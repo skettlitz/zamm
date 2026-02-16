@@ -5,6 +5,15 @@ alwaysApply: true
 
 # ZAMM — Agent Session Protocol
 
+## Template Sync Contract (MUST)
+
+To prevent drift, keep this template synchronized with its sibling template:
+- `references/AGENTS.md.template`
+- `references/zamm-rule.mdc.template`
+
+All content from `## Script Path Resolution` through `## Key Constraints` MUST be text-identical across both files.
+Allowed differences are limited to file-format scaffolding before `## Script Path Resolution` (for example, `.mdc` frontmatter and AGENTS-specific intro lines).
+
 ## Script Path Resolution
 
 Resolve once per session. Use whichever path exists (check in order):
@@ -23,47 +32,6 @@ All script references below use `<zamm-scripts>` as shorthand for the resolved d
 2. Identify the active initiative. Read its `zamm-memory/active/workstreams/<init>/STATE.md`.
 3. If no matching initiative exists, create one from `_TEMPLATE` or ask the human.
 4. **Plan-first gate (MUST):** Before starting any implementation, create or locate the plan file for the current task (`bash <zamm-scripts>/new-plan.sh`). Fill scope, Done-when, and set `Status: Implementing` when you begin work. NEVER implement first and create the plan afterward.
-
-## Session End (MUST)
-
-1. Plan bookkeeping first (for current plan files, if any):
-   - Check off completed `Done-when` todos.
-   - Update `Status:` to match reality (`Draft|Implementing|Review|Done|Partial|Abandoned|Superseded`).
-     NEVER set `Done` directly — set `Review` and ask the human to confirm. `Done` is only set after human approval.
-   - Refresh `PR list`, `Evidence`, and `Docs impacted`.
-   - **Before setting `Review` (MUST):** (1) fill the `## Learnings` section with at least one durable insight (e.g. doc/code drift, bug pattern, or decision); (2) distill those learnings into WEEKLY knowledge cards; (3) then set `Status: Review`. A plan cannot move to Review with empty or trivial learnings, and learnings must be in WEEKLY before the status change so they are never missed.
-   - If a plan moved to `Review`, `Partial`, or `Abandoned`, fill:
-     - `Wellbeing-after:`
-     - `Complexity-felt:`
-     - `Complexity-delta:`
-   - If specific memory cards materially helped or misled execution, fill:
-     - `Memory-upvotes:`
-     - `Memory-downvotes:`
-2. Update `STATE.md`: current plan + status, next 3 actions, blockers.
-3. **Integrate learnings before archive (safety):** If the initiative is archive-ready and any plan moved to Review before this protocol (so learnings might not yet be in WEEKLY), distill `## Learnings` from those plans into WEEKLY before archiving.
-4. **Archive check (MUST if initiative looks done):** If all main plans are now terminal (Done/Partial/Abandoned/Superseded) or STATE.md was set to Done, immediately run `bash <zamm-scripts>/archive-done-initiatives.sh --archive`. Do not defer this.
-5. Append a handoff block to the initiative diary (What I tried / What changed / Files touched / Next 3 actions / Evidence links).
-6. If new durable learning occurred, write a proposal to `zamm-memory/active/knowledge/_proposals/`.
-7. Run janitor preflight and act on results:
-   - `bash <zamm-scripts>/janitor-check.sh --quiet`
-   - exit `0`: no janitor action required
-   - exit `1`: note setup/metadata issue and escalate
-   - exit `2`: run one bounded maintenance pass now using the suggested profile(s):
-     - **archive-ready** (MUST — never defer): run `bash <zamm-scripts>/archive-done-initiatives.sh --archive` (learnings should already be in WEEKLY from when each plan moved to Review; if an initiative was marked Done before that protocol, distill its plan learnings into WEEKLY first)
-     - **project-finish**: distill learnings into WEEKLY, edit 1-5 WEEKLY cards, set initiative `Status: Done`
-     - **weekly-cleanup**: retire 0-3 WEEKLY cards, edit 1-5 MONTHLY cards
-     - **monthly-cleanup**: demote 0-2 MONTHLY→WEEKLY, edit 1-3 EVERGREEN cards
-     - Process up to 5 proposals (apply/reject/defer). Log each action in `_edits/`.
-     - Update `Last maintained:` in the tier file header.
-     - Every pass MUST make at least 1 improvement edit. Never retire from EVERGREEN or MONTHLY; demote instead.
-
-## Precedence (when sources conflict)
-
-1. Explicit current human instruction
-2. Code, tests, contracts (executable truth)
-3. Initiative STATE.md and active plan
-4. Knowledge tiers (WEEKLY > MONTHLY > EVERGREEN)
-5. Archive and historical notes
 
 ## Plan Placement (MUST)
 
@@ -92,6 +60,48 @@ Plans should include:
 - `Wellbeing-after:` free text (fill on completion/partial/abandon)
 - `Complexity-felt:` same scale (fill on completion/partial/abandon)
 - `Complexity-delta:` `lighter|as-expected|heavier` (fill on completion/partial/abandon)
+
+## Session End (MUST)
+
+1. Plan bookkeeping first (for current plan files, if any):
+   - Check off completed `Done-when` todos.
+   - Update `Status:` to match reality (`Draft|Implementing|Review|Done|Partial|Abandoned|Superseded`).
+     NEVER set `Done` directly — set `Review` and ask the human to confirm. `Done` is only set after human approval.
+   - Refresh `PR list`, `Evidence`, and `Docs impacted`.
+   - **Before setting `Review` (MUST):** fill `## Learnings` with specific insights. If no durable learning emerged, write that explicitly with a reason. A plan cannot move to `Review` with empty learnings.
+   - If a plan moved to `Review`, `Partial`, or `Abandoned`, fill:
+     - `Wellbeing-after:`
+     - `Complexity-felt:`
+     - `Complexity-delta:`
+   - If specific memory cards materially helped or misled execution, fill:
+     - `Memory-upvotes:`
+     - `Memory-downvotes:`
+2. Update `STATE.md`: current plan + status, next 3 actions, blockers.
+3. **Integrate learnings (MUST before archiving):** If the initiative is archive-ready (all main plans are terminal, or `STATE.md` is `Done`), distill `## Learnings` from plan files into WEEKLY before archiving.
+4. **Archive check (MUST if initiative looks done):** If all main plans are now terminal (Done/Partial/Abandoned/Superseded) or `STATE.md` was set to `Done`, immediately run `bash <zamm-scripts>/archive-done-initiatives.sh --archive`. Do not defer this.
+5. Append a handoff block to the initiative diary (What I tried / What changed / Files touched / Next 3 actions / Evidence links).
+6. If new durable learning occurred, write a proposal to `zamm-memory/active/knowledge/_proposals/`.
+7. Run janitor preflight and act on results:
+   - `bash <zamm-scripts>/janitor-check.sh --quiet`
+   - exit `0`: no janitor action required
+   - exit `1`: note setup/metadata issue and escalate
+   - exit `2`: run one bounded maintenance pass now using the suggested profile(s), with this priority:
+     - `archive-ready` > `project-finish` > `weekly-cleanup` > `monthly-cleanup`
+     - **archive-ready** (MUST — never defer): if plan learnings are not yet distilled, distill to WEEKLY first; then run `bash <zamm-scripts>/archive-done-initiatives.sh --archive`
+     - **project-finish**: distill learnings into WEEKLY, edit 1-5 WEEKLY cards, set initiative `Status: Done`
+     - **weekly-cleanup**: retire 0-3 WEEKLY cards, edit 1-5 MONTHLY cards
+     - **monthly-cleanup**: demote 0-2 MONTHLY→WEEKLY, edit 1-3 EVERGREEN cards
+     - Process up to 5 proposals (apply/reject/defer). Log each action in `_edits/`.
+     - Update `Last maintained:` in the tier file header.
+     - Every pass MUST make at least 1 improvement edit. Never retire from EVERGREEN or MONTHLY; demote instead.
+
+## Precedence (when sources conflict)
+
+1. Explicit current human instruction
+2. Code, tests, contracts (executable truth)
+3. Initiative STATE.md and active plan
+4. Knowledge tiers (WEEKLY > MONTHLY > EVERGREEN)
+5. Archive and historical notes
 
 ## Key Constraints
 

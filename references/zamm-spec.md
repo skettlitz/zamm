@@ -231,14 +231,14 @@ Workflow: create plan (Status: Draft) → fill scope + Done-when → set Status:
 
 ### Plan requirements
 Every plan MUST include:
-- Status: Draft | Implementing | Review | Done | Partial | Abandoned | Superseded (link)
+- Status: Draft | Implementing | Review | Done | Partial | Abandoned | Superseded (if `Superseded`, include successor link)
   - `Review` = agent believes work is complete, awaiting human confirmation. Agents MUST NOT set `Done` directly.
   - `Done` = human-confirmed completion. Only set after human approves.
 - Scope (in/out)
 - Done-when checklist
 - PR list (plural)
 - Evidence links to relevant code/docs/decisions
-- Learnings section (MUST fill before setting Status: Review — captures what was learned, what surprised, what should be remembered)
+- Learnings section (MUST fill before setting Status: Review — include specific insights, or explicitly note when no durable learning emerged and why)
 - “Docs impacted” (canonical `/docs` paths)
 - Wellbeing fields:
   - `Wellbeing-before:` (free text)
@@ -253,7 +253,7 @@ Session-end bookkeeping for touched plans is MUST:
 - reconcile `Done-when` checklist items (check off completed items)
 - update `Status:` to match actual state. NEVER set `Done` directly — set `Review` and ask the human to confirm.
 - refresh `PR list`, `Evidence`, and `Docs impacted`
-- **before setting `Review`**: fill the `## Learnings` section (MUST — captures what was learned, what surprised, what should be remembered). A plan cannot move to Review with empty learnings.
+- **before setting `Review`**: fill the `## Learnings` section (MUST — include specific insights, or explicitly note when no durable learning emerged and why). A plan cannot move to Review with empty learnings.
 - when status becomes `Review|Partial|Abandoned`, fill `Wellbeing-after`, `Complexity-felt`, and `Complexity-delta`
 - update `Memory-upvotes` / `Memory-downvotes` when memory cards clearly helped or misled execution
 
@@ -527,11 +527,13 @@ When superseding:
 
 ## 11) Session rituals (agent-operational)
 
+Command notation: `<zamm-scripts>` means the resolved ZAMM scripts directory (`<project-root>/.cursor/skills/zamm/scripts/` first, fallback `~/.cursor/skills/zamm/scripts/`).
+
 ### Session start (MUST)
 1. Read EVERGREEN, MONTHLY, WEEKLY.
 2. Identify the active initiative; read its `STATE.md`.
 3. If there is no matching initiative, create one from `_TEMPLATE` or ask a human.
-4. **Plan-first gate (MUST):** Before starting any implementation, create or locate the plan file for the current task (use `new-plan.sh`). Fill scope, Done-when, and set `Status: Implementing` when you begin work. NEVER implement first and create the plan afterward — the plan is the organizing tool, not a post-hoc record.
+4. **Plan-first gate (MUST):** Before starting any implementation, create or locate the plan file for the current task (use `bash <zamm-scripts>/new-plan.sh`). Fill scope, Done-when, and set `Status: Implementing` when you begin work. NEVER implement first and create the plan afterward — the plan is the organizing tool, not a post-hoc record.
 
 **Why:** Session start is kept minimal so agents proceed to primary work quickly, but the plan-first gate ensures every implementation is traceable and intentional. All maintenance runs at session end (see below).
 
@@ -540,21 +542,22 @@ When superseding:
    - check off completed `Done-when` todos
    - update `Status:` to match reality. NEVER set `Done` directly — set `Review` and ask the human to confirm.
    - refresh `PR list`, `Evidence`, and `Docs impacted`
+   - **before setting `Review`**: fill `## Learnings` with specific insights; if no durable learning emerged, state that explicitly with a reason. A plan cannot move to `Review` with empty learnings.
    - if status moved to `Review|Partial|Abandoned`, fill `Wellbeing-after`, `Complexity-felt`, `Complexity-delta`
    - if specific memory cards materially helped or misled execution, fill `Memory-upvotes` / `Memory-downvotes`
 2. Update initiative `STATE.md`:
    - current plan + status
    - next 3 actions
    - blockers
-3. **Integrate learnings (MUST before archiving):** If the initiative is archive-ready (all main plans terminal or STATE.md is Done), review the `## Learnings` section from each plan and distill them into WEEKLY knowledge cards before archiving. Learnings must not be lost to the archive.
-4. **Archive check (MUST if initiative looks done):** If all main plans are now terminal (Done/Partial/Abandoned/Superseded) or STATE.md was set to Done, immediately run `archive-done-initiatives.sh --archive`. Do not defer this -- archiving is the natural conclusion of a completed initiative and must happen in the same session.
+3. **Integrate learnings (MUST before archiving):** If the initiative is archive-ready (all main plans are terminal, or `STATE.md` is `Done`), distill `## Learnings` from plan files into WEEKLY before archiving. Learnings must not be lost to the archive.
+4. **Archive check (MUST if initiative looks done):** If all main plans are now terminal (Done/Partial/Abandoned/Superseded) or `STATE.md` was set to `Done`, immediately run `bash <zamm-scripts>/archive-done-initiatives.sh --archive`. Do not defer this -- archiving is the natural conclusion of a completed initiative and must happen in the same session.
 5. Append a “handoff block” to the diary log for the session.
 6. If new durable learning occurred, write a proposal to `_proposals/`.
 7. Run janitor preflight and act on results:
-   - preferred call: `janitor-check.sh --quiet`
+   - preferred call: `bash <zamm-scripts>/janitor-check.sh --quiet`
    - exit `0`: no janitor action required
    - exit `1`: setup or metadata issue; note and escalate
-   - exit `2`: run one bounded maintenance pass using the suggested cleanup profile(s) from section 14. Archive-ready MUST be acted on immediately; other profiles may be deferred if infeasible.
+   - exit `2`: run one bounded maintenance pass now using the suggested cleanup profile(s) from section 14, prioritized as `archive-ready` > `project-finish` > `weekly-cleanup` > `monthly-cleanup`.
 
 **Why:** We can’t always detect compaction, but we can reliably capture progress at boundaries. Archive-ready is never deferred because leaving a Done initiative in active/ creates a persistent false signal for every subsequent session.
 
@@ -640,7 +643,7 @@ If an agent needs archived detail:
 There is no dedicated background janitor. Janitor preflight runs at session end; maintenance runs inline when triggered (see section 11). Session start is kept minimal (read tiers + identify initiative) so agents proceed to primary work quickly. Any agent can temporarily assume the librarian role (see section 9), coordinating through proposals and conflict reconciliation.
 
 ### Maintenance triggers
-An agent entering the maintenance pass checks three signals:
+An agent entering the maintenance pass checks four signals:
 
 | Trigger | Condition | Default threshold |
 |---------|-----------|-------------------|
@@ -652,7 +655,7 @@ An agent entering the maintenance pass checks three signals:
 EVERGREEN has no standalone staleness trigger; it is curated during monthly cleanup and via proposals.
 
 ### Bounded maintenance pass
-When triggered, the agent does **at most** the following before proceeding with primary work (session start) or before final handoff completion (session end):
+When triggered, the agent does **at most** the following during the session-end maintenance pass before final handoff completion:
 
 Run invariants:
 - Every janitor run MUST make at least one improvement edit.
@@ -731,7 +734,7 @@ Track at minimum:
 - maintenance trigger frequency (how often janitor fires at session boundaries)
 
 Cadence:
-- janitor preflight runs at session start and end; maintenance runs when thresholds above are hit
+- janitor preflight runs at session end; maintenance runs when thresholds above are hit
 - monthly human supervisor review
 - lightweight eval run after major process changes (rule updates/topology/agent count)
 
@@ -813,54 +816,65 @@ Outcome (fill on close):
 ### A2) Plan header
 ```
 
-# <Plan title>
+# Plan: <plan-slug>
+# or:
+# Subplan: <subslug> (parent: <parent-plan-slug>)
 
 Workstream: <initiative slug>
-Status: Draft | Implementing | Review | Done | Partial | Abandoned | Superseded -> <link>
+Status: Draft | Implementing | Review | Done | Partial | Abandoned | Superseded
 Wellbeing-before:
-Complexity-forecast: peanuts | banana | grapes | capybara | badger | pitbull | piranha | shark | godzilla
+Complexity-forecast:
 Memory-upvotes:
 Memory-downvotes:
 Owner agent:
-Last updated:
+Last updated: YYYY-MM-DD
 
 Scope:
-
 * In:
 * Out:
+# For subplans, add one of:
+# Parent plan: YYYY-MM-DD-<parent-plan-slug>.plan.md
+# Parent plan slug: <parent-plan-slug> (unresolved; expected YYYY-MM-DD-<parent-plan-slug>.plan.md)
 
-Done when:
+## Done-when
 
-* [ ] ...
-* [ ] ...
+- [ ]
 
-PRs:
+## Approach
 
-* ...
 
-Docs impacted:
 
-* /docs/...
+## PR list
+
+- (none yet)
+
+## Evidence
+
+-
+
+## Docs impacted
+
+- (none yet)
+
+## Why / rationale
+
+
+
+## Risks
+
+-
+
+## Learnings
+
+- (none yet — MUST fill before setting Status: Review)
+
+## Loose ends
+
+- (none yet)
 
 Wellbeing-after:
-Complexity-felt: peanuts | banana | grapes | capybara | badger | pitbull | piranha | shark | godzilla
-Complexity-delta: lighter | as-expected | heavier
-
-Why / rationale:
-
-* ...
-
-Risks:
-
-* ...
-
-Learnings (MUST fill before Review):
-
-* ...
-
-Loose ends (if status != Done):
-
-* ...
+Complexity-felt:
+Complexity-delta:
 
 ```
 
