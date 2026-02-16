@@ -179,6 +179,9 @@ for slug in "${READY_SLUGS[@]}"; do
     fi
   fi
 
+  # Ensure source is in the index so git mv works (handles untracked initiatives)
+  git -C "$PROJECT_ROOT" add "$src_rel"
+
   if git -C "$PROJECT_ROOT" mv "$src_rel" "$dst_rel"; then
     echo "  MOVED: $slug ($reason) via git mv"
     moved=$((moved + 1))
