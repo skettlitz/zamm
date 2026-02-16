@@ -172,6 +172,8 @@ if [ "$old_proposal_count" -gt 0 ]; then
 fi
 
 closing_count=0
+done_count=0
+plans_finished_count=0
 while IFS= read -r init_dir; do
   state_file="$init_dir/STATE.md"
   if [ ! -f "$state_file" ]; then
@@ -181,6 +183,27 @@ while IFS= read -r init_dir; do
   status_word=$(printf '%s' "$status" | awk '{print $1}')
   if [ "$status_word" = "Closing" ]; then
     closing_count=$((closing_count + 1))
+  elif [ "$status_word" = "Done" ]; then
+    done_count=$((done_count + 1))
+  else
+    # Auto-detect: all main plans terminal → archive-ready even if STATE.md
+    # was not updated. Only checks main plans (not subplans); a main plan
+    # can only be Done if all its subplans are already terminal.
+    plans_dir="$init_dir/plans"
+    if [ -d "$plans_dir" ]; then
+      main_plan_count=0
+      terminal_count=0
+      while IFS= read -r plan_file; do
+        main_plan_count=$((main_plan_count + 1))
+        plan_status=$(sed -n 's/^Status:[[:space:]]*//p' "$plan_file" | head -n1 | awk '{print $1}')
+        case "$plan_status" in
+          Done|Partial|Abandoned|Superseded) terminal_count=$((terminal_count + 1)) ;;
+        esac
+      done < <(find "$plans_dir" -maxdepth 1 -name "*.plan.md" ! -name "*.subplan-*.plan.md" 2>/dev/null)
+      if [ "$main_plan_count" -gt 0 ] && [ "$main_plan_count" -eq "$terminal_count" ]; then
+        plans_finished_count=$((plans_finished_count + 1))
+      fi
+    fi
   fi
 done < <(find "$WORKSTREAMS_DIR" -mindepth 1 -maxdepth 1 -type d -name "init-*" | sort)
 
@@ -189,6 +212,19 @@ if [ "$closing_count" -gt 0 ]; then
   TRIGGERS+=("project-finish candidates: ${closing_count} initiative(s) with Status: Closing")
   if ! profile_exists "project-finish" "${PROFILES[@]:-}"; then
     PROFILES+=("project-finish")
+  fi
+fi
+
+if [ "$done_count" -gt 0 ] || [ "$plans_finished_count" -gt 0 ]; then
+  NEEDS_JANITOR=1
+  if [ "$done_count" -gt 0 ]; then
+    TRIGGERS+=("archive-ready: ${done_count} initiative(s) with Status: Done")
+  fi
+  if [ "$plans_finished_count" -gt 0 ]; then
+    TRIGGERS+=("archive-ready (auto-detected): ${plans_finished_count} initiative(s) where all main plans are terminal")
+  fi
+  if ! profile_exists "archive-ready" "${PROFILES[@]:-}"; then
+    PROFILES+=("archive-ready")
   fi
 fi
 
@@ -226,3 +262,4 @@ fi
 echo ""
 echo "Run one bounded janitor pass now (before primary task or before handoff)."
 exit 2
+

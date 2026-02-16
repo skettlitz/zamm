@@ -598,10 +598,11 @@ Before archiving:
 4. Leave promotion to MONTHLY/EVERGREEN for later janitor passes after WEEKLY survivability.
 5. Ensure `/docs` is updated for any “how it works” changes.
 
-Then:
+Then archive using `git mv` (MUST — never use `cp`):
 - `git mv zamm-memory/active/workstreams/<init> zamm-memory/archive/workstreams/<init>`
+- Or use the helper: `bash <zamm-scripts>/archive-done-initiatives.sh --archive`
 
-**Why:** Closure is the natural distillation moment. The archive move preserves the full story without polluting active work.
+**Why:** `git mv` preserves history and avoids duplicated files. Closure is the natural distillation moment. The archive move preserves the full story without polluting active work.
 
 ---
 
@@ -641,6 +642,7 @@ An agent entering the maintenance pass checks three signals:
 | Pending proposals | Files exist in `_proposals/` older than 1 day | `JANITOR_PROPOSAL_AGE = 1 day` |
 | WEEKLY stale | `Last maintained:` in WEEKLY.md exceeded | `JANITOR_WEEKLY_THRESHOLD = 3 days` |
 | MONTHLY stale | `Last maintained:` in MONTHLY.md exceeded | `JANITOR_MONTHLY_THRESHOLD = 14 days` |
+| Archive-ready | STATE.md says `Done` OR all main plans (not subplans) have terminal status | Immediate |
 
 EVERGREEN has no standalone staleness trigger; it is curated during monthly cleanup and via proposals.
 
@@ -674,6 +676,13 @@ Profiles:
    - Add/replace `0..2` cards in WEEKLY only if truly necessary.
    - Mark initiative `Status: Done` when archive-ready (`Closing` remains a staged review state before final archive).
 
+4. **Archive-ready profile** (initiative is archive-ready):
+   - Triggered when STATE.md says `Done` OR all main plans (not subplans) have terminal status (Done/Partial/Abandoned/Superseded).
+   - A main plan being Done implies all its subplans are terminal — only main plans need checking.
+   - Archive immediately: `bash <zamm-scripts>/archive-done-initiatives.sh --archive`
+   - The script uses `git mv` (MUST — never `cp`) and auto-sets STATE.md to Done if needed.
+   - No tier edits required — learnings should already have been distilled during the project-finish profile.
+
 Global bounded steps per run:
 1. **Process proposals** (max `JANITOR_MAX_PROPOSALS = 5` per pass):
    - Apply, reject, or defer each proposal per the librarian decision heuristic (section 9).
@@ -698,7 +707,7 @@ Located in the ZAMM skill `scripts/` directory:
 - `validate.sh [--project-root <path>]` — check caps, staleness, evidence links, misplaced plans, wellbeing/complexity fields, and structural integrity.
 - `janitor-check.sh [--project-root <path>] [--quiet]` — fast session-boundary preflight for janitor triggers; exit `0` when nothing is due, `2` when maintenance is required.
 - `new-plan.sh <initiative-slug> <plan-slug> [--subplan <parent-slug>] [--project-root <path>]` — create a `.plan.md` file at the deterministic path enforced by the Plan Placement Contract (section 6). Bootstraps the initiative from `_TEMPLATE` if it does not exist. Warns on stderr when a `--subplan` parent cannot be resolved.
-- `archive-done-initiatives.sh [--archive] [--project-root <path>]` — list archive-ready initiatives from `active/workstreams` by `STATE.md` status (`Done`), and optionally move them to archive via `git mv`.
+- `archive-done-initiatives.sh [--archive] [--project-root <path>]` — list archive-ready initiatives from `active/workstreams` (STATE.md `Done` or all main plans terminal), and optionally move them to archive via `git mv`. Auto-sets STATE.md to Done when archiving plan-detected initiatives.
 - `wellbeing-report.sh [--project-root <path>]` — summarize plan wellbeing check-ins and complexity forecast vs felt drift.
 - `self-test.sh [--keep-temp]` — quick smoke test that scaffolds a temp project, runs validation/preflight, and checks reporting/plan creation.
 - `package-skill.sh [--ref <git-ref>] [--out-dir <path>] [--prefix <name>]` — produce a distributable archive with `git archive` (clean of `.git` and `__MACOSX`).

@@ -80,42 +80,55 @@ if [ "$ARCHIVE_MODE" -eq 1 ]; then
   fi
 fi
 
-is_archive_ready_status() {
-  local status="$1"
-  case "$status" in
-    Done)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
+# Check if all main plans (not subplans) in an initiative have terminal status.
+# A main plan being Done implies all its subplans are already terminal.
+# Terminal statuses: Done, Partial, Abandoned, Superseded.
+all_main_plans_terminal() {
+  local init_dir="$1"
+  local plans_dir="$init_dir/plans"
+  if [ ! -d "$plans_dir" ]; then
+    return 1
+  fi
+  local main_plan_count=0
+  local terminal_count=0
+  while IFS= read -r plan_file; do
+    main_plan_count=$((main_plan_count + 1))
+    local plan_status
+    plan_status=$(sed -n 's/^Status:[[:space:]]*//p' "$plan_file" | head -n1 | awk '{print $1}')
+    case "$plan_status" in
+      Done|Partial|Abandoned|Superseded) terminal_count=$((terminal_count + 1)) ;;
+    esac
+  done < <(find "$plans_dir" -maxdepth 1 -name "*.plan.md" ! -name "*.subplan-*.plan.md" 2>/dev/null)
+  if [ "$main_plan_count" -gt 0 ] && [ "$main_plan_count" -eq "$terminal_count" ]; then
+    return 0
+  fi
+  return 1
 }
 
 declare -a READY_SLUGS
-declare -a READY_STATUSES
+declare -a READY_REASONS
 
 while IFS= read -r init_dir; do
   slug=$(basename "$init_dir")
   state_file="$init_dir/STATE.md"
-  status="(missing)"
+  status=""
 
   if [ -f "$state_file" ]; then
-    status=$(sed -n 's/^Status:[[:space:]]*//p' "$state_file" | head -n1 | sed 's/[[:space:]]*$//')
-    if [ -z "$status" ]; then
-      status="(missing)"
-    fi
+    status=$(sed -n 's/^Status:[[:space:]]*//p' "$state_file" | head -n1 | awk '{print $1}')
   fi
 
-  if is_archive_ready_status "$status"; then
+  if [ "$status" = "Done" ]; then
     READY_SLUGS+=("$slug")
-    READY_STATUSES+=("$status")
+    READY_REASONS+=("Status: Done")
+  elif all_main_plans_terminal "$init_dir"; then
+    READY_SLUGS+=("$slug")
+    READY_REASONS+=("all main plans terminal")
   fi
 done < <(find "$ACTIVE_DIR" -mindepth 1 -maxdepth 1 -type d -name "init-*" | sort)
 
 echo "ZAMM: initiative janitor"
 echo "Project root: $PROJECT_ROOT"
-echo "Archive-ready statuses: Done"
+echo "Archive-ready when: Status: Done OR all main plans terminal"
 echo ""
 
 if [ "${#READY_SLUGS[@]}" -eq 0 ]; then
@@ -126,8 +139,8 @@ fi
 echo "Archive-ready initiatives:"
 i=0
 for slug in "${READY_SLUGS[@]}"; do
-  status="${READY_STATUSES[$i]}"
-  echo "  - $slug (Status: $status)"
+  reason="${READY_REASONS[$i]}"
+  echo "  - $slug ($reason)"
   i=$((i + 1))
 done
 echo ""
@@ -145,7 +158,7 @@ i=0
 for slug in "${READY_SLUGS[@]}"; do
   src_rel="zamm-memory/active/workstreams/$slug"
   dst_rel="zamm-memory/archive/workstreams/$slug"
-  status="${READY_STATUSES[$i]}"
+  reason="${READY_REASONS[$i]}"
   i=$((i + 1))
 
   if [ -e "$PROJECT_ROOT/$dst_rel" ]; then
@@ -154,8 +167,20 @@ for slug in "${READY_SLUGS[@]}"; do
     continue
   fi
 
+  # If STATE.md doesn't say Done yet, update it before archiving
+  state_file="$PROJECT_ROOT/$src_rel/STATE.md"
+  if [ -f "$state_file" ]; then
+    current_status=$(sed -n 's/^Status:[[:space:]]*//p' "$state_file" | head -n1 | awk '{print $1}')
+    if [ "$current_status" != "Done" ]; then
+      sed -i.bak "s/^Status:[[:space:]]*.*/Status: Done/" "$state_file"
+      rm -f "$state_file.bak"
+      git -C "$PROJECT_ROOT" add "$src_rel/STATE.md"
+      echo "  SET:   $slug STATE.md -> Status: Done (was: $current_status)"
+    fi
+  fi
+
   if git -C "$PROJECT_ROOT" mv "$src_rel" "$dst_rel"; then
-    echo "  MOVED: $slug (Status: $status)"
+    echo "  MOVED: $slug ($reason) via git mv"
     moved=$((moved + 1))
   else
     echo "  FAIL:  could not archive $slug"

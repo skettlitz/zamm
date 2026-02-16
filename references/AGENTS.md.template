@@ -38,6 +38,7 @@ All script references below use `<zamm-scripts>` as shorthand for the resolved d
    - If MONTHLY is stale: demote 0-2 MONTHLY->WEEKLY, edit 1-3 EVERGREEN, optionally add/replace 0-1 EVERGREEN.
    - If WEEKLY is stale: retire 0-3 WEEKLY, edit 1-5 MONTHLY, optionally add/replace 0-2 MONTHLY.
    - If initiative is closing: distill learnings into WEEKLY first, edit 1-5 WEEKLY, optionally add/replace 0-2 WEEKLY, then set `Status: Done` (or `Closing`).
+   - If archive-ready initiatives exist: archive them immediately with `bash <zamm-scripts>/archive-done-initiatives.sh --archive`. An initiative is archive-ready when STATE.md says `Done` OR when all main plans (not subplans) have terminal status (Done/Partial/Abandoned/Superseded). A main plan being Done implies all its subplans are terminal — so only main plans need checking. The script uses `git mv` (MUST — never `cp`) and auto-sets STATE.md to Done if needed.
    - Process up to 5 proposals (apply/reject/defer). Log each action in `_edits/`.
    - Update `Last maintained:` in the tier file header.
    - Notify user: "Performing scheduled memory maintenance before primary task."

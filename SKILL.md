@@ -119,6 +119,7 @@ No background process. Check triggers at session start and session end; run a bo
 - Pending proposals in `_proposals/` older than 1 day
 - WEEKLY.md `Last maintained:` > 3 days
 - MONTHLY.md `Last maintained:` > 14 days
+- Any initiative that is archive-ready: `Status: Done` in STATE.md, OR all main plans (not subplans) have terminal status (Done/Partial/Abandoned/Superseded)
 
 **Run invariants**:
 - Every janitor run MUST make at least 1 improvement edit.
@@ -143,6 +144,12 @@ No background process. Check triggers at session start and session end; run a bo
    - Edit 1–5 cards in WEEKLY (minimum 1).
    - Optionally add/replace 0–2 cards in WEEKLY if truly needed.
    - Mark initiative `Status: Done` when archive-ready (`Closing` remains a staged review state before final archive).
+
+4. Archive-ready cleanup (when initiative is archive-ready):
+   - Triggered when STATE.md says `Done` OR all main plans have terminal status.
+   - A main plan being Done implies all its subplans are terminal — only main plans need checking.
+   - Archive immediately: `bash <zamm-scripts>/archive-done-initiatives.sh --archive`
+   - The script uses `git mv` (MUST — never `cp`) and auto-sets STATE.md to Done if needed.
 
 Remaining work is picked up by the next agent that boots.
 
