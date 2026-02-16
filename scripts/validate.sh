@@ -152,11 +152,17 @@ is_plan_like_file() {
   base=$(basename "$file")
   markers=0
 
-  # Canonical subplan naming is deterministic and strongly indicates a plan.
+  # Canonical .plan.md suffix is definitive.
+  if [[ "$base" =~ \.plan\.md$ ]]; then
+    return 0
+  fi
+
+  # Legacy: canonical subplan naming without .plan.md suffix.
   if [[ "$base" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}-.*\.subplan-.*\.md$ ]]; then
     return 0
   fi
 
+  # Heuristic fallback for legacy .md plans without the .plan.md suffix.
   if grep -qE "^Status: (Draft|Implementing|Done|Partial|Abandoned|Superseded)" "$file"; then
     markers=$((markers + 1))
   fi

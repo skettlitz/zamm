@@ -63,13 +63,40 @@ else
   exit 1
 fi
 
-echo "[4/5] new-plan (flags-first)"
+echo "[4/7] new-plan (flags-first)"
 bash "$SCRIPT_DIR/new-plan.sh" \
   --project-root "$TMP_ROOT" \
   "init-${TODAY_YYYY_MM}-self-test" \
   "smoke-plan" >/dev/null
 
-echo "[5/5] wellbeing-report"
+echo "[5/7] verify .plan.md suffix and template fields"
+TODAY=$(date +%Y-%m-%d)
+PLAN_FILE="$TMP_ROOT/zamm-memory/active/workstreams/init-${TODAY_YYYY_MM}-self-test/plans/${TODAY}-smoke-plan.plan.md"
+if [ ! -f "$PLAN_FILE" ]; then
+  echo "ERROR: expected plan file not found: $PLAN_FILE"
+  exit 1
+fi
+for field in "Workstream:" "Owner agent:" "Last updated:" "## Why / rationale" "## Risks" "## Loose ends"; do
+  if ! grep -q "$field" "$PLAN_FILE"; then
+    echo "ERROR: plan template missing field: $field"
+    exit 1
+  fi
+done
+
+echo "[6/7] new-plan subplan (parent warning)"
+stderr_output=$(bash "$SCRIPT_DIR/new-plan.sh" \
+  --project-root "$TMP_ROOT" \
+  "init-${TODAY_YYYY_MM}-self-test" \
+  "child-plan" \
+  --subplan "nonexistent-parent" 2>&1 1>/dev/null || true)
+if echo "$stderr_output" | grep -q "WARNING.*parent plan"; then
+  :
+else
+  echo "ERROR: expected parent-not-found warning on stderr for --subplan with missing parent"
+  exit 1
+fi
+
+echo "[7/7] wellbeing-report"
 bash "$SCRIPT_DIR/wellbeing-report.sh" --project-root "$TMP_ROOT" >/dev/null
 
 echo ""

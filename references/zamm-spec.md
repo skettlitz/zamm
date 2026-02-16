@@ -169,8 +169,8 @@ Each initiative is a self-contained workspace:
 zamm-memory/active/workstreams/init-2026-02-auth-oidc/
 STATE.md
 /plans/
-2026-02-16-oidc-rollout.md
-2026-02-18-oidc-rollout.subplan-migrations.md
+2026-02-16-oidc-rollout.plan.md
+2026-02-18-oidc-rollout.subplan-migrations.plan.md
 /working/
 TODO.md
 NOTES.md
@@ -212,11 +212,13 @@ Before creating or updating a plan file:
    - Else use the active workstream.
    - If ambiguous, ask the user.
 3. Plan files MUST live at: `zamm-memory/active/workstreams/<initiative-slug>/plans/`
-4. Filename MUST be:
-   - Main plan: `YYYY-MM-DD-<plan-slug>.md`
-   - Subplan: `YYYY-MM-DD-<parent-plan-slug>.subplan-<subslug>.md`
+4. Filename MUST use the `.plan.md` suffix:
+   - Main plan: `YYYY-MM-DD-<plan-slug>.plan.md`
+   - Subplan: `YYYY-MM-DD-<parent-plan-slug>.subplan-<subslug>.plan.md`
 5. Never create plan files outside `.../workstreams/*/plans/`.
 6. If the initiative path does not exist, create from `_TEMPLATE` first, then place the plan.
+
+The `.plan.md` suffix makes plans instantly identifiable by filename alone, eliminating the need for content-based heuristics in tooling.
 
 Agents SHOULD use the `new-plan.sh` helper script when available (see section 14).
 
@@ -333,7 +335,7 @@ M18 (Scope: auth/oidc)
 
 * Lineage: W14 | M18
 * Claim: Token refresh failures usually come from clock skew; confirm NTP on workers.
-* Evidence: plans/...oidc-rollout.md; PR#1234; docs/runbooks/incidents.md
+* Evidence: plans/...oidc-rollout.plan.md; PR#1234; docs/runbooks/incidents.md
 * Last verified: 2026-02-16
 
 ```
@@ -695,7 +697,7 @@ Located in the ZAMM skill `scripts/` directory:
 - `scaffold.sh [--project-root <path>]` — create the full `/zamm-memory/` directory tree and Cursor rule.
 - `validate.sh [--project-root <path>]` — check caps, staleness, evidence links, misplaced plans, wellbeing/complexity fields, and structural integrity.
 - `janitor-check.sh [--project-root <path>] [--quiet]` — fast session-boundary preflight for janitor triggers; exit `0` when nothing is due, `2` when maintenance is required.
-- `new-plan.sh <initiative-slug> <plan-slug> [--subplan <parent-slug>] [--project-root <path>]` — create a plan file at the deterministic path enforced by the Plan Placement Contract (section 6). Bootstraps the initiative from `_TEMPLATE` if it does not exist.
+- `new-plan.sh <initiative-slug> <plan-slug> [--subplan <parent-slug>] [--project-root <path>]` — create a `.plan.md` file at the deterministic path enforced by the Plan Placement Contract (section 6). Bootstraps the initiative from `_TEMPLATE` if it does not exist. Warns on stderr when a `--subplan` parent cannot be resolved.
 - `archive-done-initiatives.sh [--archive] [--project-root <path>]` — list archive-ready initiatives from `active/workstreams` by `STATE.md` status (`Done`), and optionally move them to archive via `git mv`.
 - `wellbeing-report.sh [--project-root <path>]` — summarize plan wellbeing check-ins and complexity forecast vs felt drift.
 - `self-test.sh [--keep-temp]` — quick smoke test that scaffolds a temp project, runs validation/preflight, and checks reporting/plan creation.

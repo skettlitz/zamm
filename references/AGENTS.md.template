@@ -56,9 +56,9 @@ Before creating/updating a plan file:
    - If ambiguous, ask the user.
 3. Plan files MUST live at:
    `zamm-memory/active/workstreams/<initiative-slug>/plans/`
-4. Filename MUST be:
-   - Main plan: `YYYY-MM-DD-<plan-slug>.md`
-   - Subplan: `YYYY-MM-DD-<parent-plan-slug>.subplan-<subslug>.md`
+4. Filename MUST use the `.plan.md` suffix:
+   - Main plan: `YYYY-MM-DD-<plan-slug>.plan.md`
+   - Subplan: `YYYY-MM-DD-<parent-plan-slug>.subplan-<subslug>.plan.md`
 5. Never create plan files outside `.../workstreams/*/plans/`.
 6. If the path does not exist, create from `_TEMPLATE` first, then place the plan.
 

@@ -130,9 +130,9 @@ mkdir -p "$PLANS_DIR"
 
 # --- Build filename ---
 if [ -n "$PARENT_SLUG" ]; then
-  FILENAME="${TODAY}-${PARENT_SLUG}.subplan-${PLAN_SLUG}.md"
+  FILENAME="${TODAY}-${PARENT_SLUG}.subplan-${PLAN_SLUG}.plan.md"
 else
-  FILENAME="${TODAY}-${PLAN_SLUG}.md"
+  FILENAME="${TODAY}-${PLAN_SLUG}.plan.md"
 fi
 
 PLAN_PATH="$PLANS_DIR/$FILENAME"
@@ -145,12 +145,15 @@ fi
 # --- Write plan template ---
 if [ -n "$PARENT_SLUG" ]; then
   PLAN_TITLE="Subplan: $PLAN_SLUG (parent: $PARENT_SLUG)"
-  parent_candidate=$(find "$PLANS_DIR" -maxdepth 1 -type f -name "????-??-??-${PARENT_SLUG}.md" | sort | tail -n 1)
+  # Check for both .plan.md (canonical) and .md (legacy) parent files.
+  parent_candidate=$(find "$PLANS_DIR" -maxdepth 1 -type f \( -name "????-??-??-${PARENT_SLUG}.plan.md" -o -name "????-??-??-${PARENT_SLUG}.md" \) | sort | tail -n 1)
   if [ -n "$parent_candidate" ]; then
     parent_basename=$(basename "$parent_candidate")
     PARENT_LINE="Parent plan: ${parent_basename}"
   else
-    PARENT_LINE="Parent plan slug: ${PARENT_SLUG} (unresolved; expected YYYY-MM-DD-${PARENT_SLUG}.md)"
+    echo "WARNING: parent plan '${PARENT_SLUG}' not found in ${PLANS_DIR}" >&2
+    echo "         Expected: YYYY-MM-DD-${PARENT_SLUG}.plan.md" >&2
+    PARENT_LINE="Parent plan slug: ${PARENT_SLUG} (unresolved; expected YYYY-MM-DD-${PARENT_SLUG}.plan.md)"
   fi
 else
   PLAN_TITLE="Plan: $PLAN_SLUG"
@@ -159,15 +162,18 @@ fi
 
 PLAN_CONTENT="# $PLAN_TITLE
 
+Workstream: $INITIATIVE_SLUG
 Status: Draft
-
 Wellbeing-before:
 Complexity-forecast:
 Memory-upvotes:
 Memory-downvotes:
+Owner agent:
+Last updated: ${TODAY}
 
-Scope (in):
-Scope (out):
+Scope:
+* In:
+* Out:
 ${PARENT_LINE:+${PARENT_LINE}
 }
 ## Done-when
@@ -187,6 +193,18 @@ ${PARENT_LINE:+${PARENT_LINE}
 -
 
 ## Docs impacted
+
+- (none yet)
+
+## Why / rationale
+
+
+
+## Risks
+
+-
+
+## Loose ends
 
 - (none yet)
 

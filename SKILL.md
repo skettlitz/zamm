@@ -95,7 +95,7 @@ All tiers: max 30 cards, ~220 lines, one line = max 200 chars.
 M18 (Scope: auth/oidc)
 * Lineage: W14 | M18
 * Claim: Token refresh failures usually come from clock skew.
-* Evidence: plans/...oidc-rollout.md; PR#1234
+* Evidence: plans/...oidc-rollout.plan.md; PR#1234
 * Last verified: 2026-02-16
 ```
 
@@ -165,9 +165,9 @@ Before creating/updating a plan file:
    - Else use the active workstream.
    - If ambiguous, ask the user.
 3. Plan files MUST live at: `zamm-memory/active/workstreams/<initiative-slug>/plans/`
-4. Filename MUST be:
-   - Main plan: `YYYY-MM-DD-<plan-slug>.md`
-   - Subplan: `YYYY-MM-DD-<parent-plan-slug>.subplan-<subslug>.md`
+4. Filename MUST use the `.plan.md` suffix:
+   - Main plan: `YYYY-MM-DD-<plan-slug>.plan.md`
+   - Subplan: `YYYY-MM-DD-<parent-plan-slug>.subplan-<subslug>.plan.md`
 5. Never create plan files outside `.../workstreams/*/plans/`.
 6. If the path does not exist, create from `_TEMPLATE` first, then place the plan.
 
