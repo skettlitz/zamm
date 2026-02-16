@@ -22,14 +22,16 @@ All script references below use `<zamm-scripts>` as shorthand for the resolved d
 
 2. Identify the active initiative. Read its `zamm-memory/active/workstreams/<init>/STATE.md`.
 3. If no matching initiative exists, create one from `_TEMPLATE` or ask the human.
+4. **Plan-first gate (MUST):** Before starting any implementation, create or locate the plan file for the current task (`bash <zamm-scripts>/new-plan.sh`). Fill scope, Done-when, and set `Status: Implementing` when you begin work. NEVER implement first and create the plan afterward.
 
 ## Session End (MUST)
 
 1. Plan bookkeeping first (for current plan files, if any):
    - Check off completed `Done-when` todos.
-   - Update `Status:` to match reality (`Draft|Implementing|Done|Partial|Abandoned|Superseded`).
+   - Update `Status:` to match reality (`Draft|Implementing|Review|Done|Partial|Abandoned|Superseded`).
+     NEVER set `Done` directly — set `Review` and ask the human to confirm. `Done` is only set after human approval.
    - Refresh `PR list`, `Evidence`, and `Docs impacted`.
-   - If a plan moved to `Done`, `Partial`, or `Abandoned`, fill:
+   - If a plan moved to `Review`, `Partial`, or `Abandoned`, fill:
      - `Wellbeing-after:`
      - `Complexity-felt:`
      - `Complexity-delta:`

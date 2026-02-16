@@ -163,7 +163,7 @@ is_plan_like_file() {
   fi
 
   # Heuristic fallback for legacy .md plans without the .plan.md suffix.
-  if grep -qE "^Status: (Draft|Implementing|Done|Partial|Abandoned|Superseded)" "$file"; then
+  if grep -qE "^Status: (Draft|Implementing|Review|Done|Partial|Abandoned|Superseded)" "$file"; then
     markers=$((markers + 1))
   fi
   if grep -qE "^## Done-when|^Done when:" "$file"; then

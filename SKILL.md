@@ -51,14 +51,16 @@ Creates: `/zamm-memory/` tree (knowledge tiers, edit logs, proposals, decisions,
 1. Read EVERGREEN.md, MONTHLY.md, WEEKLY.md.
 2. Identify active initiative; read its `STATE.md`.
 3. If no matching initiative, create from `_TEMPLATE` or ask the human.
+4. **Plan-first gate (MUST):** Before starting any implementation, create or locate the plan file for the current task (`bash <zamm-scripts>/new-plan.sh`). Fill scope, Done-when, and set `Status: Implementing` when you begin work. NEVER implement first and create the plan afterward — the plan is the organizing tool, not a post-hoc record.
 
 ### Session End (MUST)
 
 1. Plan bookkeeping first (for current plan files, if any):
    - Check off completed `Done-when` todos.
-   - Update `Status:` to match reality (`Draft | Implementing | Done | Partial | Abandoned | Superseded`).
+   - Update `Status:` to match reality (`Draft | Implementing | Review | Done | Partial | Abandoned | Superseded`).
+     NEVER set `Done` directly — set `Review` and ask the human to confirm. `Done` is only set after human approval.
    - Refresh `PR list`, `Evidence`, and `Docs impacted` for this session's changes.
-   - If status moved to `Done`, `Partial`, or `Abandoned`, fill `Wellbeing-after`, `Complexity-felt`, and `Complexity-delta`.
+   - If status moved to `Review`, `Partial`, or `Abandoned`, fill `Wellbeing-after`, `Complexity-felt`, and `Complexity-delta`.
    - Update `Memory-upvotes` / `Memory-downvotes` when specific cards materially helped or misled.
 2. Update initiative `STATE.md` (current plan + status, next 3 actions, blockers).
 3. **Archive check (MUST if initiative looks done):** If all main plans are now terminal (Done/Partial/Abandoned/Superseded) or STATE.md was set to Done, immediately run `bash <zamm-scripts>/archive-done-initiatives.sh --archive`. Do not defer this.

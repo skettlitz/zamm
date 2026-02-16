@@ -224,9 +224,16 @@ Agents SHOULD use the `new-plan.sh` helper script when available (see section 14
 
 **Why:** Deterministic plan placement ensures every instruction surface (Cursor rules, Codex CLI, AGENTS.md) resolves plans to the same location. It prevents orphan plans scattered across the repo.
 
+### Plan-first rule (MUST)
+Plans MUST be created BEFORE implementation begins, not after. The plan is the organizing tool — it defines scope, stopping conditions, and traceability before any code is written. Creating a plan retroactively to document work already done defeats the purpose.
+
+Workflow: create plan (Status: Draft) → fill scope + Done-when → set Status: Implementing → begin work.
+
 ### Plan requirements
 Every plan MUST include:
-- Status: Draft | Implementing | Done | Partial | Abandoned | Superseded (link)
+- Status: Draft | Implementing | Review | Done | Partial | Abandoned | Superseded (link)
+  - `Review` = agent believes work is complete, awaiting human confirmation. Agents MUST NOT set `Done` directly.
+  - `Done` = human-confirmed completion. Only set after human approves.
 - Scope (in/out)
 - Done-when checklist
 - PR list (plural)
@@ -237,15 +244,15 @@ Every plan MUST include:
   - `Complexity-forecast:` (`peanuts|banana|grapes|capybara|badger|pitbull|piranha|shark|godzilla`)
   - `Memory-upvotes:` (optional memory IDs that helped; e.g., `W14, M18`)
   - `Memory-downvotes:` (optional memory IDs that were misleading/inconsistent; only when issues were observed)
-  - `Wellbeing-after:` (free text; fill when completed/partially completed/abandoned)
-  - `Complexity-felt:` (same scale; fill when completed/partially completed/abandoned)
-  - `Complexity-delta:` (`lighter|as-expected|heavier`; fill when completed/partially completed/abandoned)
+  - `Wellbeing-after:` (free text; fill when agent work concludes: Review/Partial/Abandoned)
+  - `Complexity-felt:` (same scale; fill when agent work concludes)
+  - `Complexity-delta:` (`lighter|as-expected|heavier`; fill when agent work concludes)
 
 Session-end bookkeeping for touched plans is MUST:
 - reconcile `Done-when` checklist items (check off completed items)
-- update `Status:` to match actual state
+- update `Status:` to match actual state. NEVER set `Done` directly — set `Review` and ask the human to confirm.
 - refresh `PR list`, `Evidence`, and `Docs impacted`
-- when status becomes `Done|Partial|Abandoned`, fill `Wellbeing-after`, `Complexity-felt`, and `Complexity-delta`
+- when status becomes `Review|Partial|Abandoned`, fill `Wellbeing-after`, `Complexity-felt`, and `Complexity-delta`
 - update `Memory-upvotes` / `Memory-downvotes` when memory cards clearly helped or misled execution
 
 **Why:** Plans are the “intent ledger” for autonomous agents. They need explicit stopping conditions and traceability. The wellbeing and complexity fields provide a longitudinal feedback loop for agent wellbeing and planning quality, and memory votes provide feedback on knowledge-card quality.
@@ -522,15 +529,16 @@ When superseding:
 1. Read EVERGREEN, MONTHLY, WEEKLY.
 2. Identify the active initiative; read its `STATE.md`.
 3. If there is no matching initiative, create one from `_TEMPLATE` or ask a human.
+4. **Plan-first gate (MUST):** Before starting any implementation, create or locate the plan file for the current task (use `new-plan.sh`). Fill scope, Done-when, and set `Status: Implementing` when you begin work. NEVER implement first and create the plan afterward — the plan is the organizing tool, not a post-hoc record.
 
-**Why:** Session start is kept minimal so agents proceed to primary work quickly. All maintenance runs at session end (see below).
+**Why:** Session start is kept minimal so agents proceed to primary work quickly, but the plan-first gate ensures every implementation is traceable and intentional. All maintenance runs at session end (see below).
 
 ### Session end (MUST)
 1. Plan bookkeeping first (for current plan files, if any):
    - check off completed `Done-when` todos
-   - update `Status:` to match reality
+   - update `Status:` to match reality. NEVER set `Done` directly — set `Review` and ask the human to confirm.
    - refresh `PR list`, `Evidence`, and `Docs impacted`
-   - if status moved to `Done|Partial|Abandoned`, fill `Wellbeing-after`, `Complexity-felt`, `Complexity-delta`
+   - if status moved to `Review|Partial|Abandoned`, fill `Wellbeing-after`, `Complexity-felt`, `Complexity-delta`
    - if specific memory cards materially helped or misled execution, fill `Memory-upvotes` / `Memory-downvotes`
 2. Update initiative `STATE.md`:
    - current plan + status
@@ -579,6 +587,7 @@ When superseding:
 
 ### Run
 - Plans evolve in place.
+- When an agent believes a plan is complete (all Done-when items checked), it sets `Status: Review` and asks the human to confirm. `Done` is only set after human approval.
 - Working scratch may contradict itself.
 - Diary captures session handoffs.
 - Old/noisy artifacts may move into `cold/` (still within the initiative).
@@ -804,7 +813,7 @@ Outcome (fill on close):
 # <Plan title>
 
 Workstream: <initiative slug>
-Status: Draft | Implementing | Done | Partial | Abandoned | Superseded -> <link>
+Status: Draft | Implementing | Review | Done | Partial | Abandoned | Superseded -> <link>
 Wellbeing-before:
 Complexity-forecast: peanuts | banana | grapes | capybara | badger | pitbull | piranha | shark | godzilla
 Memory-upvotes:
