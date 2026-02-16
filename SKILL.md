@@ -60,13 +60,15 @@ Creates: `/zamm-memory/` tree (knowledge tiers, edit logs, proposals, decisions,
    - Update `Status:` to match reality (`Draft | Implementing | Review | Done | Partial | Abandoned | Superseded`).
      NEVER set `Done` directly — set `Review` and ask the human to confirm. `Done` is only set after human approval.
    - Refresh `PR list`, `Evidence`, and `Docs impacted` for this session's changes.
+   - **Before setting `Review` (MUST):** fill the `## Learnings` section — what was learned, what surprised, what should be remembered. A plan cannot move to Review with empty learnings.
    - If status moved to `Review`, `Partial`, or `Abandoned`, fill `Wellbeing-after`, `Complexity-felt`, and `Complexity-delta`.
    - Update `Memory-upvotes` / `Memory-downvotes` when specific cards materially helped or misled.
 2. Update initiative `STATE.md` (current plan + status, next 3 actions, blockers).
-3. **Archive check (MUST if initiative looks done):** If all main plans are now terminal (Done/Partial/Abandoned/Superseded) or STATE.md was set to Done, immediately run `bash <zamm-scripts>/archive-done-initiatives.sh --archive`. Do not defer this.
-4. Append a handoff block to the diary log.
-5. If new durable learning occurred, write a proposal to `_proposals/`.
-6. Run janitor preflight and act on results:
+3. **Integrate learnings (MUST before archiving):** If the initiative is archive-ready, review `## Learnings` from each plan and distill them into WEEKLY knowledge cards. Learnings must not be lost to the archive.
+4. **Archive check (MUST if initiative looks done):** If all main plans are now terminal (Done/Partial/Abandoned/Superseded) or STATE.md was set to Done, immediately run `bash <zamm-scripts>/archive-done-initiatives.sh --archive`. Do not defer this.
+5. Append a handoff block to the diary log.
+6. If new durable learning occurred, write a proposal to `_proposals/`.
+7. Run janitor preflight and act on results:
    - `bash <zamm-scripts>/janitor-check.sh --quiet`
    - Exit `0`: no janitor work required.
    - Exit `1`: setup or metadata issue; note and escalate.

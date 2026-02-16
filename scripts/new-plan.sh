@@ -204,6 +204,10 @@ ${PARENT_LINE:+${PARENT_LINE}
 
 -
 
+## Learnings
+
+- (none yet — MUST fill before setting Status: Review)
+
 ## Loose ends
 
 - (none yet)

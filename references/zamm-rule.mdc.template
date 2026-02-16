@@ -31,6 +31,7 @@ All script references below use `<zamm-scripts>` as shorthand for the resolved d
    - Update `Status:` to match reality (`Draft|Implementing|Review|Done|Partial|Abandoned|Superseded`).
      NEVER set `Done` directly — set `Review` and ask the human to confirm. `Done` is only set after human approval.
    - Refresh `PR list`, `Evidence`, and `Docs impacted`.
+   - **Before setting `Review` (MUST):** fill the `## Learnings` section. A plan cannot move to Review with empty learnings.
    - If a plan moved to `Review`, `Partial`, or `Abandoned`, fill:
      - `Wellbeing-after:`
      - `Complexity-felt:`
@@ -39,10 +40,11 @@ All script references below use `<zamm-scripts>` as shorthand for the resolved d
      - `Memory-upvotes:`
      - `Memory-downvotes:`
 2. Update `STATE.md`: current plan + status, next 3 actions, blockers.
-3. **Archive check (MUST if initiative looks done):** If all main plans are now terminal (Done/Partial/Abandoned/Superseded) or STATE.md was set to Done, immediately run `bash <zamm-scripts>/archive-done-initiatives.sh --archive`. Do not defer this.
-4. Append a handoff block to the initiative diary (What I tried / What changed / Files touched / Next 3 actions / Evidence links).
-5. If new durable learning occurred, write a proposal to `zamm-memory/active/knowledge/_proposals/`.
-6. Run janitor preflight and act on results:
+3. **Integrate learnings (MUST before archiving):** If the initiative is archive-ready, review `## Learnings` from each plan and distill them into WEEKLY knowledge cards. Learnings must not be lost to the archive.
+4. **Archive check (MUST if initiative looks done):** If all main plans are now terminal (Done/Partial/Abandoned/Superseded) or STATE.md was set to Done, immediately run `bash <zamm-scripts>/archive-done-initiatives.sh --archive`. Do not defer this.
+5. Append a handoff block to the initiative diary (What I tried / What changed / Files touched / Next 3 actions / Evidence links).
+6. If new durable learning occurred, write a proposal to `zamm-memory/active/knowledge/_proposals/`.
+7. Run janitor preflight and act on results:
    - `bash <zamm-scripts>/janitor-check.sh --quiet`
    - exit `0`: no janitor action required
    - exit `1`: note setup/metadata issue and escalate

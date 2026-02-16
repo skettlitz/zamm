@@ -238,6 +238,7 @@ Every plan MUST include:
 - Done-when checklist
 - PR list (plural)
 - Evidence links to relevant code/docs/decisions
+- Learnings section (MUST fill before setting Status: Review — captures what was learned, what surprised, what should be remembered)
 - “Docs impacted” (canonical `/docs` paths)
 - Wellbeing fields:
   - `Wellbeing-before:` (free text)
@@ -252,6 +253,7 @@ Session-end bookkeeping for touched plans is MUST:
 - reconcile `Done-when` checklist items (check off completed items)
 - update `Status:` to match actual state. NEVER set `Done` directly — set `Review` and ask the human to confirm.
 - refresh `PR list`, `Evidence`, and `Docs impacted`
+- **before setting `Review`**: fill the `## Learnings` section (MUST — captures what was learned, what surprised, what should be remembered). A plan cannot move to Review with empty learnings.
 - when status becomes `Review|Partial|Abandoned`, fill `Wellbeing-after`, `Complexity-felt`, and `Complexity-delta`
 - update `Memory-upvotes` / `Memory-downvotes` when memory cards clearly helped or misled execution
 
@@ -544,10 +546,11 @@ When superseding:
    - current plan + status
    - next 3 actions
    - blockers
-3. **Archive check (MUST if initiative looks done):** If all main plans are now terminal (Done/Partial/Abandoned/Superseded) or STATE.md was set to Done, immediately run `archive-done-initiatives.sh --archive`. Do not defer this -- archiving is the natural conclusion of a completed initiative and must happen in the same session.
-4. Append a “handoff block” to the diary log for the session.
-5. If new durable learning occurred, write a proposal to `_proposals/`.
-6. Run janitor preflight and act on results:
+3. **Integrate learnings (MUST before archiving):** If the initiative is archive-ready (all main plans terminal or STATE.md is Done), review the `## Learnings` section from each plan and distill them into WEEKLY knowledge cards before archiving. Learnings must not be lost to the archive.
+4. **Archive check (MUST if initiative looks done):** If all main plans are now terminal (Done/Partial/Abandoned/Superseded) or STATE.md was set to Done, immediately run `archive-done-initiatives.sh --archive`. Do not defer this -- archiving is the natural conclusion of a completed initiative and must happen in the same session.
+5. Append a “handoff block” to the diary log for the session.
+6. If new durable learning occurred, write a proposal to `_proposals/`.
+7. Run janitor preflight and act on results:
    - preferred call: `janitor-check.sh --quiet`
    - exit `0`: no janitor action required
    - exit `1`: setup or metadata issue; note and escalate
@@ -681,9 +684,9 @@ Profiles:
 4. **Archive-ready profile** (initiative is archive-ready):
    - Triggered when STATE.md says `Done` OR all main plans (not subplans) have terminal status (Done/Partial/Abandoned/Superseded).
    - A main plan being Done implies all its subplans are terminal — only main plans need checking.
-   - Archive immediately: `bash <zamm-scripts>/archive-done-initiatives.sh --archive`
+   - **Before archiving (MUST):** review `## Learnings` from each plan and distill them into WEEKLY knowledge cards. Learnings must not be lost to the archive.
+   - Archive: `bash <zamm-scripts>/archive-done-initiatives.sh --archive`
    - The script uses `git mv` (MUST — never `cp`) and auto-sets STATE.md to Done if needed.
-   - No tier edits required — learnings should already have been distilled during the project-finish profile.
 
 Global bounded steps per run:
 1. **Process proposals** (max `JANITOR_MAX_PROPOSALS = 5` per pass):
@@ -848,6 +851,10 @@ Why / rationale:
 * ...
 
 Risks:
+
+* ...
+
+Learnings (MUST fill before Review):
 
 * ...
 
