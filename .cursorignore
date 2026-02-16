@@ -1,0 +1,4 @@
+zamm-memory/archive/**
+zamm-memory/active/workstreams/**/cold/**
+# Optional: uncomment to exclude initiative diaries from default retrieval.
+# zamm-memory/active/workstreams/**/diary/**

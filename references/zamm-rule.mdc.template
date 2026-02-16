@@ -5,6 +5,14 @@ alwaysApply: true
 
 # ZAMM — Agent Session Protocol
 
+## Script Path Resolution
+
+Resolve once per session. Use whichever path exists (check in order):
+1. `<project-root>/.cursor/skills/zamm/scripts/` (project-level install)
+2. `~/.cursor/skills/zamm/scripts/` (personal install)
+
+All script references below use `<zamm-scripts>` as shorthand for the resolved directory.
+
 ## Session Start (MUST — do this before any other work)
 
 1. Read these files in order:
@@ -16,7 +24,7 @@ alwaysApply: true
    - Files exist in `zamm-memory/active/knowledge/_proposals/` older than 1 day (not `.gitkeep`)
    - WEEKLY.md `Last maintained:` is older than 3 days
    - MONTHLY.md `Last maintained:` is older than 14 days
-   - Preferred one-call check: `bash ~/.cursor/skills/zamm/scripts/janitor-check.sh`
+   - Preferred one-call check: `bash <zamm-scripts>/janitor-check.sh`
      - exit `0`: no janitor action required
      - exit `2`: run maintenance pass below
      - exit `1`: fix setup/metadata issue first
@@ -52,7 +60,7 @@ alwaysApply: true
 3. Append a handoff block to the initiative diary (What I tried / What changed / Files touched / Next 3 actions / Evidence links).
 4. If new durable learning occurred, write a proposal to `zamm-memory/active/knowledge/_proposals/`.
 5. Run a fast janitor preflight before handoff completion:
-   - `bash ~/.cursor/skills/zamm/scripts/janitor-check.sh --quiet`
+   - `bash <zamm-scripts>/janitor-check.sh --quiet`
    - exit `0`: no janitor action required
    - exit `2`: run one bounded maintenance pass now if feasible; otherwise call it out in the handoff for the next session
    - exit `1`: note setup/metadata issue and escalate

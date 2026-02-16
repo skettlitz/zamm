@@ -24,12 +24,20 @@ Advanced maintainer workflows:
 - run a quick smoke test before shipping (`self-test.sh`)
 - package a clean distributable archive (`package-skill.sh`)
 
+## Script Path Resolution
+
+Resolve once per session. Use whichever path exists (check in order):
+1. `<project-root>/.cursor/skills/zamm/scripts/` (project-level install)
+2. `~/.cursor/skills/zamm/scripts/` (personal install)
+
+All script references below use `<zamm-scripts>` as shorthand for the resolved directory.
+
 ## Scaffold a New Project
 
 Run in the target project root:
 
 ```bash
-bash ~/.cursor/skills/zamm/scripts/scaffold.sh
+bash <zamm-scripts>/scaffold.sh
 ```
 
 Creates: `/zamm-memory/` tree (knowledge tiers, edit logs, proposals, decisions, workstream template, indexes, archive), `AGENTS.md`, `.cursor/rules/zamm.mdc` (always-on agent rule), and `.cursorignore` (archive/cold excluded by default).
@@ -42,7 +50,7 @@ Creates: `/zamm-memory/` tree (knowledge tiers, edit logs, proposals, decisions,
 
 1. Read EVERGREEN.md, MONTHLY.md, WEEKLY.md.
 2. **Maintenance check**: run preflight first.
-   - `bash ~/.cursor/skills/zamm/scripts/janitor-check.sh`
+   - `bash <zamm-scripts>/janitor-check.sh`
    - Exit `0`: no janitor work required.
    - Exit `2`: run one bounded maintenance pass before primary work.
    - Exit `1`: setup or metadata issue; repair before proceeding.
@@ -61,7 +69,7 @@ Creates: `/zamm-memory/` tree (knowledge tiers, edit logs, proposals, decisions,
 3. Append a handoff block to the diary log.
 4. If new durable learning occurred, write a proposal to `_proposals/`.
 5. Run a fast janitor preflight before handoff completion:
-   - `bash ~/.cursor/skills/zamm/scripts/janitor-check.sh --quiet`
+   - `bash <zamm-scripts>/janitor-check.sh --quiet`
    - Exit `0`: no janitor work required.
    - Exit `2`: run one bounded maintenance pass now if feasible; otherwise call it out in the handoff so the next session starts with it.
    - Exit `1`: setup or metadata issue; note and escalate.
@@ -166,7 +174,7 @@ Before creating/updating a plan file:
 Use the helper script:
 
 ```bash
-bash ~/.cursor/skills/zamm/scripts/new-plan.sh <initiative-slug> <plan-slug> [--subplan <parent-slug>] [--project-root <path>]
+bash <zamm-scripts>/new-plan.sh <initiative-slug> <plan-slug> [--subplan <parent-slug>] [--project-root <path>]
 ```
 
 ## Wellbeing Telemetry (Plan Files)
@@ -198,7 +206,7 @@ For templates (STATE.md, plan header, diary handoff, proposal, decision record):
 Check memory health:
 
 ```bash
-bash ~/.cursor/skills/zamm/scripts/validate.sh --project-root /path/to/project
+bash <zamm-scripts>/validate.sh --project-root /path/to/project
 ```
 
 Checks: card counts vs caps, missing evidence links, stale `Last maintained:` timestamps, orphaned proposals, misplaced plan files.
@@ -210,7 +218,7 @@ Also warns on missing/invalid wellbeing and complexity fields, and invalid memor
 Quickly check whether janitor work is needed at session boundaries (startup or handoff):
 
 ```bash
-bash ~/.cursor/skills/zamm/scripts/janitor-check.sh
+bash <zamm-scripts>/janitor-check.sh
 ```
 
 Use `--quiet` for exit-code-only startup checks.
@@ -220,7 +228,7 @@ Use `--quiet` for exit-code-only startup checks.
 Summarize wellbeing and complexity drift:
 
 ```bash
-bash ~/.cursor/skills/zamm/scripts/wellbeing-report.sh
+bash <zamm-scripts>/wellbeing-report.sh
 ```
 
 ## Initiative Janitor
@@ -228,13 +236,13 @@ bash ~/.cursor/skills/zamm/scripts/wellbeing-report.sh
 List archive-ready initiatives in active workstreams:
 
 ```bash
-bash ~/.cursor/skills/zamm/scripts/archive-done-initiatives.sh
+bash <zamm-scripts>/archive-done-initiatives.sh
 ```
 
 Archive them automatically (uses `git mv`):
 
 ```bash
-bash ~/.cursor/skills/zamm/scripts/archive-done-initiatives.sh --archive
+bash <zamm-scripts>/archive-done-initiatives.sh --archive
 ```
 
 ## Additional Resources
