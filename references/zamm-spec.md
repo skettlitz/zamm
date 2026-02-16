@@ -520,18 +520,10 @@ When superseding:
 
 ### Session start (MUST)
 1. Read EVERGREEN, MONTHLY, WEEKLY.
-2. **Maintenance check.** Inspect maintenance triggers (see section 14 for thresholds):
-   - Are there pending proposals in `_proposals/` older than `JANITOR_PROPOSAL_AGE`?
-   - Is WEEKLY.md `Last maintained:` older than `JANITOR_WEEKLY_THRESHOLD`?
-   - Is MONTHLY.md `Last maintained:` older than `JANITOR_MONTHLY_THRESHOLD`?
-   - Preferred fast path: run `janitor-check.sh` and branch on exit code (`0` none, `2` maintenance due, `1` setup issue).
-   If any trigger fires:
-   - Run a bounded maintenance pass using the matching cleanup profile(s) (see section 14).
-   - Notify the user briefly: "Performing scheduled memory maintenance before primary task."
-3. Identify the active initiative; read its `STATE.md`.
-4. If there is no matching initiative, create one from `_TEMPLATE` or ask a human.
+2. Identify the active initiative; read its `STATE.md`.
+3. If there is no matching initiative, create one from `_TEMPLATE` or ask a human.
 
-**Why:** Maintenance cannot run in the background. Checking triggers at session boundaries keeps tiers current without a dedicated librarian agent while preserving predictable context bootstrapping.
+**Why:** Session start is kept minimal so agents proceed to primary work quickly. All maintenance runs at session end (see below).
 
 ### Session end (MUST)
 1. Plan bookkeeping first (for current plan files, if any):
@@ -544,15 +536,16 @@ When superseding:
    - current plan + status
    - next 3 actions
    - blockers
-3. Append a “handoff block” to the diary log for the session.
-4. If new durable learning occurred, write a proposal to `_proposals/`.
-5. Run a fast janitor preflight before handoff completion:
+3. **Archive check (MUST if initiative looks done):** If all main plans are now terminal (Done/Partial/Abandoned/Superseded) or STATE.md was set to Done, immediately run `archive-done-initiatives.sh --archive`. Do not defer this -- archiving is the natural conclusion of a completed initiative and must happen in the same session.
+4. Append a “handoff block” to the diary log for the session.
+5. If new durable learning occurred, write a proposal to `_proposals/`.
+6. Run janitor preflight and act on results:
    - preferred call: `janitor-check.sh --quiet`
    - exit `0`: no janitor action required
-   - exit `2`: run one bounded maintenance pass now if feasible; otherwise call it out in the handoff for the next session
    - exit `1`: setup or metadata issue; note and escalate
+   - exit `2`: run one bounded maintenance pass using the suggested cleanup profile(s) from section 14. Archive-ready MUST be acted on immediately; other profiles may be deferred if infeasible.
 
-**Why:** We can’t always detect compaction, but we can reliably capture progress at boundaries.
+**Why:** We can’t always detect compaction, but we can reliably capture progress at boundaries. Archive-ready is never deferred because leaving a Done initiative in active/ creates a persistent false signal for every subsequent session.
 
 ### Compaction / context-reset handling (MUST when detected or suspected)
 1. Before manual context clear or restart, checkpoint:
@@ -564,11 +557,11 @@ When superseding:
 3. Record `Rehydrated from:` links in the diary entry for traceability.
 4. If uncertainty remains, run a short verification loop (open plan, inspect touched files, rerun key command) before new edits.
 
-### Triggered distillation events (SHOULD)
+### Triggered distillation events (SHOULD, except archive which is MUST)
 - PR merged
-- plan status changes
+- plan status changes — if all main plans become terminal, immediately check archive-ready (MUST)
 - checklist milestones completed
-- initiative closure
+- initiative closure — immediately archive (MUST)
 - manual context clear / model reboot
 - agent handoff
 - long-running sessions after substantial edits
@@ -632,7 +625,7 @@ If an agent needs archived detail:
 ## 14) Automation and janitor tasks
 
 ### Inline maintenance model
-There is no dedicated background janitor. Janitor preflight runs at session start and session end; maintenance runs inline when triggered (see section 11). Any agent can temporarily assume the librarian role (see section 9), coordinating through proposals and conflict reconciliation.
+There is no dedicated background janitor. Janitor preflight runs at session end; maintenance runs inline when triggered (see section 11). Session start is kept minimal (read tiers + identify initiative) so agents proceed to primary work quickly. Any agent can temporarily assume the librarian role (see section 9), coordinating through proposals and conflict reconciliation.
 
 ### Maintenance triggers
 An agent entering the maintenance pass checks three signals:

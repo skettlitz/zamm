@@ -49,13 +49,8 @@ Creates: `/zamm-memory/` tree (knowledge tiers, edit logs, proposals, decisions,
 ### Session Start (MUST)
 
 1. Read EVERGREEN.md, MONTHLY.md, WEEKLY.md.
-2. **Maintenance check**: run preflight first.
-   - `bash <zamm-scripts>/janitor-check.sh`
-   - Exit `0`: no janitor work required.
-   - Exit `2`: run one bounded maintenance pass before primary work.
-   - Exit `1`: setup or metadata issue; repair before proceeding.
-3. Identify active initiative; read its `STATE.md`.
-4. If no matching initiative, create from `_TEMPLATE` or ask the human.
+2. Identify active initiative; read its `STATE.md`.
+3. If no matching initiative, create from `_TEMPLATE` or ask the human.
 
 ### Session End (MUST)
 
@@ -66,13 +61,14 @@ Creates: `/zamm-memory/` tree (knowledge tiers, edit logs, proposals, decisions,
    - If status moved to `Done`, `Partial`, or `Abandoned`, fill `Wellbeing-after`, `Complexity-felt`, and `Complexity-delta`.
    - Update `Memory-upvotes` / `Memory-downvotes` when specific cards materially helped or misled.
 2. Update initiative `STATE.md` (current plan + status, next 3 actions, blockers).
-3. Append a handoff block to the diary log.
-4. If new durable learning occurred, write a proposal to `_proposals/`.
-5. Run a fast janitor preflight before handoff completion:
+3. **Archive check (MUST if initiative looks done):** If all main plans are now terminal (Done/Partial/Abandoned/Superseded) or STATE.md was set to Done, immediately run `bash <zamm-scripts>/archive-done-initiatives.sh --archive`. Do not defer this.
+4. Append a handoff block to the diary log.
+5. If new durable learning occurred, write a proposal to `_proposals/`.
+6. Run janitor preflight and act on results:
    - `bash <zamm-scripts>/janitor-check.sh --quiet`
    - Exit `0`: no janitor work required.
-   - Exit `2`: run one bounded maintenance pass now if feasible; otherwise call it out in the handoff so the next session starts with it.
    - Exit `1`: setup or metadata issue; note and escalate.
+   - Exit `2`: run one bounded maintenance pass using the suggested profile(s) — see Maintenance section below for full details.
 
 ### Compaction / Context Reset (MUST when detected)
 
