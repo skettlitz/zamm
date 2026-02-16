@@ -57,26 +57,68 @@ Creates: `/zamm-memory/` tree (knowledge tiers, edit logs, proposals, decisions,
 3. If no matching initiative, create from `_TEMPLATE` or ask the human.
 4. **Plan-first gate (MUST):** Before starting any implementation, create or locate the plan file for the current task. Copy `_PLAN_TEMPLATE.plan.md` from the initiative's `plans/` directory, rename to `YYYY-MM-DD-<slug>.plan.md`, fill in the header fields, scope, and Done-when. Set `Status: Implementing` when you begin work. NEVER implement first and create the plan afterward — the plan is the organizing tool, not a post-hoc record.
 
+## Plan Status Transitions (MUST)
+
+Allowed transitions:
+1. `Draft -> Implementing | Abandoned`
+2. `Implementing -> Review | Abandoned`
+3. `Review -> Implementing | Done`
+
+Rules:
+- `Done` can only be set after human approval of a plan currently in `Review`.
+- `Done` requires:
+  - `Done-approved-by:`
+  - `Done-approved-at:`
+  - `Done-approval-evidence:`
+- `Done` and `Abandoned` are terminal. Do not resume work on a terminal plan; create a new plan.
+- If a plan is `Abandoned` because another plan replaced it, add `Successor plan: <path>` under `## Loose ends`.
+
 ### Session End (MUST)
 
 1. Plan bookkeeping first (for current plan files, if any):
-   - Check off completed `Done-when` todos.
-   - Update `Status:` to match reality (`Draft | Implementing | Review | Done | Partial | Abandoned | Superseded`).
-     NEVER set `Done` directly — set `Review` and ask the human to confirm. `Done` is only set after human approval.
-   - Refresh `PR list`, `Evidence`, and `Docs impacted` for this session's changes.
-   - **Before setting `Review` (MUST):** fill the `## Learnings` section — what was learned, what surprised, what should be remembered. A plan cannot move to Review with empty learnings.
-   - If status moved to `Review`, `Partial`, or `Abandoned`, fill `Wellbeing-after`, `Complexity-felt`, and `Complexity-delta`.
+   - For each touched plan, pick exactly one allowed transition and set `Status:` accordingly for this bookkeeping pass:
+     - `Draft -> Implementing | Abandoned`
+     - `Implementing -> Review | Abandoned`
+     - `Review -> Implementing | Done`
+   - Then apply destination requirements:
+     - `Review`:
+       - Ensure all existing `Done-when` todos are checked. If an item became obsolete, remove it before moving to `Review`.
+       - Fill `## Learnings` (required; if no durable learning emerged, state that explicitly with a reason).
+       - Update WEEKLY from those learnings (required; `No WEEKLY change needed:` is valid only with explicit rationale).
+       - Refresh `PR list`, `Evidence`, and `Docs impacted`.
+       - Fill `Wellbeing-after`, `Complexity-felt`, and `Complexity-delta`.
+     - `Abandoned`:
+       - Check off completed `Done-when` todos.
+       - Record rationale and cleanup notes.
+       - Fill `## Learnings` (required; if no durable learning emerged, state that explicitly with a reason).
+       - Update WEEKLY from those learnings (required; `No WEEKLY change needed:` is valid only with explicit rationale).
+       - Refresh `PR list`, `Evidence`, and `Docs impacted`.
+       - Add `Successor plan: <path>` under `## Loose ends` if replaced by another plan.
+       - Fill `Wellbeing-after`, `Complexity-felt`, and `Complexity-delta`.
+     - `Done`:
+       - Only after explicit human approval while plan is in `Review`.
+       - Fill `Done-approved-by`, `Done-approved-at`, and `Done-approval-evidence`.
+     - `Implementing` (re-open from `Review`):
+       - Capture requested changes and re-open relevant `Done-when` items.
    - Update `Memory-upvotes` / `Memory-downvotes` when specific cards materially helped or misled.
 2. Update initiative `STATE.md` (current plan + status, next 3 actions, blockers).
-3. **Integrate learnings (MUST before archiving):** If the initiative is archive-ready, review `## Learnings` from each plan and distill them into WEEKLY knowledge cards. Learnings must not be lost to the archive.
-4. **Archive check (MUST if initiative looks done):** If all main plans are now terminal (Done/Partial/Abandoned/Superseded) or STATE.md was set to Done, immediately run `bash <zamm-scripts>/archive-done-initiatives.sh --archive`. Do not defer this.
+3. **Integrate learnings (archive safety backstop):** If the initiative is archive-ready and any relevant plan missed the transition checklist above, distill `## Learnings` from those plans into WEEKLY before archiving.
+4. **Archive check (MUST if initiative looks done):** If all main plans are now terminal (`Done` or `Abandoned`) or `STATE.md` was set to `Done`, immediately run `bash <zamm-scripts>/archive-done-initiatives.sh --archive`. Do not defer this.
 5. Append a handoff block to the diary log.
-6. If new durable learning occurred, write a proposal to `_proposals/`.
+6. If new durable learning occurred, write a proposal to `zamm-memory/active/knowledge/_proposals/`.
 7. Run janitor preflight and act on results:
    - `bash <zamm-scripts>/janitor-check.sh --quiet`
-   - Exit `0`: no janitor work required.
+   - Exit `0`: no janitor action required.
    - Exit `1`: setup or metadata issue; note and escalate.
-   - Exit `2`: run one bounded maintenance pass using the suggested profile(s) — see Maintenance section below for full details.
+   - Exit `2`: run one bounded maintenance pass using the suggested profile(s), with this priority:
+     - `archive-ready` > `project-finish` > `weekly-cleanup` > `monthly-cleanup`
+     - **archive-ready** (MUST — never defer): if plan learnings are not yet distilled, distill to WEEKLY first; then run `bash <zamm-scripts>/archive-done-initiatives.sh --archive`
+     - **project-finish**: distill learnings into WEEKLY, edit 1-5 WEEKLY cards, set initiative `Status: Done`
+     - **weekly-cleanup**: retire 0-3 WEEKLY cards, edit 1-5 MONTHLY cards
+     - **monthly-cleanup**: demote 0-2 MONTHLY→WEEKLY, edit 1-3 EVERGREEN cards
+     - Process up to 5 proposals (apply/reject/defer). Log each action in `_edits/`.
+     - Update `Last maintained:` in the tier file header.
+     - Every pass MUST make at least 1 improvement edit. Never retire from EVERGREEN or MONTHLY; demote instead.
 
 ### Compaction / Context Reset (MUST when detected)
 
@@ -123,7 +165,8 @@ No background process. Check triggers at session start and session end; run a bo
 - Pending proposals in `_proposals/` older than 1 day
 - WEEKLY.md `Last maintained:` > 3 days
 - MONTHLY.md `Last maintained:` > 14 days
-- Any initiative that is archive-ready: `Status: Done` in STATE.md, OR all main plans (not subplans) have terminal status (Done/Partial/Abandoned/Superseded)
+- Any initiative in `Status: Closing` (project-finish profile)
+- Any initiative that is archive-ready: `Status: Done` in STATE.md, OR all main plans (not subplans) have terminal status (`Done` or `Abandoned`)
 
 **Run invariants**:
 - Every janitor run MUST make at least 1 improvement edit.
@@ -151,7 +194,7 @@ No background process. Check triggers at session start and session end; run a bo
 
 4. Archive-ready cleanup (when initiative is archive-ready):
    - Triggered when STATE.md says `Done` OR all main plans have terminal status.
-   - A main plan being Done implies all its subplans are terminal — only main plans need checking.
+   - A main plan being `Done` or `Abandoned` implies all its subplans are terminal — only main plans need checking.
    - Archive immediately: `bash <zamm-scripts>/archive-done-initiatives.sh --archive`
    - The script uses `git mv` (MUST — never `cp`) and auto-sets STATE.md to Done if needed.
 
@@ -190,11 +233,12 @@ Each plan should capture a brief emotional and complexity check-in:
   - `peanuts | banana | grapes | capybara | badger | pitbull | piranha | shark | godzilla`
 - `Memory-upvotes:` optional memory IDs that helped (e.g., `W14, M18`)
 - `Memory-downvotes:` optional memory IDs that were misleading/inconsistent (use only when issues were observed)
-- `Wellbeing-after:` free text after implementation
-- `Complexity-felt:` same scale as forecast
-- `Complexity-delta:` `lighter | as-expected | heavier`
-
-When plan status becomes `Done`, `Partial`, or `Abandoned`, fill the after/felt/delta fields.
+- `Wellbeing-after:` free text (fill on `Review` or `Abandoned`)
+- `Complexity-felt:` same scale (fill on `Review` or `Abandoned`)
+- `Complexity-delta:` `lighter | as-expected | heavier` (fill on `Review` or `Abandoned`)
+- `Done-approved-by:` required when `Status: Done`
+- `Done-approved-at:` required when `Status: Done`
+- `Done-approval-evidence:` required when `Status: Done`
 
 ## Initiatives
 

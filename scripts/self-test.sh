@@ -70,7 +70,17 @@ if [ ! -f "$TEMPLATE_FILE" ]; then
   echo "ERROR: plan template not found: $TEMPLATE_FILE"
   exit 1
 fi
-for field in "Workstream:" "Status: Draft" "## Done-when" "## Learnings" "## Why / rationale" "## Risks" "## Loose ends"; do
+for field in \
+  "Workstream:" \
+  "Status: Draft" \
+  "## Done-when" \
+  "## Learnings" \
+  "## Why / rationale" \
+  "## Risks" \
+  "## Loose ends" \
+  "Done-approved-by:" \
+  "Done-approved-at:" \
+  "Done-approval-evidence:"; do
   if ! grep -q "$field" "$TEMPLATE_FILE"; then
     echo "ERROR: plan template missing field: $field"
     exit 1

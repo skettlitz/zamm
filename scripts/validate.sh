@@ -50,6 +50,8 @@ MAX_CARDS=30
 MAX_LINES=220
 WEEKLY_THRESHOLD_DAYS=3
 MONTHLY_THRESHOLD_DAYS=14
+PROPOSAL_AGE_DAYS=1
+PROPOSAL_AGE_MINUTES=$((PROPOSAL_AGE_DAYS * 24 * 60))
 COMPLEXITY_SCALE_REGEX="^(peanuts|banana|grapes|capybara|badger|pitbull|piranha|shark|godzilla)$"
 COMPLEXITY_DELTA_REGEX="^(lighter|as-expected|heavier)$"
 MEMORY_ID_REGEX="^[WME][0-9]+$"
@@ -434,7 +436,7 @@ check_memory_vote_ids() {
     if ! [[ "$token" =~ $MEMORY_ID_REGEX ]]; then
       invalid_count=$((invalid_count + 1))
     fi
-  done < <(printf '%s' "$value" | tr ',| ' '\n')
+  done < <(printf '%s\n' "$value" | tr ',| ' '\n')
 
   if [ "$token_count" -eq 0 ] || [ "$invalid_count" -gt 0 ]; then
     echo "  WARN:  invalid ${field} '$value' in $file (expected IDs like W14, M18)"
@@ -451,9 +453,9 @@ if [ -d "$PROPOSALS_DIR" ]; then
   if [ "$proposal_count" -gt 0 ]; then
     echo "  PENDING: $proposal_count proposal(s) waiting for review"
     # Check for old proposals
-    old_proposals=$(find "$PROPOSALS_DIR" -name "*.md" -not -name ".*" -mtime +1 2>/dev/null | wc -l | tr -d ' ')
+    old_proposals=$(find "$PROPOSALS_DIR" -name "*.md" -not -name ".*" -mmin "+$PROPOSAL_AGE_MINUTES" 2>/dev/null | wc -l | tr -d ' ')
     if [ "$old_proposals" -gt 0 ]; then
-      echo "  WARN:  $old_proposals proposal(s) older than 1 day"
+      echo "  WARN:  $old_proposals proposal(s) older than ${PROPOSAL_AGE_DAYS} day(s)"
       WARNINGS=$((WARNINGS + 1))
     fi
   else

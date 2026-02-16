@@ -242,7 +242,7 @@ Scope:
 
 ## Learnings
 
-- (none yet — MUST fill before setting Status: Review)
+- (none yet — MUST fill before setting Status: Review or Abandoned)
 
 ## Loose ends
 
@@ -251,6 +251,9 @@ Scope:
 Wellbeing-after:
 Complexity-felt:
 Complexity-delta:
+Done-approved-by:
+Done-approved-at:
+Done-approval-evidence:
 '
 write_if_new "$TEMPLATE_DIR/plans/_PLAN_TEMPLATE.plan.md" "$PLAN_TEMPLATE"
 

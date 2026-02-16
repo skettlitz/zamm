@@ -120,6 +120,7 @@ fi
 WEEKLY_THRESHOLD_DAYS=3
 MONTHLY_THRESHOLD_DAYS=14
 PROPOSAL_AGE_DAYS=1
+PROPOSAL_AGE_MINUTES=$((PROPOSAL_AGE_DAYS * 24 * 60))
 
 today_epoch=$(date "+%s")
 
@@ -165,7 +166,7 @@ if [ "$monthly_age_days" -gt "$MONTHLY_THRESHOLD_DAYS" ]; then
   fi
 fi
 
-old_proposal_count=$(find "$PROPOSALS_DIR" -name "*.md" -not -name ".*" -mtime "+$PROPOSAL_AGE_DAYS" 2>/dev/null | wc -l | tr -d ' ')
+old_proposal_count=$(find "$PROPOSALS_DIR" -name "*.md" -not -name ".*" -mmin "+$PROPOSAL_AGE_MINUTES" 2>/dev/null | wc -l | tr -d ' ')
 if [ "$old_proposal_count" -gt 0 ]; then
   NEEDS_JANITOR=1
   TRIGGERS+=("proposal backlog: ${old_proposal_count} proposal(s) older than ${PROPOSAL_AGE_DAYS}d")
