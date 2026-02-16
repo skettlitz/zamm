@@ -1,0 +1,101 @@
+---
+description: ZAMM — bounded knowledge tiers and session rituals for agentic development
+alwaysApply: true
+---
+
+# ZAMM — Agent Session Protocol
+
+## Session Start (MUST — do this before any other work)
+
+1. Read these files in order:
+   - `zamm-memory/active/knowledge/EVERGREEN.md`
+   - `zamm-memory/active/knowledge/MONTHLY.md`
+   - `zamm-memory/active/knowledge/WEEKLY.md`
+
+2. **Maintenance check.** If ANY of these are true, run maintenance before your primary task:
+   - Files exist in `zamm-memory/active/knowledge/_proposals/` older than 1 day (not `.gitkeep`)
+   - WEEKLY.md `Last maintained:` is older than 3 days
+   - MONTHLY.md `Last maintained:` is older than 14 days
+   - Preferred one-call check: `bash ~/.cursor/skills/zamm/scripts/janitor-check.sh`
+     - exit `0`: no janitor action required
+     - exit `2`: run maintenance pass below
+     - exit `1`: fix setup/metadata issue first
+
+   Maintenance pass (max per session):
+   - Every run must include at least 1 improvement edit (tighten claim/scope, refresh evidence, resolve drift, or update verification metadata).
+   - Add/replace/demote/retire counts may be 0 when unnecessary.
+   - Never retire from EVERGREEN or MONTHLY; demote instead. Permanent retirement is WEEKLY-only.
+   - If MONTHLY is stale: demote 0-2 MONTHLY->WEEKLY, edit 1-3 EVERGREEN, optionally add/replace 0-1 EVERGREEN.
+   - If WEEKLY is stale: retire 0-3 WEEKLY, edit 1-5 MONTHLY, optionally add/replace 0-2 MONTHLY.
+   - If initiative is closing: distill learnings into WEEKLY first, edit 1-5 WEEKLY, optionally add/replace 0-2 WEEKLY, then set `Status: Done` (or `Closing`).
+   - Process up to 5 proposals (apply/reject/defer). Log each action in `_edits/`.
+   - Update `Last maintained:` in the tier file header.
+   - Notify user: "Performing scheduled memory maintenance before primary task."
+
+3. Identify the active initiative. Read its `zamm-memory/active/workstreams/<init>/STATE.md`.
+4. If no matching initiative exists, create one from `_TEMPLATE` or ask the human.
+
+## Session End (MUST)
+
+1. Plan bookkeeping first (for current plan files, if any):
+   - Check off completed `Done-when` todos.
+   - Update `Status:` to match reality (`Draft|Implementing|Done|Partial|Abandoned|Superseded`).
+   - Refresh `PR list`, `Evidence`, and `Docs impacted`.
+   - If a plan moved to `Done`, `Partial`, or `Abandoned`, fill:
+     - `Wellbeing-after:`
+     - `Complexity-felt:`
+     - `Complexity-delta:`
+   - If specific memory cards materially helped or misled execution, fill:
+     - `Memory-upvotes:`
+     - `Memory-downvotes:`
+2. Update `STATE.md`: current plan + status, next 3 actions, blockers.
+3. Append a handoff block to the initiative diary (What I tried / What changed / Files touched / Next 3 actions / Evidence links).
+4. If new durable learning occurred, write a proposal to `zamm-memory/active/knowledge/_proposals/`.
+5. Run a fast janitor preflight before handoff completion:
+   - `bash ~/.cursor/skills/zamm/scripts/janitor-check.sh --quiet`
+   - exit `0`: no janitor action required
+   - exit `2`: run one bounded maintenance pass now if feasible; otherwise call it out in the handoff for the next session
+   - exit `1`: note setup/metadata issue and escalate
+
+## Precedence (when sources conflict)
+
+1. Explicit current human instruction
+2. Code, tests, contracts (executable truth)
+3. Initiative STATE.md and active plan
+4. Knowledge tiers (WEEKLY > MONTHLY > EVERGREEN)
+5. Archive and historical notes
+
+## Plan Placement (MUST)
+
+Before creating/updating a plan file:
+
+1. Resolve repository root.
+2. Resolve target initiative slug:
+   - If user specified one, use it.
+   - Else use the active workstream.
+   - If ambiguous, ask the user.
+3. Plan files MUST live at:
+   `zamm-memory/active/workstreams/<initiative-slug>/plans/`
+4. Filename MUST be:
+   - Main plan: `YYYY-MM-DD-<plan-slug>.md`
+   - Subplan: `YYYY-MM-DD-<parent-plan-slug>.subplan-<subslug>.md`
+5. Never create plan files outside `.../workstreams/*/plans/`.
+6. If the path does not exist, create from `_TEMPLATE` first, then place the plan.
+
+## Wellbeing Telemetry (Plan Files)
+
+Plans should include:
+- `Wellbeing-before:` free text
+- `Complexity-forecast:` one of `peanuts|banana|grapes|capybara|badger|pitbull|piranha|shark|godzilla`
+- `Memory-upvotes:` optional memory IDs that helped (for example `W14, M18`)
+- `Memory-downvotes:` optional memory IDs that were misleading/inconsistent (only when problems were observed)
+- `Wellbeing-after:` free text (fill on completion/partial/abandon)
+- `Complexity-felt:` same scale (fill on completion/partial/abandon)
+- `Complexity-delta:` `lighter|as-expected|heavier` (fill on completion/partial/abandon)
+
+## Key Constraints
+
+- Knowledge tiers are **advisory, not authoritative**. Verify before high-impact actions.
+- Never store secrets, tokens, or credentials in memory files.
+- If a memory claim conflicts with code/tests, mark as `suspected drift` and verify.
+- Proposals go to `_proposals/`. During primary task work, avoid direct edits to WEEKLY/MONTHLY/EVERGREEN.
