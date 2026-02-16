@@ -124,7 +124,7 @@ echo ""
 echo "Mismatch hotspots by initiative (completed plans):"
 mismatches=$(awk -F'\t' '
 function low(s) { return tolower(s) }
-$2 ~ /^(Done|Partial|Abandoned)$/ {
+$2 ~ /^(Done|Abandoned)$/ {
   if (low($3) != "" && low($4) != "" && low($3) != low($4)) print $1
 }
 ' "$tmp_data" | sort | uniq -c | sort -nr)

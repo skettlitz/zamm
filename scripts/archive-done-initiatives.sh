@@ -81,8 +81,8 @@ if [ "$ARCHIVE_MODE" -eq 1 ]; then
 fi
 
 # Check if all main plans (not subplans) in an initiative have terminal status.
-# A main plan being Done implies all its subplans are already terminal.
-# Terminal statuses: Done, Partial, Abandoned, Superseded.
+# A main plan being Done or Abandoned implies all its subplans are already terminal.
+# Terminal statuses: Done, Abandoned.
 all_main_plans_terminal() {
   local init_dir="$1"
   local plans_dir="$init_dir/plans"
@@ -96,7 +96,7 @@ all_main_plans_terminal() {
     local plan_status
     plan_status=$(sed -n 's/^Status:[[:space:]]*//p' "$plan_file" | head -n1 | awk '{print $1}')
     case "$plan_status" in
-      Done|Partial|Abandoned|Superseded) terminal_count=$((terminal_count + 1)) ;;
+      Done|Abandoned) terminal_count=$((terminal_count + 1)) ;;
     esac
   done < <(find "$plans_dir" -maxdepth 1 -name "*.plan.md" ! -name "*.subplan-*.plan.md" 2>/dev/null)
   if [ "$main_plan_count" -gt 0 ] && [ "$main_plan_count" -eq "$terminal_count" ]; then

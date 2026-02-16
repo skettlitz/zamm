@@ -44,16 +44,55 @@ folder `zamm-main` by default — rename it to `zamm`.
 
 Choose **one** of the targets below (or combine them).
 
-#### Cursor (personal — all projects)
+#### A. Codex — Repo-local (recommended)
+
+Put ZAMM inside the repo so any collaborator who clones it gets the skill
+automatically:
+
+```bash
+cd /path/to/your/project
+mkdir -p .agents/skills
+cp -r /path/to/zamm .agents/skills/zamm
+```
+
+Commit `.agents/skills/zamm/` so collaborators pick it up automatically.
+
+If you keep ZAMM in this repo but want to *use* it in another repo, symlink it:
+
+```bash
+ln -s /path/to/zamm /path/to/other-repo/.agents/skills/zamm
+```
+
+#### B. Codex — User-global
+
+Install once per user profile so ZAMM is available in any repo:
+
+```bash
+mkdir -p ~/.agents/skills
+cp -r /path/to/zamm ~/.agents/skills/zamm
+# or symlink instead of copy
+```
+
+#### C. Codex — Admin / shared machine (optional)
+
+For managed dev boxes or containers where you want a standard skill set for
+every user:
+
+```bash
+sudo mkdir -p /etc/codex/skills
+sudo cp -r /path/to/zamm /etc/codex/skills/zamm
+```
+
+#### D. Cursor — personal (all projects)
 
 ```bash
 mkdir -p ~/.cursor/skills
-cp -r zamm ~/.cursor/skills/zamm
+cp -r /path/to/zamm ~/.cursor/skills/zamm
 ```
 
 The skill is available in every Cursor project after restart.
 
-#### Cursor (project-level — shared via repo)
+#### E. Cursor — project-level (shared via repo)
 
 ```bash
 cd /path/to/your/project
@@ -63,14 +102,12 @@ cp -r /path/to/zamm .cursor/skills/zamm
 
 Commit `.cursor/skills/zamm/` so collaborators pick it up automatically.
 
-#### Codex
+#### Legacy note
 
-```bash
-mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
-cp -r zamm "${CODEX_HOME:-$HOME/.codex}/skills/zamm"
-```
-
-Restart Codex to pick up the new skill.
+If you previously used `${CODEX_HOME:-$HOME/.codex}/skills` in older Codex
+setups, that path may still work as a backward-compatibility fallback, but it is
+no longer the primary discovery path. Prefer `.agents/skills/` (repo or user
+scope) going forward.
 
 ### Step 3 — Verify
 
@@ -89,7 +126,7 @@ If you cloned the repo, pull the latest changes and re-copy:
 ```bash
 cd /path/to/zamm
 git pull
-cp -r . ~/.cursor/skills/zamm   # or whichever target from Step 2
+cp -r . ~/.agents/skills/zamm   # or whichever target from Step 2
 ```
 
 If you downloaded a zip, replace the folder with the new version.

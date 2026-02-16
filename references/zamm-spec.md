@@ -231,46 +231,74 @@ Workflow: create plan (Status: Draft) → fill scope + Done-when → set Status:
 
 ### Plan requirements
 Every plan MUST include:
-- Status: Draft | Implementing | Review | Done | Partial | Abandoned | Superseded (if `Superseded`, include successor link)
+- Status: Draft | Implementing | Review | Done | Abandoned
   - `Review` = agent believes work is complete, awaiting human confirmation. Agents MUST NOT set `Done` directly.
   - `Done` = human-confirmed completion. Only set after human approves.
+  - `Abandoned` = work stopped without completion. If replaced by another plan, include a successor pointer.
 - Scope (in/out)
 - Done-when checklist
 - PR list (plural)
 - Evidence links to relevant code/docs/decisions
-- Learnings section (MUST fill before setting Status: Review — include specific insights, or explicitly note when no durable learning emerged and why)
+- Learnings section (MUST fill before setting Status: Review or Abandoned — include specific insights, or explicitly note when no durable learning emerged and why)
 - “Docs impacted” (canonical `/docs` paths)
 - Wellbeing fields:
   - `Wellbeing-before:` (free text)
   - `Complexity-forecast:` (`peanuts|banana|grapes|capybara|badger|pitbull|piranha|shark|godzilla`)
   - `Memory-upvotes:` (optional memory IDs that helped; e.g., `W14, M18`)
   - `Memory-downvotes:` (optional memory IDs that were misleading/inconsistent; only when issues were observed)
-  - `Wellbeing-after:` (free text; fill when agent work concludes: Review/Partial/Abandoned)
+  - `Wellbeing-after:` (free text; fill when agent work concludes: Review/Abandoned)
   - `Complexity-felt:` (same scale; fill when agent work concludes)
   - `Complexity-delta:` (`lighter|as-expected|heavier`; fill when agent work concludes)
+  - `Done-approved-by:` (required when `Status: Done`)
+  - `Done-approved-at:` (required when `Status: Done`)
+  - `Done-approval-evidence:` (required when `Status: Done`)
 
 Session-end bookkeeping for touched plans is MUST:
 - reconcile `Done-when` checklist items (check off completed items)
 - update `Status:` to match actual state. NEVER set `Done` directly — set `Review` and ask the human to confirm.
 - refresh `PR list`, `Evidence`, and `Docs impacted`
-- **before setting `Review`**: fill the `## Learnings` section (MUST — include specific insights, or explicitly note when no durable learning emerged and why). A plan cannot move to Review with empty learnings.
-- when status becomes `Review|Partial|Abandoned`, fill `Wellbeing-after`, `Complexity-felt`, and `Complexity-delta`
+- for `Review` transitions, all existing `Done-when` items MUST be checked; if an item became obsolete, remove it before moving to `Review`
+- **before setting `Review` or `Abandoned`**: fill the `## Learnings` section (MUST — include specific insights, or explicitly note when no durable learning emerged and why). A plan cannot move to these states with empty learnings.
+- when status becomes `Review|Abandoned`, update WEEKLY from those learnings (`No WEEKLY change needed:` is valid only with explicit rationale)
+- when status becomes `Review|Abandoned`, fill `Wellbeing-after`, `Complexity-felt`, and `Complexity-delta`
+- when status becomes `Done`, fill `Done-approved-by`, `Done-approved-at`, and `Done-approval-evidence`
 - update `Memory-upvotes` / `Memory-downvotes` when memory cards clearly helped or misled execution
 
 **Why:** Plans are the “intent ledger” for autonomous agents. They need explicit stopping conditions and traceability. The wellbeing and complexity fields provide a longitudinal feedback loop for agent wellbeing and planning quality, and memory votes provide feedback on knowledge-card quality.
+
+### Plan status transition contract (MUST)
+Allowed transitions (and only these):
+- `Draft -> Implementing | Abandoned`
+- `Implementing -> Review | Abandoned`
+- `Review -> Implementing | Done`
+
+Transition checklist:
+
+| From -> To | Actor | Prerequisites | Trigger | Required TODOs |
+|------------|-------|---------------|---------|----------------|
+| `Draft -> Implementing` | Agent | Plan exists; scope + Done-when are filled | Work is ready to start | Set `Status: Implementing`; fill `Wellbeing-before` + `Complexity-forecast` |
+| `Draft -> Abandoned` | Agent or human | Decision made not to start implementation | Scope canceled or superseded before coding | Check off any completed `Done-when` items; record rationale in `## Why / rationale`; update `## Loose ends`; fill `## Learnings`; update WEEKLY from those learnings (`No WEEKLY change needed:` allowed only with explicit rationale); refresh `PR list`, `Evidence`, and `Docs impacted`; fill `Wellbeing-after`, `Complexity-felt`, `Complexity-delta` |
+| `Implementing -> Review` | Agent | All existing `Done-when` items are checked (obsolete items removed first); evidence/docs updated | Agent believes work is complete | Fill `## Learnings`; update WEEKLY from those learnings (`No WEEKLY change needed:` allowed only with explicit rationale); fill `Wellbeing-after`, `Complexity-felt`, `Complexity-delta`; request human approval |
+| `Implementing -> Abandoned` | Agent or human | Decision made to stop unfinished work | Direction change, blocked path, or de-prioritization | Check off any completed `Done-when` items; record rationale + loose ends; fill `## Learnings`; update WEEKLY from those learnings (`No WEEKLY change needed:` allowed only with explicit rationale); refresh `PR list`, `Evidence`, and `Docs impacted`; if replaced by another plan, add `Successor plan: <path>`; fill `Wellbeing-after`, `Complexity-felt`, `Complexity-delta` |
+| `Review -> Implementing` | Agent | Human requested changes | Approval withheld pending revisions | Capture feedback intent in plan updates; reopen tasks in Done-when |
+| `Review -> Done` | Human | Plan is in `Review`; approval is explicit | Human confirms completion | Set `Status: Done`; fill `Done-approved-by`, `Done-approved-at`, `Done-approval-evidence` |
+
+Terminal states:
+- `Done` and `Abandoned` are terminal for plans.
+- Do not resume a terminal plan; create a new plan if additional work is needed.
 
 ### Subplans
 Subplans are normal plan files with a naming convention and a parent link.
 
 **Why:** We don’t know upfront whether a plan is “big”; subplans prevent rewriting the main plan into an unmanageable blob.
 
-### Abandonment / superseding
+### Abandonment / replacement
 If direction changes:
 - Do not erase history.
 - Mark the plan status accordingly and add:
   - “Why changed course”
   - “Loose ends / cleanup”
-  - pointer to successor plan
+  - `Successor plan: <path>` when replaced by another plan
 
 **Why:** The value is in the rationale and the loose ends. Agents and humans need to see *what was tried* and *what remains risky*.
 
@@ -527,7 +555,7 @@ When superseding:
 
 ## 11) Session rituals (agent-operational)
 
-Command notation: `<zamm-scripts>` means the resolved ZAMM scripts directory (`<project-root>/.cursor/skills/zamm/scripts/` first, fallback `~/.cursor/skills/zamm/scripts/`).
+Command notation: `<zamm-scripts>` means the resolved ZAMM scripts directory. Resolution order: `<project-root>/.cursor/skills/zamm/scripts/`, `~/.cursor/skills/zamm/scripts/`, `<project-root>/.agents/skills/zamm/scripts/`, `~/.agents/skills/zamm/scripts/`, `/etc/codex/skills/zamm/scripts/`. Use the first path that exists.
 
 ### Session start (MUST)
 1. Read EVERGREEN, MONTHLY, WEEKLY.
@@ -539,18 +567,37 @@ Command notation: `<zamm-scripts>` means the resolved ZAMM scripts directory (`<
 
 ### Session end (MUST)
 1. Plan bookkeeping first (for current plan files, if any):
-   - check off completed `Done-when` todos
-   - update `Status:` to match reality. NEVER set `Done` directly — set `Review` and ask the human to confirm.
-   - refresh `PR list`, `Evidence`, and `Docs impacted`
-   - **before setting `Review`**: fill `## Learnings` with specific insights; if no durable learning emerged, state that explicitly with a reason. A plan cannot move to `Review` with empty learnings.
-   - if status moved to `Review|Partial|Abandoned`, fill `Wellbeing-after`, `Complexity-felt`, `Complexity-delta`
+   - for each touched plan, choose exactly one allowed transition and set `Status:` accordingly for this bookkeeping pass:
+     - `Draft -> Implementing | Abandoned`
+     - `Implementing -> Review | Abandoned`
+     - `Review -> Implementing | Done`
+   - then apply destination requirements:
+     - `Review`:
+       - ensure all existing `Done-when` todos are checked; if an item became obsolete, remove it before moving to `Review`
+       - fill `## Learnings` (required; if no durable learning emerged, state that explicitly with a reason)
+       - update WEEKLY from those learnings (required; `No WEEKLY change needed:` is valid only with explicit rationale)
+       - refresh `PR list`, `Evidence`, and `Docs impacted`
+       - fill `Wellbeing-after`, `Complexity-felt`, and `Complexity-delta`
+     - `Abandoned`:
+       - check off completed `Done-when` todos
+       - record rationale and cleanup notes
+       - fill `## Learnings` (required; if no durable learning emerged, state that explicitly with a reason)
+       - update WEEKLY from those learnings (required; `No WEEKLY change needed:` is valid only with explicit rationale)
+       - refresh `PR list`, `Evidence`, and `Docs impacted`
+       - add `Successor plan: <path>` under `## Loose ends` if replaced by another plan
+       - fill `Wellbeing-after`, `Complexity-felt`, and `Complexity-delta`
+     - `Done`:
+       - only after explicit human approval while plan is in `Review`
+       - fill `Done-approved-by`, `Done-approved-at`, and `Done-approval-evidence`
+     - `Implementing` (re-open from `Review`):
+       - capture requested changes and re-open relevant `Done-when` items
    - if specific memory cards materially helped or misled execution, fill `Memory-upvotes` / `Memory-downvotes`
 2. Update initiative `STATE.md`:
    - current plan + status
    - next 3 actions
    - blockers
-3. **Integrate learnings (MUST before archiving):** If the initiative is archive-ready (all main plans are terminal, or `STATE.md` is `Done`), distill `## Learnings` from plan files into WEEKLY before archiving. Learnings must not be lost to the archive.
-4. **Archive check (MUST if initiative looks done):** If all main plans are now terminal (Done/Partial/Abandoned/Superseded) or `STATE.md` was set to `Done`, immediately run `bash <zamm-scripts>/archive-done-initiatives.sh --archive`. Do not defer this -- archiving is the natural conclusion of a completed initiative and must happen in the same session.
+3. **Integrate learnings (archive safety backstop):** If the initiative is archive-ready and any relevant plan missed the transition checklist above, distill `## Learnings` from those plans into WEEKLY before archiving.
+4. **Archive check (MUST if initiative looks done):** If all main plans are now terminal (`Done` or `Abandoned`) or `STATE.md` was set to `Done`, immediately run `bash <zamm-scripts>/archive-done-initiatives.sh --archive`. Do not defer this -- archiving is the natural conclusion of a completed initiative and must happen in the same session.
 5. Append a “handoff block” to the diary log for the session.
 6. If new durable learning occurred, write a proposal to `_proposals/`.
 7. Run janitor preflight and act on results:
@@ -585,6 +632,26 @@ Command notation: `<zamm-scripts>` means the resolved ZAMM scripts directory (`<
 ---
 
 ## 12) Initiative lifecycle
+
+### Initiative status transition contract (MUST)
+Allowed transitions (and only these):
+- `Active -> Paused | Closing`
+- `Paused -> Active | Closing`
+- `Closing -> Active | Done`
+
+Transition checklist:
+
+| From -> To | Actor | Prerequisites | Trigger | Required TODOs |
+|------------|-------|---------------|---------|----------------|
+| `Active -> Paused` | Agent or human | Work is intentionally deferred | Priority shift or external dependency wait | Update `STATE.md` blockers + next actions |
+| `Paused -> Active` | Agent or human | Blocker removed or work re-prioritized | Resume decision | Refresh `STATE.md` current plan + next actions |
+| `Active -> Closing` | Agent or human | Main plans are terminal (`Done` or `Abandoned`) or closure is in progress | Preparing initiative for archive | Ensure outcome summary is being assembled in `STATE.md` |
+| `Paused -> Closing` | Agent or human | Closure chosen without resuming active execution | Explicit close decision | Same as `Active -> Closing` |
+| `Closing -> Active` | Agent or human | New in-scope work appears | Reopen initiative | Set `STATE.md` status to `Active`; create/reopen plan as needed |
+| `Closing -> Done` | Agent/script/human | Closure checks complete | Archive-ready and finalization step | Ensure `STATE.md` outcome is complete; distill learnings; run archive helper |
+
+Terminal state:
+- `Done` is terminal for initiatives in `active/workstreams`; archive move should follow in the same session.
 
 ### Create
 - Copy `zamm-memory/active/workstreams/_TEMPLATE/` to a new initiative slug:
@@ -685,9 +752,9 @@ Profiles:
    - Mark initiative `Status: Done` when archive-ready (`Closing` remains a staged review state before final archive).
 
 4. **Archive-ready profile** (initiative is archive-ready):
-   - Triggered when STATE.md says `Done` OR all main plans (not subplans) have terminal status (Done/Partial/Abandoned/Superseded).
-   - A main plan being Done implies all its subplans are terminal — only main plans need checking.
-   - **Before archiving (MUST):** review `## Learnings` from each plan and distill them into WEEKLY knowledge cards. Learnings must not be lost to the archive.
+   - Triggered when STATE.md says `Done` OR all main plans (not subplans) have terminal status (`Done` or `Abandoned`).
+   - A main plan being `Done` or `Abandoned` implies all its subplans are terminal — only main plans need checking.
+   - **Before archiving (MUST):** if plan learnings are not yet distilled, review `## Learnings` from relevant plans and distill them into WEEKLY knowledge cards. Learnings must not be lost to the archive.
    - Archive: `bash <zamm-scripts>/archive-done-initiatives.sh --archive`
    - The script uses `git mv` (MUST — never `cp`) and auto-sets STATE.md to Done if needed.
 
@@ -821,7 +888,7 @@ Outcome (fill on close):
 # Subplan: <subslug> (parent: <parent-plan-slug>)
 
 Workstream: <initiative slug>
-Status: Draft | Implementing | Review | Done | Partial | Abandoned | Superseded
+Status: Draft | Implementing | Review | Done | Abandoned
 Wellbeing-before:
 Complexity-forecast:
 Memory-upvotes:
@@ -866,15 +933,19 @@ Scope:
 
 ## Learnings
 
-- (none yet — MUST fill before setting Status: Review)
+- (none yet — MUST fill before setting Status: Review or Abandoned)
 
 ## Loose ends
 
 - (none yet)
+- Successor plan: <path> (required when `Status: Abandoned` due to replacement)
 
 Wellbeing-after:
 Complexity-felt:
 Complexity-delta:
+Done-approved-by:
+Done-approved-at:
+Done-approval-evidence:
 
 ```
 

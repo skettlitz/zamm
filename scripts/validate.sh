@@ -163,7 +163,7 @@ is_plan_like_file() {
   fi
 
   # Heuristic fallback for legacy .md plans without the .plan.md suffix.
-  if grep -qE "^Status: (Draft|Implementing|Review|Done|Partial|Abandoned|Superseded)" "$file"; then
+  if grep -qE "^Status: (Draft|Implementing|Review|Done|Abandoned)" "$file"; then
     markers=$((markers + 1))
   fi
   if grep -qE "^## Done-when|^Done when:" "$file"; then
@@ -204,14 +204,78 @@ normalize_lc() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]'
 }
 
+count_done_when_checkboxes() {
+  local file="$1"
+  awk '
+    BEGIN { in_section=0; checked=0; unchecked=0 }
+    /^## / {
+      if ($0 == "## Done-when" || $0 == "## Done when") {
+        in_section=1
+        next
+      }
+      if (in_section) {
+        in_section=0
+      }
+    }
+    in_section {
+      if ($0 ~ /^[[:space:]]*-[[:space:]]*\[[xX]\]/) {
+        checked++
+      } else if ($0 ~ /^[[:space:]]*-[[:space:]]*\[[[:space:]]\]/) {
+        unchecked++
+      }
+    }
+    END { printf "%d %d\n", checked, unchecked }
+  ' "$file"
+}
+
+count_section_nonplaceholder_lines() {
+  local file="$1"
+  local section="$2"
+  awk -v section="$section" '
+    BEGIN {
+      header="## " section
+      in_section=0
+      count=0
+    }
+    /^## / {
+      if ($0 == header) {
+        in_section=1
+        next
+      }
+      if (in_section) {
+        in_section=0
+      }
+    }
+    in_section {
+      line=$0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      if (line == "") {
+        next
+      }
+      if (line ~ /^-[[:space:]]*\(none yet/) {
+        next
+      }
+      count++
+    }
+    END { print count }
+  ' "$file"
+}
+
 check_plan_wellbeing() {
   local file="$1"
   local status status_word
   local wb_before complexity_forecast wb_after complexity_felt complexity_delta
+  local done_approved_by done_approved_at done_approval_evidence
   local memory_upvotes memory_downvotes
   local complexity_forecast_lc complexity_felt_lc complexity_delta_lc
   local needs_precheck=0
   local needs_postmortem=0
+  local needs_done_approval=0
+  local needs_review_completion=0
+  local needs_learnings=0
+  local done_checked=0 done_unchecked=0
+  local learnings_entries=0
 
   status=$(extract_field_value "$file" "Status")
   status_word=$(printf '%s' "$status" | awk '{print $1}')
@@ -223,9 +287,21 @@ check_plan_wellbeing() {
   wb_after=$(extract_field_value "$file" "Wellbeing-after")
   complexity_felt=$(extract_field_value "$file" "Complexity-felt")
   complexity_delta=$(extract_field_value "$file" "Complexity-delta")
+  done_approved_by=$(extract_field_value "$file" "Done-approved-by")
+  done_approved_at=$(extract_field_value "$file" "Done-approved-at")
+  done_approval_evidence=$(extract_field_value "$file" "Done-approval-evidence")
 
   case "$status_word" in
-    Implementing|Done|Partial|Abandoned|Superseded)
+    Draft|Implementing|Review|Done|Abandoned|"")
+      ;;
+    *)
+      echo "  WARN:  invalid plan status '$status_word' in $file (expected Draft|Implementing|Review|Done|Abandoned)"
+      WARNINGS=$((WARNINGS + 1))
+      ;;
+  esac
+
+  case "$status_word" in
+    Implementing|Review|Done|Abandoned)
       needs_precheck=1
       ;;
   esac
@@ -249,10 +325,31 @@ check_plan_wellbeing() {
   fi
 
   case "$status_word" in
-    Done|Partial|Abandoned)
+    Review|Done|Abandoned)
       needs_postmortem=1
       ;;
   esac
+
+  case "$status_word" in
+    Done)
+      needs_done_approval=1
+      ;;
+  esac
+
+  case "$status_word" in
+    Review|Done)
+      needs_review_completion=1
+      ;;
+  esac
+
+  case "$status_word" in
+    Review|Done|Abandoned)
+      needs_learnings=1
+      ;;
+  esac
+
+  read -r done_checked done_unchecked < <(count_done_when_checkboxes "$file")
+  learnings_entries=$(count_section_nonplaceholder_lines "$file" "Learnings")
 
   if [ -n "$complexity_felt" ]; then
     complexity_felt_lc=$(normalize_lc "$complexity_felt")
@@ -275,17 +372,42 @@ check_plan_wellbeing() {
 
   if [ "$needs_postmortem" -eq 1 ]; then
     if [ -z "$wb_after" ]; then
-      echo "  WARN:  missing Wellbeing-after for completed plan ($status_word) in $file"
+      echo "  WARN:  missing Wellbeing-after for plan status $status_word in $file"
       WARNINGS=$((WARNINGS + 1))
     fi
     if [ -z "$complexity_felt" ]; then
-      echo "  WARN:  missing Complexity-felt for completed plan ($status_word) in $file"
+      echo "  WARN:  missing Complexity-felt for plan status $status_word in $file"
       WARNINGS=$((WARNINGS + 1))
     fi
     if [ -z "$complexity_delta" ]; then
-      echo "  WARN:  missing Complexity-delta for completed plan ($status_word) in $file"
+      echo "  WARN:  missing Complexity-delta for plan status $status_word in $file"
       WARNINGS=$((WARNINGS + 1))
     fi
+  fi
+
+  if [ "$needs_done_approval" -eq 1 ]; then
+    if [ -z "$done_approved_by" ]; then
+      echo "  WARN:  missing Done-approved-by for plan status Done in $file"
+      WARNINGS=$((WARNINGS + 1))
+    fi
+    if [ -z "$done_approved_at" ]; then
+      echo "  WARN:  missing Done-approved-at for plan status Done in $file"
+      WARNINGS=$((WARNINGS + 1))
+    fi
+    if [ -z "$done_approval_evidence" ]; then
+      echo "  WARN:  missing Done-approval-evidence for plan status Done in $file"
+      WARNINGS=$((WARNINGS + 1))
+    fi
+  fi
+
+  if [ "$needs_review_completion" -eq 1 ] && [ "$done_unchecked" -gt 0 ]; then
+    echo "  WARN:  status $status_word requires all existing Done-when items checked in $file (found $done_unchecked unchecked item(s))"
+    WARNINGS=$((WARNINGS + 1))
+  fi
+
+  if [ "$needs_learnings" -eq 1 ] && [ "$learnings_entries" -eq 0 ]; then
+    echo "  WARN:  status $status_word requires non-placeholder Learnings content in $file"
+    WARNINGS=$((WARNINGS + 1))
   fi
 }
 
@@ -386,7 +508,7 @@ if [ -d "$PROJECT_ROOT/zamm-memory" ]; then
   misplaced_sample_count=0
   while IFS= read -r candidate; do
     case "$candidate" in
-      */zamm-memory/active/workstreams/*/plans/*)
+      */zamm-memory/active/workstreams/*/plans/*|*/zamm-memory/archive/workstreams/*/plans/*)
         continue
         ;;
     esac
@@ -446,7 +568,7 @@ fi
 
 # --- Check plan wellbeing + memory signal fields ---
 echo ""
-echo "Plan wellbeing + memory signals:"
+echo "Plan wellbeing + workflow signals:"
 PLAN_DIR="$PROJECT_ROOT/zamm-memory/active/workstreams"
 plan_files_found=0
 if [ -d "$PLAN_DIR" ]; then
@@ -460,7 +582,7 @@ if [ -d "$PLAN_DIR" ]; then
   if [ "$plan_files_found" -eq 0 ]; then
     echo "  OK: no plan files found"
   else
-    echo "  Checked wellbeing and memory signal fields in $plan_files_found plan file(s)"
+    echo "  Checked wellbeing and workflow signal fields in $plan_files_found plan file(s)"
   fi
 else
   echo "  SKIP: active workstreams not found"

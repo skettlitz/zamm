@@ -206,15 +206,19 @@ ${PARENT_LINE:+${PARENT_LINE}
 
 ## Learnings
 
-- (none yet — MUST fill before setting Status: Review)
+- (none yet — MUST fill before setting Status: Review or Abandoned)
 
 ## Loose ends
 
 - (none yet)
+- Successor plan: (required when Status: Abandoned due to replacement)
 
 Wellbeing-after:
 Complexity-felt:
 Complexity-delta:
+Done-approved-by:
+Done-approved-at:
+Done-approval-evidence:
 "
 
 printf '%s\n' "$PLAN_CONTENT" > "$PLAN_PATH"

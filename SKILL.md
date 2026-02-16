@@ -27,8 +27,12 @@ Advanced maintainer workflows:
 ## Script Path Resolution
 
 Resolve once per session. Use whichever path exists (check in order):
-1. `<project-root>/.cursor/skills/zamm/scripts/` (project-level install)
-2. `~/.cursor/skills/zamm/scripts/` (personal install)
+
+1. `<project-root>/.cursor/skills/zamm/scripts/` (Cursor project-level)
+2. `~/.cursor/skills/zamm/scripts/` (Cursor personal)
+3. `<project-root>/.agents/skills/zamm/scripts/` (Codex repo-level)
+4. `~/.agents/skills/zamm/scripts/` (Codex user-level)
+5. `/etc/codex/skills/zamm/scripts/` (Codex admin-level; shared machines)
 
 All script references below use `<zamm-scripts>` as shorthand for the resolved directory.
 

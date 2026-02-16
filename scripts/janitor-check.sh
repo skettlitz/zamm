@@ -188,7 +188,7 @@ while IFS= read -r init_dir; do
   else
     # Auto-detect: all main plans terminal → archive-ready even if STATE.md
     # was not updated. Only checks main plans (not subplans); a main plan
-    # can only be Done if all its subplans are already terminal.
+    # can only be Done or Abandoned if all its subplans are already terminal.
     plans_dir="$init_dir/plans"
     if [ -d "$plans_dir" ]; then
       main_plan_count=0
@@ -197,7 +197,7 @@ while IFS= read -r init_dir; do
         main_plan_count=$((main_plan_count + 1))
         plan_status=$(sed -n 's/^Status:[[:space:]]*//p' "$plan_file" | head -n1 | awk '{print $1}')
         case "$plan_status" in
-          Done|Partial|Abandoned|Superseded) terminal_count=$((terminal_count + 1)) ;;
+          Done|Abandoned) terminal_count=$((terminal_count + 1)) ;;
         esac
       done < <(find "$plans_dir" -maxdepth 1 -name "*.plan.md" ! -name "*.subplan-*.plan.md" 2>/dev/null)
       if [ "$main_plan_count" -gt 0 ] && [ "$main_plan_count" -eq "$terminal_count" ]; then
@@ -262,4 +262,3 @@ fi
 echo ""
 echo "Run one bounded janitor pass now (before primary task or before handoff)."
 exit 2
-
