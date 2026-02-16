@@ -205,7 +205,7 @@ while IFS= read -r init_dir; do
       fi
     fi
   fi
-done < <(find "$WORKSTREAMS_DIR" -mindepth 1 -maxdepth 1 -type d -name "init-*" | sort)
+done < <(find "$WORKSTREAMS_DIR" -mindepth 1 -maxdepth 1 -type d ! -name "_TEMPLATE" | sort)
 
 if [ "$closing_count" -gt 0 ]; then
   NEEDS_JANITOR=1

@@ -124,7 +124,7 @@ while IFS= read -r init_dir; do
     READY_SLUGS+=("$slug")
     READY_REASONS+=("all main plans terminal")
   fi
-done < <(find "$ACTIVE_DIR" -mindepth 1 -maxdepth 1 -type d -name "init-*" | sort)
+done < <(find "$ACTIVE_DIR" -mindepth 1 -maxdepth 1 -type d ! -name "_TEMPLATE" | sort)
 
 echo "ZAMM: initiative janitor"
 echo "Project root: $PROJECT_ROOT"
