@@ -196,6 +196,64 @@ ensure_dir "$TEMPLATE_DIR/working"
 ensure_dir "$TEMPLATE_DIR/diary"
 ensure_dir "$TEMPLATE_DIR/cold"
 
+# --- Plan template (zero-friction plan creation for agents) ---
+PLAN_TEMPLATE='# <Plan title>
+
+Workstream: <initiative-slug>
+Status: Draft
+Wellbeing-before:
+Complexity-forecast:
+Memory-upvotes:
+Memory-downvotes:
+Owner agent:
+Last updated: <YYYY-MM-DD>
+
+Scope:
+* In:
+* Out:
+
+## Done-when
+
+- [ ]
+
+## Approach
+
+
+
+## PR list
+
+- (none yet)
+
+## Evidence
+
+-
+
+## Docs impacted
+
+- (none yet)
+
+## Why / rationale
+
+
+
+## Risks
+
+-
+
+## Learnings
+
+- (none yet — MUST fill before setting Status: Review)
+
+## Loose ends
+
+- (none yet)
+
+Wellbeing-after:
+Complexity-felt:
+Complexity-delta:
+'
+write_if_new "$TEMPLATE_DIR/plans/_PLAN_TEMPLATE.plan.md" "$PLAN_TEMPLATE"
+
 # --- Indexes ---
 WORKSTREAMS_INDEX="# Active Workstreams
 
@@ -240,7 +298,8 @@ echo "  2. Add initial EVERGREEN cards (architecture, key entry points)"
 echo "  3. Create your first initiative:"
 echo "     cp -r zamm-memory/active/workstreams/_TEMPLATE zamm-memory/active/workstreams/init-$(date +%Y-%m)-YOUR-SLUG"
 echo "  4. Create your first plan:"
-echo "     bash \"$SKILL_DIR/scripts/new-plan.sh\" init-$(date +%Y-%m)-YOUR-SLUG YOUR-PLAN-SLUG"
+echo "     cp zamm-memory/active/workstreams/init-$(date +%Y-%m)-YOUR-SLUG/plans/_PLAN_TEMPLATE.plan.md \\"
+echo "        zamm-memory/active/workstreams/init-$(date +%Y-%m)-YOUR-SLUG/plans/$(date +%Y-%m-%d)-YOUR-PLAN-SLUG.plan.md"
 echo "  5. Run janitor preflight:"
 echo "     bash \"$SKILL_DIR/scripts/janitor-check.sh\""
 echo "  6. List archive-ready initiatives:"

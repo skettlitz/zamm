@@ -220,14 +220,14 @@ Before creating or updating a plan file:
 
 The `.plan.md` suffix makes plans instantly identifiable by filename alone, eliminating the need for content-based heuristics in tooling.
 
-Agents SHOULD use the `new-plan.sh` helper script when available (see section 14).
+Each initiative's `plans/` directory contains a `_PLAN_TEMPLATE.plan.md` for zero-friction plan creation: copy, rename to `YYYY-MM-DD-<slug>.plan.md`, and fill in.
 
 **Why:** Deterministic plan placement ensures every instruction surface (Cursor rules, Codex CLI, AGENTS.md) resolves plans to the same location. It prevents orphan plans scattered across the repo.
 
 ### Plan-first rule (MUST)
 Plans MUST be created BEFORE implementation begins, not after. The plan is the organizing tool — it defines scope, stopping conditions, and traceability before any code is written. Creating a plan retroactively to document work already done defeats the purpose.
 
-Workflow: create plan (Status: Draft) → fill scope + Done-when → set Status: Implementing → begin work.
+Workflow: copy `_PLAN_TEMPLATE.plan.md` → rename to `YYYY-MM-DD-<slug>.plan.md` → fill header, scope, Done-when (Status: Draft) → set Status: Implementing → begin work.
 
 ### Plan requirements
 Every plan MUST include:
@@ -561,7 +561,7 @@ Command notation: `<zamm-scripts>` means the resolved ZAMM scripts directory. Re
 1. Read EVERGREEN, MONTHLY, WEEKLY.
 2. Identify the active initiative; read its `STATE.md`.
 3. If there is no matching initiative, create one from `_TEMPLATE` or ask a human.
-4. **Plan-first gate (MUST):** Before starting any implementation, create or locate the plan file for the current task (use `bash <zamm-scripts>/new-plan.sh`). Fill scope, Done-when, and set `Status: Implementing` when you begin work. NEVER implement first and create the plan afterward — the plan is the organizing tool, not a post-hoc record.
+4. **Plan-first gate (MUST):** Before starting any implementation, create or locate the plan file for the current task. Copy `_PLAN_TEMPLATE.plan.md` from the initiative's `plans/` directory, rename to `YYYY-MM-DD-<slug>.plan.md`, fill in the header fields, scope, and Done-when. Set `Status: Implementing` when you begin work. NEVER implement first and create the plan afterward — the plan is the organizing tool, not a post-hoc record.
 
 **Why:** Session start is kept minimal so agents proceed to primary work quickly, but the plan-first gate ensures every implementation is traceable and intentional. All maintenance runs at session end (see below).
 
@@ -781,15 +781,14 @@ Located in the ZAMM skill `scripts/` directory:
 - `scaffold.sh [--project-root <path>]` — create the full `/zamm-memory/` directory tree and Cursor rule.
 - `validate.sh [--project-root <path>]` — check caps, staleness, evidence links, misplaced plans, wellbeing/complexity fields, and structural integrity.
 - `janitor-check.sh [--project-root <path>] [--quiet]` — fast session-boundary preflight for janitor triggers; exit `0` when nothing is due, `2` when maintenance is required.
-- `new-plan.sh <initiative-slug> <plan-slug> [--subplan <parent-slug>] [--project-root <path>]` — create a `.plan.md` file at the deterministic path enforced by the Plan Placement Contract (section 6). Bootstraps the initiative from `_TEMPLATE` if it does not exist. Warns on stderr when a `--subplan` parent cannot be resolved.
 - `archive-done-initiatives.sh [--archive] [--project-root <path>]` — list archive-ready initiatives from `active/workstreams` (STATE.md `Done` or all main plans terminal), and optionally move them to archive via `git mv`. Auto-sets STATE.md to Done when archiving plan-detected initiatives.
 - `wellbeing-report.sh [--project-root <path>]` — summarize plan wellbeing check-ins and complexity forecast vs felt drift.
 - `self-test.sh [--keep-temp]` — quick smoke test that scaffolds a temp project, runs validation/preflight, and checks reporting/plan creation.
 - `package-skill.sh [--ref <git-ref>] [--out-dir <path>] [--prefix <name>]` — produce a distributable archive with `git archive` (clean of `.git` and `__MACOSX`).
 
-Agents SHOULD use `new-plan.sh` instead of manually creating plan files.
+Agents create plans by copying `_PLAN_TEMPLATE.plan.md` from the initiative's `plans/` directory and renaming to `YYYY-MM-DD-<slug>.plan.md`.
 
-**Why:** Deterministic script-based creation eliminates the most common placement mistake across instruction surfaces (Cursor, Codex CLI, AGENTS.md).
+**Why:** Agents prefer direct file operations over shell scripts. The template provides a zero-friction path that agents will actually follow.
 
 ### Memory quality metrics and eval loop
 Track at minimum:

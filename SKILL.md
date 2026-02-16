@@ -16,7 +16,7 @@ For the full design spec: [references/zamm-spec.md](references/zamm-spec.md)
 Core workflows:
 - bootstrap ZAMM in a repository (`scaffold.sh`)
 - run session-bound maintenance checks and janitor passes (`janitor-check.sh`)
-- create plans in the required initiative path (`new-plan.sh`)
+- create plans by copying `_PLAN_TEMPLATE.plan.md`
 - validate memory and plan hygiene (`validate.sh`)
 - summarize wellbeing/drift or archive-ready initiatives (`wellbeing-report.sh`, `archive-done-initiatives.sh`)
 
@@ -55,7 +55,7 @@ Creates: `/zamm-memory/` tree (knowledge tiers, edit logs, proposals, decisions,
 1. Read EVERGREEN.md, MONTHLY.md, WEEKLY.md.
 2. Identify active initiative; read its `STATE.md`.
 3. If no matching initiative, create from `_TEMPLATE` or ask the human.
-4. **Plan-first gate (MUST):** Before starting any implementation, create or locate the plan file for the current task (`bash <zamm-scripts>/new-plan.sh`). Fill scope, Done-when, and set `Status: Implementing` when you begin work. NEVER implement first and create the plan afterward — the plan is the organizing tool, not a post-hoc record.
+4. **Plan-first gate (MUST):** Before starting any implementation, create or locate the plan file for the current task. Copy `_PLAN_TEMPLATE.plan.md` from the initiative's `plans/` directory, rename to `YYYY-MM-DD-<slug>.plan.md`, fill in the header fields, scope, and Done-when. Set `Status: Implementing` when you begin work. NEVER implement first and create the plan afterward — the plan is the organizing tool, not a post-hoc record.
 
 ### Session End (MUST)
 
@@ -181,12 +181,6 @@ Before creating/updating a plan file:
    - Subplan: `YYYY-MM-DD-<parent-plan-slug>.subplan-<subslug>.plan.md`
 5. Never create plan files outside `.../workstreams/*/plans/`.
 6. If the path does not exist, create from `_TEMPLATE` first, then place the plan.
-
-Use the helper script:
-
-```bash
-bash <zamm-scripts>/new-plan.sh <initiative-slug> <plan-slug> [--subplan <parent-slug>] [--project-root <path>]
-```
 
 ## Wellbeing Telemetry (Plan Files)
 
