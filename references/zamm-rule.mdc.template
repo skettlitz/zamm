@@ -31,7 +31,7 @@ All script references below use `<zamm-scripts>` as shorthand for the resolved d
    - Update `Status:` to match reality (`Draft|Implementing|Review|Done|Partial|Abandoned|Superseded`).
      NEVER set `Done` directly — set `Review` and ask the human to confirm. `Done` is only set after human approval.
    - Refresh `PR list`, `Evidence`, and `Docs impacted`.
-   - **Before setting `Review` (MUST):** fill the `## Learnings` section. A plan cannot move to Review with empty learnings.
+   - **Before setting `Review` (MUST):** (1) fill the `## Learnings` section with at least one durable insight (e.g. doc/code drift, bug pattern, or decision); (2) distill those learnings into WEEKLY knowledge cards; (3) then set `Status: Review`. A plan cannot move to Review with empty or trivial learnings, and learnings must be in WEEKLY before the status change so they are never missed.
    - If a plan moved to `Review`, `Partial`, or `Abandoned`, fill:
      - `Wellbeing-after:`
      - `Complexity-felt:`
@@ -40,7 +40,7 @@ All script references below use `<zamm-scripts>` as shorthand for the resolved d
      - `Memory-upvotes:`
      - `Memory-downvotes:`
 2. Update `STATE.md`: current plan + status, next 3 actions, blockers.
-3. **Integrate learnings (MUST before archiving):** If the initiative is archive-ready, review `## Learnings` from each plan and distill them into WEEKLY knowledge cards. Learnings must not be lost to the archive.
+3. **Integrate learnings before archive (safety):** If the initiative is archive-ready and any plan moved to Review before this protocol (so learnings might not yet be in WEEKLY), distill `## Learnings` from those plans into WEEKLY before archiving.
 4. **Archive check (MUST if initiative looks done):** If all main plans are now terminal (Done/Partial/Abandoned/Superseded) or STATE.md was set to Done, immediately run `bash <zamm-scripts>/archive-done-initiatives.sh --archive`. Do not defer this.
 5. Append a handoff block to the initiative diary (What I tried / What changed / Files touched / Next 3 actions / Evidence links).
 6. If new durable learning occurred, write a proposal to `zamm-memory/active/knowledge/_proposals/`.
@@ -49,7 +49,7 @@ All script references below use `<zamm-scripts>` as shorthand for the resolved d
    - exit `0`: no janitor action required
    - exit `1`: note setup/metadata issue and escalate
    - exit `2`: run one bounded maintenance pass now using the suggested profile(s):
-     - **archive-ready** (MUST — never defer): run `bash <zamm-scripts>/archive-done-initiatives.sh --archive`
+     - **archive-ready** (MUST — never defer): run `bash <zamm-scripts>/archive-done-initiatives.sh --archive` (learnings should already be in WEEKLY from when each plan moved to Review; if an initiative was marked Done before that protocol, distill its plan learnings into WEEKLY first)
      - **project-finish**: distill learnings into WEEKLY, edit 1-5 WEEKLY cards, set initiative `Status: Done`
      - **weekly-cleanup**: retire 0-3 WEEKLY cards, edit 1-5 MONTHLY cards
      - **monthly-cleanup**: demote 0-2 MONTHLY→WEEKLY, edit 1-3 EVERGREEN cards
