@@ -159,35 +159,18 @@ write_if_new "$PROJECT_ROOT/zamm-memory/active/knowledge/decisions/INDEX.md" "$D
 # --- Workstream template ---
 TEMPLATE_STATE='# Initiative: <slug>
 
-Goal:
-Scope (in/out):
-Owner agents:
-Start date:
 Status: Active | Paused | Closing | Done
 
-Current plan:
-* <link>
+# Plans
 
-Next 3 actions:
-1)
-2)
-3)
+Drafts:
+- (none)
 
-Blockers / unknowns:
-* ...
+Implementing:
+- (none)
 
-Key links:
-* Docs:
-* Decisions:
-* PRs:
-
-Loose ends / cleanup:
-* ...
-
-Outcome (fill on close):
-* Summary:
-* What changed:
-* What we learned:'
+Review:
+- (none)'
 
 TEMPLATE_DIR="$PROJECT_ROOT/zamm-memory/active/workstreams/_TEMPLATE"
 write_if_new "$TEMPLATE_DIR/STATE.md" "$TEMPLATE_STATE"
@@ -260,7 +243,7 @@ write_if_new "$TEMPLATE_DIR/plans/_PLAN_TEMPLATE.plan.md" "$PLAN_TEMPLATE"
 # --- Indexes ---
 WORKSTREAMS_INDEX="# Active Workstreams
 
-<!-- Format: slug | Status | Goal | STATE.md link -->
+<!-- Format: slug | Status | STATE.md link -->
 "
 
 write_if_new "$PROJECT_ROOT/zamm-memory/active/indexes/WORKSTREAMS.md" "$WORKSTREAMS_INDEX"

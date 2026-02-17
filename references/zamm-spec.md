@@ -217,6 +217,9 @@ Before creating or updating a plan file:
    - Subplan: `YYYY-MM-DD-<parent-plan-slug>.subplan-<subslug>.plan.md`
 5. Never create plan files outside `.../workstreams/*/plans/`.
 6. If the initiative path does not exist, create from `_TEMPLATE` first, then place the plan.
+7. If using offsite planning files/tools (for example Cursor offsite plans), you MUST still keep an in-project ZAMM plan file in this directory:
+   - First offsite todo: create/update the in-project `.plan.md` file (stub is fine) and set the current `Status:`.
+   - Last offsite todo: update the in-project `.plan.md` file with final `Status:` and `## Learnings` before ending the session.
 
 The `.plan.md` suffix makes plans instantly identifiable by filename alone, eliminating the need for content-based heuristics in tooling.
 
@@ -228,6 +231,7 @@ Each initiative's `plans/` directory contains a `_PLAN_TEMPLATE.plan.md` for zer
 Plans MUST be created BEFORE implementation begins, not after. The plan is the organizing tool — it defines scope, stopping conditions, and traceability before any code is written. Creating a plan retroactively to document work already done defeats the purpose.
 
 Workflow: copy `_PLAN_TEMPLATE.plan.md` → rename to `YYYY-MM-DD-<slug>.plan.md` → fill header, scope, Done-when (Status: Draft) → set Status: Implementing → begin work.
+If offsite planning files are used, the in-project `.plan.md` file remains mandatory and is the durable source for session handoff: first offsite todo creates/updates the in-project plan stub; last offsite todo syncs final status + learnings.
 
 ### Plan requirements
 Every plan MUST include:
@@ -239,7 +243,7 @@ Every plan MUST include:
 - Done-when checklist
 - PR list (plural)
 - Evidence links to relevant code/docs/decisions
-- Learnings section (MUST fill before setting Status: Review or Abandoned — include specific insights, or explicitly note when no durable learning emerged and why)
+- Learnings section (MUST fill before `Implementing -> Review` or `Implementing -> Abandoned` — include specific insights, or explicitly note when no durable learning emerged and why)
 - “Docs impacted” (canonical `/docs` paths)
 - Wellbeing fields:
   - `Wellbeing-before:` (free text)
@@ -253,20 +257,26 @@ Every plan MUST include:
   - `Done-approved-at:` (required when `Status: Done`)
   - `Done-approval-evidence:` (required when `Status: Done`)
 
-Session-end bookkeeping for touched plans is MUST:
+Transition-time bookkeeping for touched plans is MUST (primary trigger):
 - reconcile `Done-when` checklist items (check off completed items)
 - update `Status:` to match actual state. NEVER set `Done` directly — set `Review` and ask the human to confirm.
 - refresh `PR list`, `Evidence`, and `Docs impacted`
 - for `Review` transitions, all existing `Done-when` items MUST be checked; if an item became obsolete, remove it before moving to `Review`
-- **before setting `Review` or `Abandoned`**: fill the `## Learnings` section (MUST — include specific insights, or explicitly note when no durable learning emerged and why). A plan cannot move to these states with empty learnings.
-- when status becomes `Review|Abandoned`, update WEEKLY from those learnings (`No WEEKLY change needed:` is valid only with explicit rationale)
-- when status becomes `Review|Abandoned`, fill `Wellbeing-after`, `Complexity-felt`, and `Complexity-delta`
+- **before `Implementing -> Review` or `Implementing -> Abandoned`**: fill the `## Learnings` section (MUST — include specific insights, or explicitly note when no durable learning emerged and why). A plan cannot move to these states with empty learnings.
+- for `Implementing -> Review|Abandoned`, update WEEKLY.md from those learnings (required)
+- for `Implementing -> Review|Abandoned`, fill `Wellbeing-after`, `Complexity-felt`, and `Complexity-delta`
 - when status becomes `Done`, fill `Done-approved-by`, `Done-approved-at`, and `Done-approval-evidence`
 - update `Memory-upvotes` / `Memory-downvotes` when memory cards clearly helped or misled execution
+- if offsite planning files/tools were used, ensure the in-project `.plan.md` file is synchronized (minimum: current `Status:` and `## Learnings`)
 
 **Why:** Plans are the “intent ledger” for autonomous agents. They need explicit stopping conditions and traceability. The wellbeing and complexity fields provide a longitudinal feedback loop for agent wellbeing and planning quality, and memory votes provide feedback on knowledge-card quality.
 
 ### Plan status transition contract (MUST)
+Primary trigger model:
+- apply transition checklist requirements immediately when a transition is attempted or requested
+- trigger events include status changes in plan files, offsite planning boundary todos, and human review decisions
+- session-end bookkeeping is a backstop that reconciles any missed transition-time updates
+
 Allowed transitions (and only these):
 - `Draft -> Implementing | Abandoned`
 - `Implementing -> Review | Abandoned`
@@ -277,9 +287,9 @@ Transition checklist:
 | From -> To | Actor | Prerequisites | Trigger | Required TODOs |
 |------------|-------|---------------|---------|----------------|
 | `Draft -> Implementing` | Agent | Plan exists; scope + Done-when are filled | Work is ready to start | Set `Status: Implementing`; fill `Wellbeing-before` + `Complexity-forecast` |
-| `Draft -> Abandoned` | Agent or human | Decision made not to start implementation | Scope canceled or superseded before coding | Check off any completed `Done-when` items; record rationale in `## Why / rationale`; update `## Loose ends`; fill `## Learnings`; update WEEKLY from those learnings (`No WEEKLY change needed:` allowed only with explicit rationale); refresh `PR list`, `Evidence`, and `Docs impacted`; fill `Wellbeing-after`, `Complexity-felt`, `Complexity-delta` |
-| `Implementing -> Review` | Agent | All existing `Done-when` items are checked (obsolete items removed first); evidence/docs updated | Agent believes work is complete | Fill `## Learnings`; update WEEKLY from those learnings (`No WEEKLY change needed:` allowed only with explicit rationale); fill `Wellbeing-after`, `Complexity-felt`, `Complexity-delta`; request human approval |
-| `Implementing -> Abandoned` | Agent or human | Decision made to stop unfinished work | Direction change, blocked path, or de-prioritization | Check off any completed `Done-when` items; record rationale + loose ends; fill `## Learnings`; update WEEKLY from those learnings (`No WEEKLY change needed:` allowed only with explicit rationale); refresh `PR list`, `Evidence`, and `Docs impacted`; if replaced by another plan, add `Successor plan: <path>`; fill `Wellbeing-after`, `Complexity-felt`, `Complexity-delta` |
+| `Draft -> Abandoned` | Agent or human | Decision made not to start implementation | Scope canceled or superseded before coding | If replaced by another plan, add `Successor plan: <path>` under `## Loose ends` |
+| `Implementing -> Review` | Agent | All existing `Done-when` items are checked (obsolete items removed first); evidence/docs updated | Agent believes work is complete | Fill `## Learnings`; update WEEKLY.md from those learnings (required); fill `Wellbeing-after`, `Complexity-felt`, `Complexity-delta`; request human approval |
+| `Implementing -> Abandoned` | Agent or human | Decision made to stop unfinished work | Direction change, blocked path, or de-prioritization | Check off any completed `Done-when` items; record rationale + loose ends; fill `## Learnings`; update WEEKLY.md from those learnings (required); refresh `PR list`, `Evidence`, and `Docs impacted`; if replaced by another plan, add `Successor plan: <path>`; fill `Wellbeing-after`, `Complexity-felt`, `Complexity-delta` |
 | `Review -> Implementing` | Agent | Human requested changes | Approval withheld pending revisions | Capture feedback intent in plan updates; reopen tasks in Done-when |
 | `Review -> Done` | Human | Plan is in `Review`; approval is explicit | Human confirms completion | Set `Status: Done`; fill `Done-approved-by`, `Done-approved-at`, `Done-approval-evidence` |
 
@@ -387,8 +397,8 @@ M18 (Scope: auth/oidc)
 - Demotion moves one tier down:
   - EVERGREEN → MONTHLY
   - MONTHLY → WEEKLY
-- Never directly remove from EVERGREEN or MONTHLY.
-- Permanent removal (`RETIRE`) is allowed only from WEEKLY.
+- Never directly remove from EVERGREEN.md or MONTHLY.md.
+- Permanent removal (`RETIRE`) is allowed only from WEEKLY.md.
 
 ### Purpose-driven elevation (blessing)
 Every promotion, demotion, or retirement is a purposeful act of curation—a "blessing" that shapes what the next agent's mind will contain. When moving a card, the librarian SHOULD consider:
@@ -558,55 +568,48 @@ When superseding:
 Command notation: `<zamm-scripts>` means the resolved ZAMM scripts directory. Resolution order: `<project-root>/.cursor/skills/zamm/scripts/`, `~/.cursor/skills/zamm/scripts/`, `<project-root>/.agents/skills/zamm/scripts/`, `~/.agents/skills/zamm/scripts/`, `/etc/codex/skills/zamm/scripts/`. Use the first path that exists.
 
 ### Session start (MUST)
-1. Read EVERGREEN, MONTHLY, WEEKLY.
+1. Read EVERGREEN.md, MONTHLY.md, WEEKLY.md.
 2. Identify the active initiative; read its `STATE.md`.
 3. If there is no matching initiative, create one from `_TEMPLATE` or ask a human.
 4. **Plan-first gate (MUST):** Before starting any implementation, create or locate the plan file for the current task. Copy `_PLAN_TEMPLATE.plan.md` from the initiative's `plans/` directory, rename to `YYYY-MM-DD-<slug>.plan.md`, fill in the header fields, scope, and Done-when. Set `Status: Implementing` when you begin work. NEVER implement first and create the plan afterward — the plan is the organizing tool, not a post-hoc record.
 
-**Why:** Session start is kept minimal so agents proceed to primary work quickly, but the plan-first gate ensures every implementation is traceable and intentional. All maintenance runs at session end (see below).
+**Why:** Session start is kept minimal so agents proceed to primary work quickly, but the plan-first gate ensures every implementation is traceable and intentional. Plan bookkeeping runs at transition time; session-end acts as a backstop.
 
 ### Session end (MUST)
-1. Plan bookkeeping first (for current plan files, if any):
-   - for each touched plan, choose exactly one allowed transition and set `Status:` accordingly for this bookkeeping pass:
-     - `Draft -> Implementing | Abandoned`
-     - `Implementing -> Review | Abandoned`
-     - `Review -> Implementing | Done`
-   - then apply destination requirements:
-     - `Review`:
-       - ensure all existing `Done-when` todos are checked; if an item became obsolete, remove it before moving to `Review`
-       - fill `## Learnings` (required; if no durable learning emerged, state that explicitly with a reason)
-       - update WEEKLY from those learnings (required; `No WEEKLY change needed:` is valid only with explicit rationale)
-       - refresh `PR list`, `Evidence`, and `Docs impacted`
-       - fill `Wellbeing-after`, `Complexity-felt`, and `Complexity-delta`
-     - `Abandoned`:
-       - check off completed `Done-when` todos
-       - record rationale and cleanup notes
-       - fill `## Learnings` (required; if no durable learning emerged, state that explicitly with a reason)
-       - update WEEKLY from those learnings (required; `No WEEKLY change needed:` is valid only with explicit rationale)
-       - refresh `PR list`, `Evidence`, and `Docs impacted`
-       - add `Successor plan: <path>` under `## Loose ends` if replaced by another plan
-       - fill `Wellbeing-after`, `Complexity-felt`, and `Complexity-delta`
-     - `Done`:
-       - only after explicit human approval while plan is in `Review`
-       - fill `Done-approved-by`, `Done-approved-at`, and `Done-approval-evidence`
-     - `Implementing` (re-open from `Review`):
-       - capture requested changes and re-open relevant `Done-when` items
-   - if specific memory cards materially helped or misled execution, fill `Memory-upvotes` / `Memory-downvotes`
-2. Update initiative `STATE.md`:
-   - current plan + status
-   - next 3 actions
-   - blockers
-3. **Integrate learnings (archive safety backstop):** If the initiative is archive-ready and any relevant plan missed the transition checklist above, distill `## Learnings` from those plans into WEEKLY before archiving.
-4. **Archive check (MUST if initiative looks done):** If all main plans are now terminal (`Done` or `Abandoned`) or `STATE.md` was set to `Done`, immediately run `bash <zamm-scripts>/archive-done-initiatives.sh --archive`. Do not defer this -- archiving is the natural conclusion of a completed initiative and must happen in the same session.
-5. Append a “handoff block” to the diary log for the session.
-6. If new durable learning occurred, write a proposal to `_proposals/`.
-7. Run janitor preflight and act on results:
-   - preferred call: `bash <zamm-scripts>/janitor-check.sh --quiet`
-   - exit `0`: no janitor action required
-   - exit `1`: setup or metadata issue; note and escalate
-   - exit `2`: run one bounded maintenance pass now using the suggested cleanup profile(s) from section 14, prioritized as `archive-ready` > `project-finish` > `weekly-cleanup` > `monthly-cleanup`.
+1. Execute plan transition bookkeeping for touched plans (if applicable), per section 6.
+2. Update initiative `STATE.md`, per the `STATE.md` update contract below.
+3. Append a handoff block to the initiative diary, per the diary handoff contract below.
+4. Run janitor preflight and act on results, per the janitor preflight contract below.
 
-**Why:** We can’t always detect compaction, but we can reliably capture progress at boundaries. Archive-ready is never deferred because leaving a Done initiative in active/ creates a persistent false signal for every subsequent session.
+#### STATE.md update contract (MUST)
+- keep `Status:` accurate (`Active | Paused | Closing | Done`)
+- keep `# Plans` as a links-only index with these buckets:
+  - `Drafts:`
+  - `Implementing:`
+  - `Review:`
+- when plan status changes, move plan links to the matching bucket in the same session
+- use `- (none)` for empty buckets
+- do not duplicate scope/progress details in `STATE.md`; those belong in plan files
+
+#### Diary handoff contract (MUST)
+- append a handoff block to the initiative diary with:
+  - what I tried
+  - what changed
+  - files touched
+  - next 3 actions
+  - evidence links
+- if new durable learning occurred, write a proposal to `_proposals/`
+
+#### Janitor preflight contract (MUST)
+- preferred call: `bash <zamm-scripts>/janitor-check.sh --quiet`
+- exit `0`: no janitor action required
+- exit `1`: setup or metadata issue; note and escalate
+- exit `2`: run one bounded maintenance pass now using the suggested cleanup profile(s) from section 14, prioritized as `archive-ready` > `project-finish` > `weekly-cleanup` > `monthly-cleanup`
+- for **archive-ready** (MUST — never defer):
+  - if plan learnings are not yet distilled, distill relevant `## Learnings` into WEEKLY.md first
+  - then run `bash <zamm-scripts>/archive-done-initiatives.sh --archive`
+
+**Why:** Transition-time bookkeeping keeps plan state current during execution. Session-end should stay a short executable checklist, with detailed contracts in dedicated sections.
 
 ### Compaction / context-reset handling (MUST when detected or suspected)
 1. Before manual context clear or restart, checkpoint:
@@ -614,7 +617,7 @@ Command notation: `<zamm-scripts>` means the resolved ZAMM scripts directory. Re
    - append a diary handoff block
    - park pending memory ideas in a proposal draft
 2. After restart, rehydrate in fixed order:
-   - EVERGREEN → MONTHLY → WEEKLY → initiative `STATE.md` → current plan
+   - EVERGREEN.md → MONTHLY.md → WEEKLY.md → initiative `STATE.md` → current plan
 3. Record `Rehydrated from:` links in the diary entry for traceability.
 4. If uncertainty remains, run a short verification loop (open plan, inspect touched files, rerun key command) before new edits.
 
@@ -643,12 +646,12 @@ Transition checklist:
 
 | From -> To | Actor | Prerequisites | Trigger | Required TODOs |
 |------------|-------|---------------|---------|----------------|
-| `Active -> Paused` | Agent or human | Work is intentionally deferred | Priority shift or external dependency wait | Update `STATE.md` blockers + next actions |
-| `Paused -> Active` | Agent or human | Blocker removed or work re-prioritized | Resume decision | Refresh `STATE.md` current plan + next actions |
-| `Active -> Closing` | Agent or human | Main plans are terminal (`Done` or `Abandoned`) or closure is in progress | Preparing initiative for archive | Ensure outcome summary is being assembled in `STATE.md` |
+| `Active -> Paused` | Agent or human | Work is intentionally deferred | Priority shift or external dependency wait | Set `STATE.md` `Status: Paused`; keep plan-link buckets current |
+| `Paused -> Active` | Agent or human | Blocker removed or work re-prioritized | Resume decision | Set `STATE.md` `Status: Active`; keep plan-link buckets current |
+| `Active -> Closing` | Agent or human | Main plans are terminal (`Done` or `Abandoned`) or closure is in progress | Preparing initiative for archive | Set `STATE.md` `Status: Closing`; keep plan-link buckets current |
 | `Paused -> Closing` | Agent or human | Closure chosen without resuming active execution | Explicit close decision | Same as `Active -> Closing` |
-| `Closing -> Active` | Agent or human | New in-scope work appears | Reopen initiative | Set `STATE.md` status to `Active`; create/reopen plan as needed |
-| `Closing -> Done` | Agent/script/human | Closure checks complete | Archive-ready and finalization step | Ensure `STATE.md` outcome is complete; distill learnings; run archive helper |
+| `Closing -> Active` | Agent or human | New in-scope work appears | Reopen initiative | Set `STATE.md` `Status: Active`; create/reopen plan as needed |
+| `Closing -> Done` | Agent/script/human | Closure checks complete | Archive-ready and finalization step | Set `STATE.md` `Status: Done`; distill learnings; run archive helper |
 
 Terminal state:
 - `Done` is terminal for initiatives in `active/workstreams`; archive move should follow in the same session.
@@ -656,7 +659,7 @@ Terminal state:
 ### Create
 - Copy `zamm-memory/active/workstreams/_TEMPLATE/` to a new initiative slug:
   - `init-YYYY-MM-short-slug`
-- Fill `STATE.md` with goal, scope, current plan link.
+- Fill `STATE.md` with `Status:` and initial `# Plans` link buckets.
 
 ### Run
 - Plans evolve in place.
@@ -668,8 +671,8 @@ Terminal state:
 ### Close (MUST)
 Before archiving:
 1. Set `STATE.md` status to `Done`.
-2. Ensure `STATE.md` has a final “Outcome” summary and links to key PRs/docs/decisions.
-3. Distill project learnings into WEEKLY first (project-finish janitor profile).
+2. Ensure `STATE.md` `# Plans` link buckets are synchronized.
+3. Distill project learnings into WEEKLY.md first (project-finish janitor profile).
 4. Leave promotion to MONTHLY/EVERGREEN for later janitor passes after WEEKLY survivability.
 5. Ensure `/docs` is updated for any “how it works” changes.
 
@@ -736,25 +739,25 @@ Run invariants:
 Profiles:
 
 1. **Monthly cleanup profile** (MONTHLY stale trigger):
-   - Demote `0..2` cards from MONTHLY -> WEEKLY.
-   - Edit `1..3` cards in EVERGREEN (minimum one required).
-   - Add/replace `0..1` card in EVERGREEN only if truly necessary.
+   - Demote `0..2` cards from MONTHLY.md -> WEEKLY.md.
+   - Edit `1..3` cards in EVERGREEN.md (minimum one required).
+   - Add/replace `0..1` card in EVERGREEN.md only if truly necessary.
 
 2. **Weekly cleanup profile** (WEEKLY stale trigger):
-   - Retire `0..3` cards from WEEKLY.
-   - Edit `1..5` cards in MONTHLY (minimum one required).
-   - Add/replace `0..2` cards in MONTHLY only if truly necessary.
+   - Retire `0..3` cards from WEEKLY.md.
+   - Edit `1..5` cards in MONTHLY.md (minimum one required).
+   - Add/replace `0..2` cards in MONTHLY.md only if truly necessary.
 
 3. **Project-finish profile** (initiative status transitions toward closure):
-   - Distill learnings into WEEKLY first.
-   - Edit `1..5` cards in WEEKLY (minimum one required).
-   - Add/replace `0..2` cards in WEEKLY only if truly necessary.
+   - Distill learnings into WEEKLY.md first.
+   - Edit `1..5` cards in WEEKLY.md (minimum one required).
+   - Add/replace `0..2` cards in WEEKLY.md only if truly necessary.
    - Mark initiative `Status: Done` when archive-ready (`Closing` remains a staged review state before final archive).
 
 4. **Archive-ready profile** (initiative is archive-ready):
    - Triggered when STATE.md says `Done` OR all main plans (not subplans) have terminal status (`Done` or `Abandoned`).
    - A main plan being `Done` or `Abandoned` implies all its subplans are terminal — only main plans need checking.
-   - **Before archiving (MUST):** if plan learnings are not yet distilled, review `## Learnings` from relevant plans and distill them into WEEKLY knowledge cards. Learnings must not be lost to the archive.
+   - **Before archiving (MUST):** if plan learnings are not yet distilled, review `## Learnings` from relevant plans and distill them into WEEKLY.md knowledge cards. Learnings must not be lost to the archive.
    - Archive: `bash <zamm-scripts>/archive-done-initiatives.sh --archive`
    - The script uses `git mv` (MUST — never `cp`) and auto-sets STATE.md to Done if needed.
 
@@ -822,7 +825,7 @@ Cadence:
 
 3. **Archive becomes a black hole**
    - ensure stubs for decisions
-   - ensure initiative `STATE.md` includes “Where to look” links before closure
+   - ensure initiative `STATE.md` plan-link buckets are synchronized before closure
 
 4. **Bots hallucinate memory**
    - require evidence links (PR/commit/docs/plan)
@@ -842,40 +845,18 @@ Cadence:
 
 # Initiative: <slug>
 
-Goal:
-Scope (in/out):
-Owner agents:
-Start date:
 Status: Active | Paused | Closing | Done
 
-Current plan:
+# Plans
 
-* <link>
+Drafts:
+- (none)
 
-Next 3 actions:
-1)
-2)
-3)
+Implementing:
+- (none)
 
-Blockers / unknowns:
-
-* ...
-
-Key links:
-
-* Docs:
-* Decisions:
-* PRs:
-
-Loose ends / cleanup:
-
-* ...
-
-Outcome (fill on close):
-
-* Summary:
-* What changed:
-* What we learned:
+Review:
+- (none)
 
 ```
 
@@ -1033,10 +1014,10 @@ Evidence:
 - JANITOR_WEEKLY_THRESHOLD: 3 days (WEEKLY.md staleness trigger)
 - JANITOR_MONTHLY_THRESHOLD: 14 days (MONTHLY.md staleness trigger)
 - JANITOR_MAX_PROPOSALS: 5 per maintenance pass
-- JANITOR_MONTHLY_DEMOTE_MAX: 2 (MONTHLY -> WEEKLY)
+- JANITOR_MONTHLY_DEMOTE_MAX: 2 (MONTHLY.md -> WEEKLY.md)
 - JANITOR_EVERGREEN_EDIT_MIN/MAX: 1/3
 - JANITOR_EVERGREEN_ADD_REPLACE_MAX: 1
-- JANITOR_WEEKLY_RETIRE_MAX: 3 (permanent removal only from WEEKLY)
+- JANITOR_WEEKLY_RETIRE_MAX: 3 (permanent removal only from WEEKLY.md)
 - JANITOR_MONTHLY_EDIT_MIN/MAX: 1/5
 - JANITOR_MONTHLY_ADD_REPLACE_MAX: 2
 - JANITOR_PROJECT_FINISH_WEEKLY_EDIT_MIN/MAX: 1/5
