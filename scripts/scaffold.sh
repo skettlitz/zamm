@@ -2,17 +2,21 @@
 set -euo pipefail
 
 # ZAMM scaffold — creates the /zamm-memory/ directory tree and Cursor rule.
-# Run from the target project root. Idempotent: never overwrites existing files.
-# Usage: bash scaffold.sh [--project-root <path>]
+# Run from the target project root. Idempotent by default.
+# Usage: bash scaffold.sh [--project-root <path>] [--overwrite-templates]
 
 usage() {
-  echo "Usage: scaffold.sh [--project-root <path>]"
+  echo "Usage: scaffold.sh [--project-root <path>] [--overwrite-templates]"
   echo ""
   echo "  --project-root   Optional explicit repository root (default: current directory)"
+  echo "  --overwrite-templates"
+  echo "                   Overwrite scaffold-managed template files if they already exist"
+  echo "                   (_TEMPLATE/STATE.md, _PLAN_TEMPLATE.plan.md, AGENTS.md, .cursor/rules/zamm.mdc)"
   exit 1
 }
 
 PROJECT_ROOT_OVERRIDE=""
+OVERWRITE_TEMPLATES=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --project-root)
@@ -22,6 +26,10 @@ while [ $# -gt 0 ]; do
       fi
       PROJECT_ROOT_OVERRIDE="$2"
       shift 2
+      ;;
+    --overwrite-templates)
+      OVERWRITE_TEMPLATES=1
+      shift
       ;;
     -h|--help)
       usage
@@ -58,6 +66,19 @@ write_if_new() {
     mkdir -p "$(dirname "$path")"
     printf '%s\n' "$content" > "$path"
     echo "  created: $path"
+  fi
+}
+
+write_template_file() {
+  local path="$1"
+  local content="$2"
+
+  if [ "$OVERWRITE_TEMPLATES" -eq 1 ] && [ -f "$path" ]; then
+    mkdir -p "$(dirname "$path")"
+    printf '%s\n' "$content" > "$path"
+    echo "  overwritten: $path"
+  else
+    write_if_new "$path" "$content"
   fi
 }
 
@@ -173,7 +194,7 @@ Review:
 - (none)'
 
 TEMPLATE_DIR="$PROJECT_ROOT/zamm-memory/active/workstreams/_TEMPLATE"
-write_if_new "$TEMPLATE_DIR/STATE.md" "$TEMPLATE_STATE"
+write_template_file "$TEMPLATE_DIR/STATE.md" "$TEMPLATE_STATE"
 ensure_dir "$TEMPLATE_DIR/plans"
 ensure_dir "$TEMPLATE_DIR/working"
 ensure_dir "$TEMPLATE_DIR/diary"
@@ -238,7 +259,7 @@ Done-approved-by:
 Done-approved-at:
 Done-approval-evidence:
 '
-write_if_new "$TEMPLATE_DIR/plans/_PLAN_TEMPLATE.plan.md" "$PLAN_TEMPLATE"
+write_template_file "$TEMPLATE_DIR/plans/_PLAN_TEMPLATE.plan.md" "$PLAN_TEMPLATE"
 
 # --- Indexes ---
 WORKSTREAMS_INDEX="# Active Workstreams
@@ -262,7 +283,7 @@ write_if_new "$PROJECT_ROOT/.cursorignore" "$CURSOR_IGNORE_CONTENT"
 
 # --- AGENTS.md (Codex / non-Cursor agents) ---
 if [ -f "$SKILL_DIR/references/AGENTS.md.template" ]; then
-  write_if_new "$PROJECT_ROOT/AGENTS.md" \
+  write_template_file "$PROJECT_ROOT/AGENTS.md" \
     "$(cat "$SKILL_DIR/references/AGENTS.md.template")"
 else
   echo "  warning: AGENTS.md template not found at $SKILL_DIR/references/AGENTS.md.template"
@@ -270,7 +291,7 @@ fi
 
 # --- Cursor rule ---
 if [ -f "$SKILL_DIR/references/zamm-rule.mdc.template" ]; then
-  write_if_new "$PROJECT_ROOT/.cursor/rules/zamm.mdc" \
+  write_template_file "$PROJECT_ROOT/.cursor/rules/zamm.mdc" \
     "$(cat "$SKILL_DIR/references/zamm-rule.mdc.template")"
 else
   echo "  warning: rule template not found at $SKILL_DIR/references/zamm-rule.mdc.template"

@@ -781,7 +781,7 @@ If more work remains (e.g., > 5 proposals pending), it will be picked up by the 
 ### Helper scripts
 Located in the ZAMM skill `scripts/` directory:
 
-- `scaffold.sh [--project-root <path>]` — create the full `/zamm-memory/` directory tree and Cursor rule.
+- `scaffold.sh [--project-root <path>] [--overwrite-templates]` — create the full `/zamm-memory/` directory tree and Cursor rule; optionally refresh scaffold-managed template files in-place.
 - `validate.sh [--project-root <path>]` — check caps, staleness, evidence links, misplaced plans, wellbeing/complexity fields, and structural integrity.
 - `janitor-check.sh [--project-root <path>] [--quiet]` — fast session-boundary preflight for janitor triggers; exit `0` when nothing is due, `2` when maintenance is required.
 - `archive-done-initiatives.sh [--archive] [--project-root <path>]` — list archive-ready initiatives from `active/workstreams` (STATE.md `Done` or all main plans terminal), and optionally move them to archive via `git mv`. Auto-sets STATE.md to Done when archiving plan-detected initiatives.
