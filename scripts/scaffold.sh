@@ -11,7 +11,7 @@ usage() {
   echo "  --project-root   Optional explicit repository root (default: current directory)"
   echo "  --overwrite-templates"
   echo "                   Overwrite scaffold-managed template files if they already exist"
-  echo "                   (_TEMPLATE/STATE.md, _PLAN_TEMPLATE.plan.md, AGENTS.md, .cursor/rules/zamm.mdc)"
+  echo "                   (_TEMPLATE/WORKSTREAM_STATE.md, _PLAN_TEMPLATE.plan.md, AGENTS.md, .cursor/rules/zamm.mdc)"
   exit 1
 }
 
@@ -104,7 +104,7 @@ W1 (Scope: zamm/all)
 * Lineage: W1
 * Claim: You just booted. You don't remember yesterday. These cards are
   what your predecessor thought you'd need most right now. Before your
-  session ends, return the favor: update STATE.md, write a handoff block,
+  session ends, return the favor: update WORKSTREAM_STATE.md, write a handoff block,
   and propose any new learning. The molt is coming — write what matters.
 * Evidence: AGENTS.md (Session Start, Session End); .cursor/rules/zamm.mdc (Session Start, Session End)
 * Last verified: ${TODAY}
@@ -194,7 +194,7 @@ Review:
 - (none)'
 
 TEMPLATE_DIR="$PROJECT_ROOT/zamm-memory/active/workstreams/_TEMPLATE"
-write_template_file "$TEMPLATE_DIR/STATE.md" "$TEMPLATE_STATE"
+write_template_file "$TEMPLATE_DIR/WORKSTREAM_STATE.md" "$TEMPLATE_STATE"
 ensure_dir "$TEMPLATE_DIR/plans"
 ensure_dir "$TEMPLATE_DIR/working"
 ensure_dir "$TEMPLATE_DIR/diary"
@@ -264,7 +264,7 @@ write_template_file "$TEMPLATE_DIR/plans/_PLAN_TEMPLATE.plan.md" "$PLAN_TEMPLATE
 # --- Indexes ---
 WORKSTREAMS_INDEX="# Active Workstreams
 
-<!-- Format: slug | Status | STATE.md link -->
+<!-- Format: slug | Status | WORKSTREAM_STATE.md link -->
 "
 
 write_if_new "$PROJECT_ROOT/zamm-memory/active/indexes/WORKSTREAMS.md" "$WORKSTREAMS_INDEX"

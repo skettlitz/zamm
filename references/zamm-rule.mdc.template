@@ -33,9 +33,9 @@ All script references below use `<zamm-scripts>` as shorthand for the resolved d
    - `zamm-memory/active/knowledge/MONTHLY.md`
    - `zamm-memory/active/knowledge/WEEKLY.md`
 
-2. Identify the active initiative. Read its `zamm-memory/active/workstreams/<init>/STATE.md`.
+2. Identify the active initiative. Read its `zamm-memory/active/workstreams/<init>/WORKSTREAM_STATE.md`.
 3. If no matching initiative exists, create one from `_TEMPLATE` or ask the human.
-4. **Plan-first gate (MUST):** Before starting any implementation, create or locate the plan file for the current task. Copy `_PLAN_TEMPLATE.plan.md` from the initiative's `plans/` directory, rename to `YYYY-MM-DD-<slug>.plan.md`, fill in the header fields, scope, and Done-when. Set `Status: Implementing` when you begin work. NEVER implement first and create the plan afterward.
+4. **Plan-first gate (MUST):** Before implementation, ensure the task has an in-repo plan in this initiative's `plans/` folder (create from `_PLAN_TEMPLATE.plan.md` if missing), and set `Status: Implementing` when work starts.
 
 ## Plan Status Transitions (MUST)
 
@@ -121,11 +121,11 @@ Plans should include:
 ## Session End (MUST)
 
 1. Execute plan transition bookkeeping for touched plans (if applicable), per `## Plan Status Transitions (MUST)`.
-2. Update initiative `STATE.md`, per `## STATE.md Update Contract (MUST)`.
+2. Update initiative `WORKSTREAM_STATE.md`, per `## WORKSTREAM_STATE.md Update Contract (MUST)`.
 3. Append a handoff block to the initiative diary, per `## Diary Handoff Contract (MUST)`.
 4. Run janitor preflight and act on results, per `## Janitor Preflight (MUST)`.
 
-## STATE.md Update Contract (MUST)
+## WORKSTREAM_STATE.md Update Contract (MUST)
 
 - Keep `Status:` accurate (`Active | Paused | Closing | Done`).
 - Keep `# Plans` as a links-only index with these buckets:
@@ -134,7 +134,7 @@ Plans should include:
   - `Review:`
 - When plan status changes, move plan links to the matching bucket in the same session.
 - Use `- (none)` for empty buckets.
-- Do not duplicate scope/progress details in `STATE.md`; those belong in plan files.
+- Do not duplicate scope/progress details in `WORKSTREAM_STATE.md`; those belong in plan files.
 
 ## Diary Handoff Contract (MUST)
 
@@ -167,7 +167,7 @@ Plans should include:
 
 1. Explicit current human instruction
 2. Code, tests, contracts (executable truth)
-3. Initiative STATE.md and active plan
+3. Initiative WORKSTREAM_STATE.md and active plan
 4. Knowledge tiers (WEEKLY > MONTHLY > EVERGREEN)
 5. Archive and historical notes
 

@@ -54,13 +54,13 @@ echo "[1/6] scaffold"
 bash "$SCRIPT_DIR/scaffold.sh" --project-root "$TMP_ROOT" >/dev/null
 
 echo "[2/6] scaffold --overwrite-templates refreshes templates"
-STATE_TEMPLATE_FILE="$TMP_ROOT/zamm-memory/active/workstreams/_TEMPLATE/STATE.md"
+STATE_TEMPLATE_FILE="$TMP_ROOT/zamm-memory/active/workstreams/_TEMPLATE/WORKSTREAM_STATE.md"
 AGENTS_FILE="$TMP_ROOT/AGENTS.md"
 printf '%s\n' "BROKEN TEMPLATE CONTENT" > "$STATE_TEMPLATE_FILE"
 printf '%s\n' "BROKEN AGENTS CONTENT" > "$AGENTS_FILE"
 bash "$SCRIPT_DIR/scaffold.sh" --project-root "$TMP_ROOT" --overwrite-templates >/dev/null
 if ! grep -q "^# Initiative: <slug>" "$STATE_TEMPLATE_FILE"; then
-  echo "ERROR: --overwrite-templates did not refresh STATE template"
+  echo "ERROR: --overwrite-templates did not refresh WORKSTREAM_STATE template"
   exit 1
 fi
 if ! grep -q "^# AGENTS.md — ZAMM Agent Protocol" "$AGENTS_FILE"; then

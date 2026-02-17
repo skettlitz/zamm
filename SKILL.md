@@ -53,9 +53,9 @@ Creates: `/zamm-memory/` tree (knowledge tiers, edit logs, proposals, decisions,
 ### Session Start (MUST)
 
 1. Read EVERGREEN.md, MONTHLY.md, WEEKLY.md.
-2. Identify active initiative; read its `STATE.md`.
+2. Identify active initiative; read its `WORKSTREAM_STATE.md`.
 3. If no matching initiative, create from `_TEMPLATE` or ask the human.
-4. **Plan-first gate (MUST):** Before starting any implementation, create or locate the plan file for the current task. Copy `_PLAN_TEMPLATE.plan.md` from the initiative's `plans/` directory, rename to `YYYY-MM-DD-<slug>.plan.md`, fill in the header fields, scope, and Done-when. Set `Status: Implementing` when you begin work. NEVER implement first and create the plan afterward — the plan is the organizing tool, not a post-hoc record.
+4. **Plan-first gate (MUST):** Before implementation, ensure the task has an in-repo plan in this initiative's `plans/` folder (create from `_PLAN_TEMPLATE.plan.md` if missing), and set `Status: Implementing` when work starts.
 
 ## Plan Status Transitions (MUST)
 
@@ -107,11 +107,11 @@ Transition-time requirements:
 ### Session End (MUST)
 
 1. Execute plan transition bookkeeping for touched plans (if applicable), per `## Plan Status Transitions (MUST)`.
-2. Update initiative `STATE.md`, per `### STATE.md Update Contract (MUST)`.
+2. Update initiative `WORKSTREAM_STATE.md`, per `### WORKSTREAM_STATE.md Update Contract (MUST)`.
 3. Append a handoff block to the initiative diary, per `### Diary Handoff Contract (MUST)`.
 4. Run janitor preflight and act on results, per `### Janitor Preflight (MUST)`.
 
-### STATE.md Update Contract (MUST)
+### WORKSTREAM_STATE.md Update Contract (MUST)
 
 - Keep `Status:` accurate (`Active | Paused | Closing | Done`).
 - Keep `# Plans` as a links-only index with these buckets:
@@ -120,7 +120,7 @@ Transition-time requirements:
   - `Review:`
 - When plan status changes, move plan links to the matching bucket in the same session.
 - Use `- (none)` for empty buckets.
-- Do not duplicate scope/progress details in `STATE.md`; those belong in plan files.
+- Do not duplicate scope/progress details in `WORKSTREAM_STATE.md`; those belong in plan files.
 
 ### Diary Handoff Contract (MUST)
 
@@ -151,8 +151,8 @@ Transition-time requirements:
 
 ### Compaction / Context Reset (MUST when detected)
 
-1. Before clear: update `STATE.md`, append diary handoff, park pending proposals.
-2. After restart: rehydrate EVERGREEN.md → MONTHLY.md → WEEKLY.md → STATE.md → current plan.
+1. Before clear: update `WORKSTREAM_STATE.md`, append diary handoff, park pending proposals.
+2. After restart: rehydrate EVERGREEN.md → MONTHLY.md → WEEKLY.md → WORKSTREAM_STATE.md → current plan.
 
 ## Knowledge Tiers
 
@@ -195,7 +195,7 @@ No background process. Check triggers at session start and session end; run a bo
 - WEEKLY.md `Last maintained:` > 3 days
 - MONTHLY.md `Last maintained:` > 14 days
 - Any initiative in `Status: Closing` (project-finish profile)
-- Any initiative that is archive-ready: `Status: Done` in STATE.md, OR all main plans (not subplans) have terminal status (`Done` or `Abandoned`)
+- Any initiative that is archive-ready: `Status: Done` in WORKSTREAM_STATE.md, OR all main plans (not subplans) have terminal status (`Done` or `Abandoned`)
 
 **Run invariants**:
 - Every janitor run MUST make at least 1 improvement edit.
@@ -222,10 +222,10 @@ No background process. Check triggers at session start and session end; run a bo
    - Mark initiative `Status: Done` when archive-ready (`Closing` remains a staged review state before final archive).
 
 4. Archive-ready cleanup (when initiative is archive-ready):
-   - Triggered when STATE.md says `Done` OR all main plans have terminal status.
+   - Triggered when WORKSTREAM_STATE.md says `Done` OR all main plans have terminal status.
    - A main plan being `Done` or `Abandoned` implies all its subplans are terminal — only main plans need checking.
    - Archive immediately: `bash <zamm-scripts>/archive-done-initiatives.sh --archive`
-   - The script uses `git mv` (MUST — never `cp`) and auto-sets STATE.md to Done if needed.
+   - The script uses `git mv` (MUST — never `cp`) and auto-sets WORKSTREAM_STATE.md to Done if needed.
 
 Remaining work is picked up by the next agent that boots.
 
@@ -274,13 +274,13 @@ Each plan should capture a brief emotional and complexity check-in:
 
 ## Initiatives
 
-Each initiative: `/zamm-memory/active/workstreams/init-YYYY-MM-short-slug/` containing STATE.md, plans/, working/, diary/, cold/.
+Each initiative: `/zamm-memory/active/workstreams/init-YYYY-MM-short-slug/` containing WORKSTREAM_STATE.md, plans/, working/, diary/, cold/.
 
-- **Create**: copy `_TEMPLATE`, fill STATE.md.
+- **Create**: copy `_TEMPLATE`, fill WORKSTREAM_STATE.md.
 - **Run**: plans evolve in place; old scratch moves to cold/.
-- **Close**: set `STATE.md` to `Status: Done`, promote learnings to tiers, update /docs, `git mv` to archive.
+- **Close**: set `WORKSTREAM_STATE.md` to `Status: Done`, promote learnings to tiers, update /docs, `git mv` to archive.
 
-For templates (STATE.md, plan header, diary handoff, proposal, decision record): see Appendix A in [references/zamm-spec.md](references/zamm-spec.md).
+For templates (WORKSTREAM_STATE.md, plan header, diary handoff, proposal, decision record): see Appendix A in [references/zamm-spec.md](references/zamm-spec.md).
 
 ## Validation
 

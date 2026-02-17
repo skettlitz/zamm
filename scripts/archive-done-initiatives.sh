@@ -27,6 +27,20 @@ resolve_explicit_root() {
   (cd "$path" && pwd)
 }
 
+resolve_workstream_state_file() {
+  local init_dir="$1"
+  if [ -f "$init_dir/WORKSTREAM_STATE.md" ]; then
+    printf '%s\n' "$init_dir/WORKSTREAM_STATE.md"
+    return 0
+  fi
+  if [ -f "$init_dir/STATE.md" ]; then
+    # Legacy compatibility fallback.
+    printf '%s\n' "$init_dir/STATE.md"
+    return 0
+  fi
+  return 1
+}
+
 ARCHIVE_MODE=0
 PROJECT_ROOT_OVERRIDE=""
 
@@ -110,10 +124,10 @@ declare -a READY_REASONS
 
 while IFS= read -r init_dir; do
   slug=$(basename "$init_dir")
-  state_file="$init_dir/STATE.md"
+  state_file=$(resolve_workstream_state_file "$init_dir" || true)
   status=""
 
-  if [ -f "$state_file" ]; then
+  if [ -n "$state_file" ] && [ -f "$state_file" ]; then
     status=$(sed -n 's/^Status:[[:space:]]*//p' "$state_file" | head -n1 | awk '{print $1}')
   fi
 
@@ -167,15 +181,16 @@ for slug in "${READY_SLUGS[@]}"; do
     continue
   fi
 
-  # If STATE.md doesn't say Done yet, update it before archiving
-  state_file="$PROJECT_ROOT/$src_rel/STATE.md"
-  if [ -f "$state_file" ]; then
+  # If WORKSTREAM_STATE.md doesn't say Done yet, update it before archiving.
+  state_file=$(resolve_workstream_state_file "$PROJECT_ROOT/$src_rel" || true)
+  if [ -n "$state_file" ] && [ -f "$state_file" ]; then
     current_status=$(sed -n 's/^Status:[[:space:]]*//p' "$state_file" | head -n1 | awk '{print $1}')
     if [ "$current_status" != "Done" ]; then
       sed -i.bak "s/^Status:[[:space:]]*.*/Status: Done/" "$state_file"
       rm -f "$state_file.bak"
-      git -C "$PROJECT_ROOT" add "$src_rel/STATE.md"
-      echo "  SET:   $slug STATE.md -> Status: Done (was: $current_status)"
+      rel_state_file="${state_file#"$PROJECT_ROOT/"}"
+      git -C "$PROJECT_ROOT" add "$rel_state_file"
+      echo "  SET:   $slug $(basename "$state_file") -> Status: Done (was: $current_status)"
     fi
   fi
 

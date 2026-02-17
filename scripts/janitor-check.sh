@@ -53,6 +53,20 @@ profile_exists() {
   return 1
 }
 
+resolve_workstream_state_file() {
+  local init_dir="$1"
+  if [ -f "$init_dir/WORKSTREAM_STATE.md" ]; then
+    printf '%s\n' "$init_dir/WORKSTREAM_STATE.md"
+    return 0
+  fi
+  if [ -f "$init_dir/STATE.md" ]; then
+    # Legacy compatibility fallback.
+    printf '%s\n' "$init_dir/STATE.md"
+    return 0
+  fi
+  return 1
+}
+
 PROJECT_ROOT_OVERRIDE=""
 QUIET=0
 
@@ -176,8 +190,8 @@ closing_count=0
 done_count=0
 plans_finished_count=0
 while IFS= read -r init_dir; do
-  state_file="$init_dir/STATE.md"
-  if [ ! -f "$state_file" ]; then
+  state_file=$(resolve_workstream_state_file "$init_dir" || true)
+  if [ -z "$state_file" ]; then
     continue
   fi
   status=$(sed -n 's/^Status:[[:space:]]*//p' "$state_file" | head -n1 | sed 's/[[:space:]]*$//')
@@ -187,8 +201,9 @@ while IFS= read -r init_dir; do
   elif [ "$status_word" = "Done" ]; then
     done_count=$((done_count + 1))
   else
-    # Auto-detect: all main plans terminal → archive-ready even if STATE.md
-    # was not updated. Only checks main plans (not subplans); a main plan
+    # Auto-detect: all main plans terminal → archive-ready even if
+    # WORKSTREAM_STATE.md was not updated. Only checks main plans
+    # (not subplans); a main plan
     # can only be Done or Abandoned if all its subplans are already terminal.
     plans_dir="$init_dir/plans"
     if [ -d "$plans_dir" ]; then

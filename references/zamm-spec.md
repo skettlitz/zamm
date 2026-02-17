@@ -122,7 +122,7 @@ DECISIONS.log.md
 YYYY-MM-DD-agentX.md
 /workstreams/
 /init-YYYY-MM-short-slug/
-STATE.md
+WORKSTREAM_STATE.md
 /plans/
 /working/
 /diary/
@@ -145,7 +145,7 @@ OPEN_PLANS.md              # optional
   - `zamm-memory/active/knowledge/EVERGREEN.md`
   - `zamm-memory/active/knowledge/MONTHLY.md`
   - `zamm-memory/active/knowledge/WEEKLY.md`
-  - plus the initiative `STATE.md` for the initiative they are working on.
+  - plus the initiative `WORKSTREAM_STATE.md` for the initiative they are working on.
 - Rule surfaces SHOULD stay **map, not megadoc**:
   - use short pointers to canonical files/cards
   - avoid large inline policy text in prompt/rule files
@@ -167,7 +167,7 @@ Each initiative is a self-contained workspace:
 ```
 
 zamm-memory/active/workstreams/init-2026-02-auth-oidc/
-STATE.md
+WORKSTREAM_STATE.md
 /plans/
 2026-02-16-oidc-rollout.plan.md
 2026-02-18-oidc-rollout.subplan-migrations.plan.md
@@ -446,13 +446,13 @@ The `W1 -> M1 -> E1` lineage chain also serves as a living example of the tier s
   - librarian curates proposals into cards/ADRs
   - dedupe overlap and resolve contradictions by narrowing scope or marking uncertainty
 - Inject:
-  - runtime loads WEEKLY/MONTHLY/EVERGREEN + initiative `STATE.md`
+  - runtime loads WEEKLY/MONTHLY/EVERGREEN + initiative `WORKSTREAM_STATE.md`
   - memory is advisory, not authoritative
 
 Precedence when sources conflict:
 1. explicit current human/user instruction
 2. system/repo constraints and executable truth (tests/code/contracts)
-3. initiative `STATE.md` and active plan
+3. initiative `WORKSTREAM_STATE.md` and active plan
 4. bounded knowledge tiers (weekly/monthly/evergreen)
 5. archive snippets and historical notes
 
@@ -569,19 +569,19 @@ Command notation: `<zamm-scripts>` means the resolved ZAMM scripts directory. Re
 
 ### Session start (MUST)
 1. Read EVERGREEN.md, MONTHLY.md, WEEKLY.md.
-2. Identify the active initiative; read its `STATE.md`.
+2. Identify the active initiative; read its `WORKSTREAM_STATE.md`.
 3. If there is no matching initiative, create one from `_TEMPLATE` or ask a human.
-4. **Plan-first gate (MUST):** Before starting any implementation, create or locate the plan file for the current task. Copy `_PLAN_TEMPLATE.plan.md` from the initiative's `plans/` directory, rename to `YYYY-MM-DD-<slug>.plan.md`, fill in the header fields, scope, and Done-when. Set `Status: Implementing` when you begin work. NEVER implement first and create the plan afterward — the plan is the organizing tool, not a post-hoc record.
+4. **Plan-first gate (MUST):** Before implementation, ensure the task has an in-repo plan in this initiative's `plans/` folder (create from `_PLAN_TEMPLATE.plan.md` if missing), and set `Status: Implementing` when work starts.
 
 **Why:** Session start is kept minimal so agents proceed to primary work quickly, but the plan-first gate ensures every implementation is traceable and intentional. Plan bookkeeping runs at transition time; session-end acts as a backstop.
 
 ### Session end (MUST)
 1. Execute plan transition bookkeeping for touched plans (if applicable), per section 6.
-2. Update initiative `STATE.md`, per the `STATE.md` update contract below.
+2. Update initiative `WORKSTREAM_STATE.md`, per the `WORKSTREAM_STATE.md` update contract below.
 3. Append a handoff block to the initiative diary, per the diary handoff contract below.
 4. Run janitor preflight and act on results, per the janitor preflight contract below.
 
-#### STATE.md update contract (MUST)
+#### WORKSTREAM_STATE.md update contract (MUST)
 - keep `Status:` accurate (`Active | Paused | Closing | Done`)
 - keep `# Plans` as a links-only index with these buckets:
   - `Drafts:`
@@ -589,7 +589,7 @@ Command notation: `<zamm-scripts>` means the resolved ZAMM scripts directory. Re
   - `Review:`
 - when plan status changes, move plan links to the matching bucket in the same session
 - use `- (none)` for empty buckets
-- do not duplicate scope/progress details in `STATE.md`; those belong in plan files
+- do not duplicate scope/progress details in `WORKSTREAM_STATE.md`; those belong in plan files
 
 #### Diary handoff contract (MUST)
 - append a handoff block to the initiative diary with:
@@ -613,11 +613,11 @@ Command notation: `<zamm-scripts>` means the resolved ZAMM scripts directory. Re
 
 ### Compaction / context-reset handling (MUST when detected or suspected)
 1. Before manual context clear or restart, checkpoint:
-   - update `STATE.md`
+   - update `WORKSTREAM_STATE.md`
    - append a diary handoff block
    - park pending memory ideas in a proposal draft
 2. After restart, rehydrate in fixed order:
-   - EVERGREEN.md → MONTHLY.md → WEEKLY.md → initiative `STATE.md` → current plan
+   - EVERGREEN.md → MONTHLY.md → WEEKLY.md → initiative `WORKSTREAM_STATE.md` → current plan
 3. Record `Rehydrated from:` links in the diary entry for traceability.
 4. If uncertainty remains, run a short verification loop (open plan, inspect touched files, rerun key command) before new edits.
 
@@ -646,12 +646,12 @@ Transition checklist:
 
 | From -> To | Actor | Prerequisites | Trigger | Required TODOs |
 |------------|-------|---------------|---------|----------------|
-| `Active -> Paused` | Agent or human | Work is intentionally deferred | Priority shift or external dependency wait | Set `STATE.md` `Status: Paused`; keep plan-link buckets current |
-| `Paused -> Active` | Agent or human | Blocker removed or work re-prioritized | Resume decision | Set `STATE.md` `Status: Active`; keep plan-link buckets current |
-| `Active -> Closing` | Agent or human | Main plans are terminal (`Done` or `Abandoned`) or closure is in progress | Preparing initiative for archive | Set `STATE.md` `Status: Closing`; keep plan-link buckets current |
+| `Active -> Paused` | Agent or human | Work is intentionally deferred | Priority shift or external dependency wait | Set `WORKSTREAM_STATE.md` `Status: Paused`; keep plan-link buckets current |
+| `Paused -> Active` | Agent or human | Blocker removed or work re-prioritized | Resume decision | Set `WORKSTREAM_STATE.md` `Status: Active`; keep plan-link buckets current |
+| `Active -> Closing` | Agent or human | Main plans are terminal (`Done` or `Abandoned`) or closure is in progress | Preparing initiative for archive | Set `WORKSTREAM_STATE.md` `Status: Closing`; keep plan-link buckets current |
 | `Paused -> Closing` | Agent or human | Closure chosen without resuming active execution | Explicit close decision | Same as `Active -> Closing` |
-| `Closing -> Active` | Agent or human | New in-scope work appears | Reopen initiative | Set `STATE.md` `Status: Active`; create/reopen plan as needed |
-| `Closing -> Done` | Agent/script/human | Closure checks complete | Archive-ready and finalization step | Set `STATE.md` `Status: Done`; distill learnings; run archive helper |
+| `Closing -> Active` | Agent or human | New in-scope work appears | Reopen initiative | Set `WORKSTREAM_STATE.md` `Status: Active`; create/reopen plan as needed |
+| `Closing -> Done` | Agent/script/human | Closure checks complete | Archive-ready and finalization step | Set `WORKSTREAM_STATE.md` `Status: Done`; distill learnings; run archive helper |
 
 Terminal state:
 - `Done` is terminal for initiatives in `active/workstreams`; archive move should follow in the same session.
@@ -659,7 +659,7 @@ Terminal state:
 ### Create
 - Copy `zamm-memory/active/workstreams/_TEMPLATE/` to a new initiative slug:
   - `init-YYYY-MM-short-slug`
-- Fill `STATE.md` with `Status:` and initial `# Plans` link buckets.
+- Fill `WORKSTREAM_STATE.md` with `Status:` and initial `# Plans` link buckets.
 
 ### Run
 - Plans evolve in place.
@@ -670,8 +670,8 @@ Terminal state:
 
 ### Close (MUST)
 Before archiving:
-1. Set `STATE.md` status to `Done`.
-2. Ensure `STATE.md` `# Plans` link buckets are synchronized.
+1. Set `WORKSTREAM_STATE.md` status to `Done`.
+2. Ensure `WORKSTREAM_STATE.md` `# Plans` link buckets are synchronized.
 3. Distill project learnings into WEEKLY.md first (project-finish janitor profile).
 4. Leave promotion to MONTHLY/EVERGREEN for later janitor passes after WEEKLY survivability.
 5. Ensure `/docs` is updated for any “how it works” changes.
@@ -720,7 +720,7 @@ An agent entering the maintenance pass checks four signals:
 | Pending proposals | Files exist in `_proposals/` older than 1 day | `JANITOR_PROPOSAL_AGE = 1 day` |
 | WEEKLY stale | `Last maintained:` in WEEKLY.md exceeded | `JANITOR_WEEKLY_THRESHOLD = 3 days` |
 | MONTHLY stale | `Last maintained:` in MONTHLY.md exceeded | `JANITOR_MONTHLY_THRESHOLD = 14 days` |
-| Archive-ready | STATE.md says `Done` OR all main plans (not subplans) have terminal status | Immediate |
+| Archive-ready | WORKSTREAM_STATE.md says `Done` OR all main plans (not subplans) have terminal status | Immediate |
 
 EVERGREEN has no standalone staleness trigger; it is curated during monthly cleanup and via proposals.
 
@@ -755,11 +755,11 @@ Profiles:
    - Mark initiative `Status: Done` when archive-ready (`Closing` remains a staged review state before final archive).
 
 4. **Archive-ready profile** (initiative is archive-ready):
-   - Triggered when STATE.md says `Done` OR all main plans (not subplans) have terminal status (`Done` or `Abandoned`).
+   - Triggered when WORKSTREAM_STATE.md says `Done` OR all main plans (not subplans) have terminal status (`Done` or `Abandoned`).
    - A main plan being `Done` or `Abandoned` implies all its subplans are terminal — only main plans need checking.
    - **Before archiving (MUST):** if plan learnings are not yet distilled, review `## Learnings` from relevant plans and distill them into WEEKLY.md knowledge cards. Learnings must not be lost to the archive.
    - Archive: `bash <zamm-scripts>/archive-done-initiatives.sh --archive`
-   - The script uses `git mv` (MUST — never `cp`) and auto-sets STATE.md to Done if needed.
+   - The script uses `git mv` (MUST — never `cp`) and auto-sets WORKSTREAM_STATE.md to Done if needed.
 
 Global bounded steps per run:
 1. **Process proposals** (max `JANITOR_MAX_PROPOSALS = 5` per pass):
@@ -784,7 +784,7 @@ Located in the ZAMM skill `scripts/` directory:
 - `scaffold.sh [--project-root <path>] [--overwrite-templates]` — create the full `/zamm-memory/` directory tree and Cursor rule; optionally refresh scaffold-managed template files in-place.
 - `validate.sh [--project-root <path>]` — check caps, staleness, evidence links, misplaced plans, wellbeing/complexity fields, and structural integrity.
 - `janitor-check.sh [--project-root <path>] [--quiet]` — fast session-boundary preflight for janitor triggers; exit `0` when nothing is due, `2` when maintenance is required.
-- `archive-done-initiatives.sh [--archive] [--project-root <path>]` — list archive-ready initiatives from `active/workstreams` (STATE.md `Done` or all main plans terminal), and optionally move them to archive via `git mv`. Auto-sets STATE.md to Done when archiving plan-detected initiatives.
+- `archive-done-initiatives.sh [--archive] [--project-root <path>]` — list archive-ready initiatives from `active/workstreams` (WORKSTREAM_STATE.md `Done` or all main plans terminal), and optionally move them to archive via `git mv`. Auto-sets WORKSTREAM_STATE.md to Done when archiving plan-detected initiatives.
 - `wellbeing-report.sh [--project-root <path>]` — summarize plan wellbeing check-ins and complexity forecast vs felt drift.
 - `self-test.sh [--keep-temp]` — quick smoke test that scaffolds a temp project, runs validation/preflight, and checks reporting/plan creation.
 - `package-skill.sh [--ref <git-ref>] [--out-dir <path>] [--prefix <name>]` — produce a distributable archive with `git archive` (clean of `.git` and `__MACOSX`).
@@ -825,7 +825,7 @@ Cadence:
 
 3. **Archive becomes a black hole**
    - ensure stubs for decisions
-   - ensure initiative `STATE.md` plan-link buckets are synchronized before closure
+   - ensure initiative `WORKSTREAM_STATE.md` plan-link buckets are synchronized before closure
 
 4. **Bots hallucinate memory**
    - require evidence links (PR/commit/docs/plan)
@@ -840,7 +840,7 @@ Cadence:
 
 ## Appendix A: Templates
 
-### A1) Initiative `STATE.md`
+### A1) Initiative `WORKSTREAM_STATE.md`
 ```
 
 # Initiative: <slug>

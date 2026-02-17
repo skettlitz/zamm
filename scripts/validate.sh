@@ -492,7 +492,18 @@ fi
 echo ""
 echo "Workstream template:"
 TEMPLATE="$PROJECT_ROOT/zamm-memory/active/workstreams/_TEMPLATE"
-for item in STATE.md plans working diary cold; do
+
+if [ -e "$TEMPLATE/WORKSTREAM_STATE.md" ]; then
+  echo "  OK: _TEMPLATE/WORKSTREAM_STATE.md"
+elif [ -e "$TEMPLATE/STATE.md" ]; then
+  echo "  WARN:  _TEMPLATE/STATE.md found (legacy filename); prefer WORKSTREAM_STATE.md"
+  WARNINGS=$((WARNINGS + 1))
+else
+  echo "  ERROR: _TEMPLATE/WORKSTREAM_STATE.md missing"
+  ERRORS=$((ERRORS + 1))
+fi
+
+for item in plans working diary cold; do
   if [ -e "$TEMPLATE/$item" ]; then
     echo "  OK: _TEMPLATE/$item"
   else
