@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ZAMM plan archive helper:
 # - List plan directories in active/plans that are terminal
-# - Optionally archive them with git mv
+# - Optionally archive them (prefer git mv, fallback to mv)
 #
 # Usage:
 #   bash zamm-archive.sh [--archive] [--project-root <path>]
@@ -13,7 +13,8 @@ set -euo pipefail
 usage() {
   echo "Usage: zamm-archive.sh [--archive] [--project-root <path>]"
   echo ""
-  echo "  --archive          Move matching plan directories to zamm-memory/archive/plans via git mv"
+  echo "  --archive          Move matching plan directories to zamm-memory/archive/plans"
+  echo "                     (tries git mv first, falls back to mv)"
   echo "  --project-root     Optional explicit repository root (default: current directory)"
   exit 1
 }
@@ -83,13 +84,6 @@ if [ ! -d "$ARCHIVE_DIR" ]; then
   mkdir -p "$ARCHIVE_DIR"
 fi
 
-if [ "$ARCHIVE_MODE" -eq 1 ]; then
-  if ! git -C "$PROJECT_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    echo "ERROR: --archive requires a git repository at project root: $PROJECT_ROOT"
-    exit 1
-  fi
-fi
-
 declare -a READY_SLUGS
 declare -a READY_REASONS
 
@@ -130,7 +124,7 @@ done
 echo ""
 
 if [ "$ARCHIVE_MODE" -eq 0 ]; then
-  echo "Dry run only. Re-run with --archive to move these with git mv."
+  echo "Dry run only. Re-run with --archive to move these (git mv with mv fallback)."
   exit 0
 fi
 
@@ -151,11 +145,21 @@ for slug in "${READY_SLUGS[@]}"; do
     continue
   fi
 
-  # Ensure source is in the index so git mv works (handles ignored/untracked plan dirs).
-  git -C "$PROJECT_ROOT" add -f "$src_rel"
+  moved_via=""
+  if git -C "$PROJECT_ROOT" mv "$src_rel" "$dst_rel" >/dev/null 2>&1; then
+    moved_via="git mv"
+  else
+    echo "  NOTE: git mv failed for $slug; falling back to mv"
+  fi
 
-  if git -C "$PROJECT_ROOT" mv "$src_rel" "$dst_rel"; then
-    echo "  MOVED: $slug ($reason) via git mv"
+  if [ -z "$moved_via" ]; then
+    if mv "$PROJECT_ROOT/$src_rel" "$PROJECT_ROOT/$dst_rel"; then
+      moved_via="mv fallback"
+    fi
+  fi
+
+  if [ -n "$moved_via" ]; then
+    echo "  MOVED: $slug ($reason) via $moved_via"
     moved=$((moved + 1))
   else
     echo "  FAIL:  could not archive $slug"
