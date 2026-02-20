@@ -3,7 +3,7 @@ name: zamm
 description: Bounded memory workflow for agentic development. Use when initializing or operating ZAMM in a repository: scaffolding zamm-memory, creating plan directories and plans, archiving terminal plan directories, and syncing AGENTS/Cursor rule runtime files from canonical scaffold fragments.
 ---
 
-# Z-Agents Memory Mill (ZAMM)
+# Zippy Agentic Memory Mill (ZAMM)
 
 Use this skill to run the ZAMM workflow with minimal context overhead.
 

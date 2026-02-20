@@ -1,8 +1,12 @@
-# Z-Agents Memory Mill (ZAMM)
+# Zippy Agentic Memory Mill (ZAMM)
 
-ZAMM is a bounded memory system for agentic software work. It provides a framework for plan execution and learnings distillation.
+ZAMM is a lightweight operating workflow for agentic software work.
+It combines three things:
+- task execution through plan directories,
+- bounded memory distillation through **WEEKLY -> MONTHLY -> EVERGREEN** tiers,
+- archive hygiene that moves finished plan contexts out of active memory.
 
-Learnings from implementation are distilled into **WEEKLY -> MONTHLY -> EVERGREEN** knowledge tiers with hard limits to keep context compact.
+In short: plan while doing, distill what lasts, archive the rest.
 
 Canonical skill name/folder is `zamm`.
 
