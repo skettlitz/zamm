@@ -142,6 +142,10 @@ Transition-time requirements:
   - Record rationale under `## Loose ends`.
 - `Implementing -> Review`:
   - Ensure all existing `Done-when` todos are checked. If an item became obsolete, remove it before moving to `Review`.
+  - Reconcile stale/conflicting knowledge claims touched by this work before appending learnings:
+    - Prefer editing existing cards in place when a claim is outdated.
+    - Merge or retire duplicates when two cards encode the same rule.
+    - Do not leave contradictory active cards across WEEKLY/MONTHLY/EVERGREEN; if verification is pending, mark `suspected drift` and add a verification note.
   - Fill `## Learnings` (required; if no durable learning emerged, state that explicitly with a reason).
   - Append new WEEKLY cards from those learnings (required), then consolidate tiers if any upper tolerance bound is reached.
   - Fill `Wellbeing-after`, `Complexity-felt`, and `Complexity-delta`.
@@ -149,6 +153,7 @@ Transition-time requirements:
 - `Implementing -> Abandoned`:
   - Check off completed `Done-when` todos.
   - Record rationale and cleanup notes.
+  - Reconcile stale/conflicting knowledge claims touched by partial work before appending learnings, using the same rules as `Implementing -> Review`.
   - Fill `## Learnings` (required; if no durable learning emerged, state that explicitly with a reason).
   - Append new WEEKLY cards from those learnings (required), then consolidate tiers if any upper tolerance bound is reached.
   - Fill `Wellbeing-after`, `Complexity-felt`, and `Complexity-delta`.
@@ -179,7 +184,7 @@ Plans should include:
 
 1. Execute plan transition bookkeeping for touched plans (if applicable), per `## Plan Status Transitions (MUST)`.
 2. Ensure touched plans have current `Last updated:` date.
-3. Ensure durable learnings were appended to WEEKLY and tier caps were reconciled per `## Knowledge Tier Motion (MUST)` (required).
+3. Ensure touched knowledge cards were reconciled for staleness/conflicts and durable learnings were appended to WEEKLY; then reconcile tier caps per `## Knowledge Tier Motion (MUST)` (required).
 4. If the human requests cleanup or plans are terminal, run archive flow per `## Archive Flow (Optional)`.
 
 ## Archive Flow (Optional)
@@ -206,4 +211,5 @@ Plans should include:
 - Knowledge tiers are advisory, not authoritative. Verify before high-impact actions.
 - Never store secrets, tokens, or credentials in memory files.
 - If a memory claim conflicts with code/tests, mark as `suspected drift` and verify.
+- Prefer correction over accretion: update stale cards in place before adding new cards that could duplicate or conflict.
 - During primary task work, avoid unnecessary knowledge churn; keep edits targeted and durable.
