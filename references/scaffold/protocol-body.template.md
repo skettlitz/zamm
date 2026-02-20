@@ -30,6 +30,9 @@ Resolve once per session. Use whichever path exists (check in order):
 
 All script references below use `<zamm-scripts>` as shorthand for the resolved directory.
 All template-path references below use `<zamm-skill>` as shorthand for the parent directory of `<zamm-scripts>`.
+For quick recall in the current session, use this mnemonic alias form:
+- `ZAMM_SCRIPTS_DIR=<zamm-scripts>`
+- `ZAMM_SKILL_DIR=<zamm-skill>`
 
 ## Session Start (MUST — do this before any other work)
 

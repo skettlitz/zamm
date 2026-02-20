@@ -33,6 +33,9 @@ Runtime surfaces `AGENTS.md` and `zamm.mdc` are composed directly by `scaffold.s
 - `<zamm-skill>/references/scaffold/protocol-body.template.md`
 
 No separate render script is required.
+During scaffold composition, runtime files resolve these shorthands to install-aware paths:
+- `<zamm-skill>` -> `<project-root>...`, `~...`, or absolute fallback.
+- `<zamm-scripts>` -> the resolved scripts directory path.
 
 ## Scaffold Output (Fresh Project)
 

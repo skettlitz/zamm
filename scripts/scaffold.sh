@@ -56,6 +56,30 @@ SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SCAFFOLD_DIR="$SKILL_DIR/references/scaffold"
 PLAN_TEMPLATE="$SKILL_DIR/references/templates/plan-template.plan.template.md"
 
+display_runtime_path() {
+  local path="$1"
+  case "$path" in
+    "$PROJECT_ROOT")
+      printf '<project-root>'
+      ;;
+    "$PROJECT_ROOT"/*)
+      printf '<project-root>%s' "${path#"$PROJECT_ROOT"}"
+      ;;
+    "$HOME")
+      printf '~'
+      ;;
+    "$HOME"/*)
+      printf '~%s' "${path#"$HOME"}"
+      ;;
+    *)
+      printf '%s' "$path"
+      ;;
+  esac
+}
+
+RESOLVED_ZAMM_SKILL="$(display_runtime_path "$SKILL_DIR")"
+RESOLVED_ZAMM_SCRIPTS="$(display_runtime_path "$SKILL_DIR/scripts")"
+
 if [ ! -d "$SCAFFOLD_DIR" ]; then
   echo "ERROR: missing scaffold directory: $SCAFFOLD_DIR"
   exit 1
@@ -105,6 +129,13 @@ render_template_file() {
   sed "s/__TODAY__/${TODAY}/g" "$source_file"
 }
 
+render_runtime_surface_content() {
+  local content="$1"
+  content="${content//<zamm-skill>/$RESOLVED_ZAMM_SKILL}"
+  content="${content//<zamm-scripts>/$RESOLVED_ZAMM_SCRIPTS}"
+  printf '%s' "$content"
+}
+
 write_from_template_if_new() {
   local dest_path="$1"
   local source_path="$2"
@@ -139,8 +170,10 @@ RULE_HEADER="$SCAFFOLD_DIR/rule-header.mdc"
 PROTOCOL_BODY="$SCAFFOLD_DIR/protocol-body.template.md"
 
 if [ -f "$AGENTS_HEADER" ] && [ -f "$RULE_HEADER" ] && [ -f "$PROTOCOL_BODY" ]; then
-  AGENTS_CONTENT="$(cat "$AGENTS_HEADER"; printf '\n'; cat "$PROTOCOL_BODY")"
-  RULE_CONTENT="$(cat "$RULE_HEADER"; printf '\n'; cat "$PROTOCOL_BODY")"
+  RAW_AGENTS_CONTENT="$(cat "$AGENTS_HEADER"; printf '\n'; cat "$PROTOCOL_BODY")"
+  RAW_RULE_CONTENT="$(cat "$RULE_HEADER"; printf '\n'; cat "$PROTOCOL_BODY")"
+  AGENTS_CONTENT="$(render_runtime_surface_content "$RAW_AGENTS_CONTENT")"
+  RULE_CONTENT="$(render_runtime_surface_content "$RAW_RULE_CONTENT")"
   write_template_file "$PROJECT_ROOT/AGENTS.md" "$AGENTS_CONTENT"
   write_template_file "$PROJECT_ROOT/.cursor/rules/zamm.mdc" "$RULE_CONTENT"
 else
