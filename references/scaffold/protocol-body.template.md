@@ -1,26 +1,7 @@
-## Template Sync Contract (MUST)
-
-Keep scaffold-consumed canonical files in:
-- `<zamm-skill>/references/scaffold/`
-
-In that directory:
-- `protocol-body.template.md` is the shared protocol source template.
-- `agents-header.template.md` and `rule-header.mdc` are surface-specific header templates.
-- Remaining files are scaffold seed templates copied into project working trees.
-
-Keep agent-authored plan template in:
-- `<zamm-skill>/references/templates/plan-template.plan.template.md`
-
-`zamm-scaffold.sh` concatenates `header + body` to create runtime files:
-- `AGENTS.md`
-- `.cursor/rules/zamm.mdc`
-
-All content from `## Script Path Resolution` through `## Key Constraints` MUST remain text-identical across runtime surfaces.
-Allowed differences are limited to file-format scaffolding before `## Script Path Resolution` (for example, `.mdc` frontmatter and AGENTS-specific intro lines).
-
 ## Script Path Resolution
 
-The `zamm` skill directory is `<zamm-skill>` with scripts in subdirectory scripts/.
+The `zamm` skill directory is `<zamm-skill>` with scripts in `scripts/` subdirectory.
+
 
 ## Session Start (MUST — do this before any other work)
 
@@ -31,10 +12,12 @@ The `zamm` skill directory is `<zamm-skill>` with scripts in subdirectory script
 
 2. Count tier entries (`Wn`, `Mn`, `En`) in those files.
    - If any tier is at or above its upper tolerance bound, run consolidation per `## Knowledge Tier Motion (MUST)` before primary task work.
-3. Identify the active plan directory under `zamm-memory/active/plans/`.
+
+3. Identify the active plan directory under `zamm-memory/active/plans/` - if multiple plans exist, select using your own judgment.
+
 4. If no plan matches the user request, create a new plan directory and `.plan.md` file using:
    - `<zamm-skill>/references/templates/plan-template.plan.template.md`
-5. Soft focus rule: prefer one active implementing plan at a time; if unclear, auto-pick by best match and ask the human only when ambiguity remains.
+
 
 ## Knowledge Tier Motion (MUST)
 
@@ -59,23 +42,14 @@ Consolidation pass order:
 3. EVERGREEN consolidation
 4. Recount all tiers; repeat the pass order until all tiers are within tolerance windows.
 
-Consolidation archive record (MUST):
-- For every consolidation event, write one dated record file under:
-  - `zamm-memory/archive/knowledge/consolidations/`
-- Filename format:
-  - `YYYY-MM-DD-HHMM-tier-consolidation.md`
-- Do not use a single append-only log file; use one file per consolidation event.
-- The record MUST include:
-  1. Trigger (`session-start` or `post-distillation`)
-  2. Tier counts before and after (`W`, `M`, `E`)
-  3. Promotions, demotions, and drops performed
-  4. One-line rationale for each dropped card
-  5. Links/IDs for cards moved between tiers where applicable
 
 WEEKLY consolidation (run when WEEKLY >= 37; reset to 30):
 - Promote exactly 1 high-value WEEKLY card to MONTHLY (append at end of MONTHLY).
 - Unify/edit overlapping WEEKLY cards when it improves clarity.
 - Archive lowest-value/redundant WEEKLY cards until WEEKLY is 30.
+  - Write one dated record file under: `zamm-memory/archive/knowledge/consolidations/`
+  - Filename format: `YYYY-MM-DD-HHMM-consolidation.md`
+  - Every element that gets dropped from WEEKLY is appended to the consolidation file.
 
 MONTHLY consolidation (run when MONTHLY >= 16; reset to 12):
 - Promote exactly 1 high-value MONTHLY card to EVERGREEN (append at end of EVERGREEN).
@@ -85,6 +59,7 @@ MONTHLY consolidation (run when MONTHLY >= 16; reset to 12):
 EVERGREEN consolidation (run when EVERGREEN >= 14; reset to 10):
 - Keep the 10 best, most durable cards in EVERGREEN.
 - Consolidate by demotion only: demote overly similar/lower-signal EVERGREEN cards to MONTHLY (remove from EVERGREEN; append to MONTHLY) until EVERGREEN is 10.
+
 
 ## Plan Directory Model (MUST)
 
@@ -96,6 +71,7 @@ EVERGREEN consolidation (run when EVERGREEN >= 14; reset to 10):
 - Archive moves the full plan directory to `zamm-memory/archive/plans/<plan-dir>/`.
 - `Done` and `Abandoned` are terminal; continue with a new plan directory.
 - Do not maintain separate workstream state/index files. Discover plans by searching `zamm-memory/active/plans/**/*.plan.md` and reading `Status:`.
+
 
 ## Offsite Planning Backfill (MUST)
 
@@ -116,6 +92,7 @@ Required actions (same turn, immediately after planning):
    - `Review` when execution is complete and waiting for human approval/closure.
 5. From that point on, apply all transition bookkeeping only in the ZAMM plan file.
    Offsite plan files are non-authoritative scratch artifacts.
+
 
 ## Plan Status Transitions (MUST)
 
@@ -166,6 +143,7 @@ Transition-time requirements:
     - `bash <zamm-skill>/scripts/zamm-archive.sh --archive`
 - Update `Memory-upvotes` / `Memory-downvotes` when memory cards materially helped or misled execution.
 
+
 ## Wellbeing Telemetry (Plan Files)
 
 Plans should include:
@@ -180,12 +158,15 @@ Plans should include:
 - `Done-approved-at:` required when `Status: Done`
 - `Done-approval-evidence:` required when `Status: Done`
 
+
 ## Session End (MUST)
 
 1. Execute plan transition bookkeeping for touched plans (if applicable), per `## Plan Status Transitions (MUST)`.
 2. Ensure touched plans have current `Last updated:` date.
 3. Ensure touched knowledge cards were reconciled for staleness/conflicts and durable learnings were appended to WEEKLY; then reconcile tier caps per `## Knowledge Tier Motion (MUST)` (required).
 4. If the human requests cleanup or plans are terminal, run archive flow per `## Archive Flow (Optional)`.
+5. Ask the human for approval on plans with `Status: Review`.
+
 
 ## Archive Flow (Optional)
 
@@ -193,23 +174,16 @@ Plans should include:
 - Run `bash <zamm-skill>/scripts/zamm-archive.sh --archive` to move ready plan directories into `zamm-memory/archive/plans/`.
 - Archive flow shall be triggered every time after a plan was marked `Status: Done` after file edits are finished.
 
+
 ## Plan Status Snapshot (Optional)
 
 - Run `bash <zamm-skill>/scripts/zamm-status.sh` to view grouped plan counts and listings by status.
 - Buckets are: `Draft`, `Implementing`, `Review`, `Done`, `Abandoned`, and `Unknown`.
 
-## Precedence (when sources conflict)
-
-1. Explicit current human instruction
-2. Code, tests, contracts (executable truth)
-3. Active plan file and terminal status semantics
-4. Knowledge tiers (WEEKLY > MONTHLY > EVERGREEN)
-5. Archive and historical notes
 
 ## Key Constraints
 
 - Knowledge tiers are advisory, not authoritative. Verify before high-impact actions.
 - Never store secrets, tokens, or credentials in memory files.
-- If a memory claim conflicts with code/tests, mark as `suspected drift` and verify.
 - Prefer correction over accretion: update stale cards in place before adding new cards that could duplicate or conflict.
 - During primary task work, avoid unnecessary knowledge churn; keep edits targeted and durable.
