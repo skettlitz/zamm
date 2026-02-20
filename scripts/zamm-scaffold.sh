@@ -10,8 +10,8 @@ usage() {
   echo ""
   echo "  --project-root   Optional explicit repository root (default: current directory)"
   echo "  --overwrite-templates"
-  echo "                   Overwrite scaffold-managed runtime protocol files if they exist"
-  echo "                   (AGENTS.md, .cursor/rules/zamm.mdc)"
+  echo "                   Overwrite scaffold-managed runtime rule file if it exists"
+  echo "                   (.cursor/rules/zamm.mdc)"
   exit 1
 }
 
@@ -55,6 +55,11 @@ TODAY=$(date +%Y-%m-%d)
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SCAFFOLD_DIR="$SKILL_DIR/references/scaffold"
 PLAN_TEMPLATE="$SKILL_DIR/references/templates/plan-template.plan.template.md"
+ZAMM_AGENTS_BEGIN_MARKER_REGEX="^<!-- SKILL-BLOCK:zamm:BEGIN"
+ZAMM_AGENTS_END_MARKER="<!-- SKILL-BLOCK:zamm:END -->"
+ZAMM_AGENTS_LEGACY_BEGIN_MARKER="<!-- ZAMM-BEGIN -->"
+ZAMM_AGENTS_LEGACY_END_MARKER="<!-- ZAMM-END -->"
+ZAMM_BLOCK_VERSION="local"
 
 display_runtime_path() {
   local path="$1"
@@ -84,6 +89,11 @@ if [ ! -d "$SCAFFOLD_DIR" ]; then
   exit 1
 fi
 
+if version_sha="$(git -C "$SKILL_DIR" rev-parse --short HEAD 2>/dev/null)"; then
+  ZAMM_BLOCK_VERSION="git:${version_sha}"
+fi
+ZAMM_AGENTS_BEGIN_MARKER="<!-- SKILL-BLOCK:zamm:BEGIN version=${ZAMM_BLOCK_VERSION} date=${TODAY} -->"
+
 echo "ZAMM: scaffolding in ${PROJECT_ROOT}"
 
 write_if_new() {
@@ -108,6 +118,71 @@ write_template_file() {
     echo "  overwritten: $path"
   else
     write_if_new "$path" "$content"
+  fi
+}
+
+ensure_file_exists() {
+  local path="$1"
+  mkdir -p "$(dirname "$path")"
+  if [ ! -f "$path" ]; then
+    : > "$path"
+    echo "  created: $path"
+  fi
+}
+
+upsert_managed_block_at_end() {
+  local path="$1"
+  local begin_marker="$2"
+  local begin_marker_regex="$3"
+  local end_marker="$4"
+  local legacy_begin_marker="$5"
+  local legacy_end_marker="$6"
+  local content="$7"
+  local had_existing_block=0
+  local filtered_file
+
+  ensure_file_exists "$path"
+
+  if grep -Eq "$begin_marker_regex" "$path" || grep -Fqx "$legacy_begin_marker" "$path"; then
+    had_existing_block=1
+  fi
+
+  filtered_file="$(mktemp)"
+  awk \
+    -v begin_regex="$begin_marker_regex" \
+    -v end_marker="$end_marker" \
+    -v legacy_begin="$legacy_begin_marker" \
+    -v legacy_end="$legacy_end_marker" '
+    BEGIN { in_block = 0 }
+    {
+      if (in_block == 0 && ($0 ~ begin_regex || $0 == legacy_begin)) {
+        in_block = 1
+        next
+      }
+      if (in_block == 1 && ($0 == end_marker || $0 == legacy_end)) {
+        in_block = 0
+        next
+      }
+      if (in_block == 0) {
+        print
+      }
+    }
+  ' "$path" > "$filtered_file"
+
+  cat "$filtered_file" > "$path"
+  rm -f "$filtered_file"
+
+  if [ -s "$path" ] && [ -n "$(tail -n1 "$path")" ]; then
+    printf '\n' >> "$path"
+  fi
+  printf '%s\n' "$begin_marker" >> "$path"
+  printf '%s\n' "$content" >> "$path"
+  printf '%s\n' "$end_marker" >> "$path"
+
+  if [ "$had_existing_block" -eq 1 ]; then
+    echo "  updated: $path (ZAMM managed block)"
+  else
+    echo "  appended: $path (ZAMM managed block)"
   fi
 }
 
@@ -173,7 +248,14 @@ if [ -f "$AGENTS_HEADER" ] && [ -f "$RULE_HEADER" ] && [ -f "$PROTOCOL_BODY" ]; 
   RAW_RULE_CONTENT="$(cat "$RULE_HEADER"; printf '\n'; cat "$PROTOCOL_BODY")"
   AGENTS_CONTENT="$(render_runtime_surface_content "$RAW_AGENTS_CONTENT")"
   RULE_CONTENT="$(render_runtime_surface_content "$RAW_RULE_CONTENT")"
-  write_template_file "$PROJECT_ROOT/AGENTS.md" "$AGENTS_CONTENT"
+  upsert_managed_block_at_end \
+    "$PROJECT_ROOT/AGENTS.md" \
+    "$ZAMM_AGENTS_BEGIN_MARKER" \
+    "$ZAMM_AGENTS_BEGIN_MARKER_REGEX" \
+    "$ZAMM_AGENTS_END_MARKER" \
+    "$ZAMM_AGENTS_LEGACY_BEGIN_MARKER" \
+    "$ZAMM_AGENTS_LEGACY_END_MARKER" \
+    "$AGENTS_CONTENT"
   write_template_file "$PROJECT_ROOT/.cursor/rules/zamm.mdc" "$RULE_CONTENT"
 else
   [ -f "$AGENTS_HEADER" ] || echo "  warning: missing template fragment: $AGENTS_HEADER"
