@@ -6,12 +6,12 @@ set -euo pipefail
 # - Optionally archive them with git mv
 #
 # Usage:
-#   bash archive-done-initiatives.sh [--archive] [--project-root <path>]
+#   bash zamm-archive.sh [--archive] [--project-root <path>]
 #
 # Default behavior is list-only (safe dry run).
 
 usage() {
-  echo "Usage: archive-done-initiatives.sh [--archive] [--project-root <path>]"
+  echo "Usage: zamm-archive.sh [--archive] [--project-root <path>]"
   echo ""
   echo "  --archive          Move matching plan directories to zamm-memory/archive/plans via git mv"
   echo "  --project-root     Optional explicit repository root (default: current directory)"
@@ -75,7 +75,7 @@ ARCHIVE_DIR="$PROJECT_ROOT/zamm-memory/archive/plans"
 
 if [ ! -d "$ACTIVE_DIR" ]; then
   echo "ERROR: active plans directory not found: $ACTIVE_DIR"
-  echo "       Run scaffold.sh in repo root or pass --project-root <repo-root>."
+  echo "       Run zamm-scaffold.sh in repo root or pass --project-root <repo-root>."
   exit 1
 fi
 

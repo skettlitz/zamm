@@ -104,7 +104,7 @@ fi
 ACTIVE_DIR="$PROJECT_ROOT/zamm-memory/active/plans"
 if [ ! -d "$ACTIVE_DIR" ]; then
   echo "ERROR: active plans directory not found: $ACTIVE_DIR"
-  echo "       Run scaffold.sh in repo root or pass --project-root <repo-root>."
+  echo "       Run zamm-scaffold.sh in repo root or pass --project-root <repo-root>."
   exit 1
 fi
 

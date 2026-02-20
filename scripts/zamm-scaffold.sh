@@ -3,10 +3,10 @@ set -euo pipefail
 
 # ZAMM scaffold — creates the /zamm-memory/ directory tree and runtime protocol files.
 # Run from the target project root. Idempotent by default.
-# Usage: bash scaffold.sh [--project-root <path>] [--overwrite-templates]
+# Usage: bash zamm-scaffold.sh [--project-root <path>] [--overwrite-templates]
 
 usage() {
-  echo "Usage: scaffold.sh [--project-root <path>] [--overwrite-templates]"
+  echo "Usage: zamm-scaffold.sh [--project-root <path>] [--overwrite-templates]"
   echo ""
   echo "  --project-root   Optional explicit repository root (default: current directory)"
   echo "  --overwrite-templates"
@@ -78,7 +78,6 @@ display_runtime_path() {
 }
 
 RESOLVED_ZAMM_SKILL="$(display_runtime_path "$SKILL_DIR")"
-RESOLVED_ZAMM_SCRIPTS="$(display_runtime_path "$SKILL_DIR/scripts")"
 
 if [ ! -d "$SCAFFOLD_DIR" ]; then
   echo "ERROR: missing scaffold directory: $SCAFFOLD_DIR"
@@ -132,7 +131,6 @@ render_template_file() {
 render_runtime_surface_content() {
   local content="$1"
   content="${content//<zamm-skill>/$RESOLVED_ZAMM_SKILL}"
-  content="${content//<zamm-scripts>/$RESOLVED_ZAMM_SCRIPTS}"
   printf '%s' "$content"
 }
 
@@ -198,4 +196,4 @@ fi
 echo "  4. Check current plan status buckets anytime:"
 echo "     bash \"$SKILL_DIR/scripts/zamm-status.sh\""
 echo "  5. Archive finished plan directories when ready:"
-echo "     bash \"$SKILL_DIR/scripts/archive-done-initiatives.sh\""
+echo "     bash \"$SKILL_DIR/scripts/zamm-archive.sh\""

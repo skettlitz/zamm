@@ -14,7 +14,7 @@ Read these files as needed instead of duplicating policy in this file:
 1. `<zamm-skill>/references/scaffold/protocol-body.template.md` (shared protocol source template)
 2. `<zamm-skill>/references/scaffold/agents-header.template.md` (AGENTS header fragment template)
 3. `<zamm-skill>/references/scaffold/rule-header.mdc` (Cursor rule header fragment)
-4. `<zamm-skill>/references/scaffold/` (scaffold seed templates consumed by `scaffold.sh`)
+4. `<zamm-skill>/references/scaffold/` (scaffold seed templates consumed by `zamm-scaffold.sh`)
 5. `<zamm-skill>/references/templates/plan-template.plan.template.md` (agent copy-edit template for new plans)
 
 For all MUST-level protocol details, follow:
@@ -22,16 +22,16 @@ For all MUST-level protocol details, follow:
 
 ## Script Path Resolution
 
-Resolve `<zamm-scripts>` once per session using:
+Resolve `<zamm-skill>` once per session using:
 `<zamm-skill>/references/scaffold/protocol-body.template.md` under `## Script Path Resolution`.
-Use `<zamm-skill>` as shorthand for the parent directory of `<zamm-scripts>`.
+Scripts are always under `<zamm-skill>/scripts/`.
 
 ## Core Commands
 
 ```bash
-bash <zamm-scripts>/scaffold.sh [--project-root <path>] [--overwrite-templates]
-bash <zamm-scripts>/archive-done-initiatives.sh [--project-root <path>] [--archive]
-bash <zamm-scripts>/zamm-status.sh [--project-root <path>]
+bash <zamm-skill>/scripts/zamm-scaffold.sh [--project-root <path>] [--overwrite-templates]
+bash <zamm-skill>/scripts/zamm-archive.sh [--project-root <path>] [--archive]
+bash <zamm-skill>/scripts/zamm-status.sh [--project-root <path>]
 ```
 
 ## Minimal Runbook
@@ -45,4 +45,4 @@ bash <zamm-scripts>/zamm-status.sh [--project-root <path>]
 
 Keep this file concise. Put detailed contracts and examples in `references/`.
 When editing protocol templates, update canonical scaffold fragments.
-`scaffold.sh` composes runtime files directly from those fragments.
+`zamm-scaffold.sh` composes runtime files directly from those fragments.

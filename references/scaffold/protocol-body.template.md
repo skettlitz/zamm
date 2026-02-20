@@ -11,7 +11,7 @@ In that directory:
 Keep agent-authored plan template in:
 - `<zamm-skill>/references/templates/plan-template.plan.template.md`
 
-`scaffold.sh` concatenates `header + body` to create runtime files:
+`zamm-scaffold.sh` concatenates `header + body` to create runtime files:
 - `AGENTS.md`
 - `.cursor/rules/zamm.mdc`
 
@@ -20,19 +20,7 @@ Allowed differences are limited to file-format scaffolding before `## Script Pat
 
 ## Script Path Resolution
 
-Resolve once per session. Use whichever path exists (check in order):
-
-1. `<project-root>/.cursor/skills/zamm/scripts/` (Cursor project-level)
-2. `~/.cursor/skills/zamm/scripts/` (Cursor personal)
-3. `<project-root>/.agents/skills/zamm/scripts/` (Codex repo-level)
-4. `~/.agents/skills/zamm/scripts/` (Codex user-level)
-5. `/etc/codex/skills/zamm/scripts/` (Codex admin-level; shared machines)
-
-All script references below use `<zamm-scripts>` as shorthand for the resolved directory.
-All template-path references below use `<zamm-skill>` as shorthand for the parent directory of `<zamm-scripts>`.
-For quick recall in the current session, use this mnemonic alias form:
-- `ZAMM_SCRIPTS_DIR=<zamm-scripts>`
-- `ZAMM_SKILL_DIR=<zamm-skill>`
+The `zamm` skill directory is `<zamm-skill>` with scripts in subdirectory scripts/.
 
 ## Session Start (MUST — do this before any other work)
 
@@ -53,9 +41,9 @@ For quick recall in the current session, use this mnemonic alias form:
 Tier names are symbolic, not calendar-bound. Treat them as memory layers with fixed caps and explicit motion rules.
 
 Tier caps:
-- WEEKLY: 30..37 cards (when reaching 37 consolidate to 30)
-- MONTHLY: 12..16 cards (when reaching 16 consolidate to 12)
-- EVERGREEN: 10..14 cards (when reaching 14 consolidate to 10)
+- WEEKLY: 30..37 cards
+- MONTHLY: 12..16 cards
+- EVERGREEN: 10..14 cards
 
 Distillation ingress rule:
 - When plan learnings are distilled, edit existing or append new WEEKLY cards at the end of `WEEKLY.md` first.
@@ -87,7 +75,7 @@ Consolidation archive record (MUST):
 WEEKLY consolidation (run when WEEKLY >= 37; reset to 30):
 - Promote exactly 1 high-value WEEKLY card to MONTHLY (append at end of MONTHLY).
 - Unify/edit overlapping WEEKLY cards when it improves clarity.
-- Drop lowest-value/redundant WEEKLY cards until WEEKLY is 30.
+- Archive lowest-value/redundant WEEKLY cards until WEEKLY is 30.
 
 MONTHLY consolidation (run when MONTHLY >= 16; reset to 12):
 - Promote exactly 1 high-value MONTHLY card to EVERGREEN (append at end of EVERGREEN).
@@ -170,7 +158,7 @@ Transition-time requirements:
   - Only after explicit human approval while plan is in `Review`.
   - Fill `Done-approved-by`, `Done-approved-at`, and `Done-approval-evidence`.
   - After setting `Status: Done` and finishing file edits, run:
-    - `bash <zamm-scripts>/archive-done-initiatives.sh --archive`
+    - `bash <zamm-skill>/scripts/zamm-archive.sh --archive`
 - Update `Memory-upvotes` / `Memory-downvotes` when memory cards materially helped or misled execution.
 
 ## Wellbeing Telemetry (Plan Files)
@@ -196,13 +184,13 @@ Plans should include:
 
 ## Archive Flow (Optional)
 
-- Run `bash <zamm-scripts>/archive-done-initiatives.sh` to list archive-ready plan directories.
-- Run `bash <zamm-scripts>/archive-done-initiatives.sh --archive` to move ready plan directories into `zamm-memory/archive/plans/`.
+- Run `bash <zamm-skill>/scripts/zamm-archive.sh` to list archive-ready plan directories.
+- Run `bash <zamm-skill>/scripts/zamm-archive.sh --archive` to move ready plan directories into `zamm-memory/archive/plans/`.
 - Archive flow shall be triggered every time after a plan was marked `Status: Done` after file edits are finished.
 
 ## Plan Status Snapshot (Optional)
 
-- Run `bash <zamm-scripts>/zamm-status.sh` to view grouped plan counts and listings by status.
+- Run `bash <zamm-skill>/scripts/zamm-status.sh` to view grouped plan counts and listings by status.
 - Buckets are: `Draft`, `Implementing`, `Review`, `Done`, `Abandoned`, and `Unknown`.
 
 ## Precedence (when sources conflict)

@@ -17,8 +17,8 @@ Development and testing iterations. The structure is still evolving and tested o
 Canonical files in this skill:
 
 - `<zamm-skill>/SKILL.md`: skill definition.
-- `<zamm-skill>/scripts/scaffold.sh`: creates/refreshes scaffold-managed runtime files.
-- `<zamm-skill>/scripts/archive-done-initiatives.sh`: archives terminal plan directories.
+- `<zamm-skill>/scripts/zamm-scaffold.sh`: creates/refreshes scaffold-managed runtime files.
+- `<zamm-skill>/scripts/zamm-archive.sh`: archives terminal plan directories.
 - `<zamm-skill>/scripts/zamm-status.sh`: snapshots active plan statuses by bucket.
 - `<zamm-skill>/references/scaffold/`: scaffold-consumed canonical files.
   - `agents-header.template.md`
@@ -27,7 +27,7 @@ Canonical files in this skill:
   - scaffold seed templates (`knowledge-*`, `cursorignore`)
 - `<zamm-skill>/references/templates/plan-template.plan.template.md`: agent-authored plan template.
 
-Runtime surfaces `AGENTS.md` and `zamm.mdc` are composed directly by `scaffold.sh` from:
+Runtime surfaces `AGENTS.md` and `zamm.mdc` are composed directly by `zamm-scaffold.sh` from:
 - `<zamm-skill>/references/scaffold/agents-header.template.md`
 - `<zamm-skill>/references/scaffold/rule-header.mdc`
 - `<zamm-skill>/references/scaffold/protocol-body.template.md`
@@ -35,11 +35,10 @@ Runtime surfaces `AGENTS.md` and `zamm.mdc` are composed directly by `scaffold.s
 No separate render script is required.
 During scaffold composition, runtime files resolve these shorthands to install-aware paths:
 - `<zamm-skill>` -> `<project-root>...`, `~...`, or absolute fallback.
-- `<zamm-scripts>` -> the resolved scripts directory path.
 
 ## Scaffold Output (Fresh Project)
 
-Running `bash <zamm-skill>/scripts/scaffold.sh --project-root <repo-root>` produces:
+Running `bash <zamm-skill>/scripts/zamm-scaffold.sh --project-root <repo-root>` produces:
 
 ```text
 <repo-root>/
@@ -143,7 +142,7 @@ Open a project in Cursor (or start a Codex session) and ask the agent:
 
 > Scaffold ZAMM in this project.
 
-The agent runs `scaffold.sh`, creating the plan-only `zamm-memory/` tree, `AGENTS.md`, `.cursor/rules/zamm.mdc`, and `.cursorignore`.
+The agent runs `zamm-scaffold.sh`, creating the plan-only `zamm-memory/` tree, `AGENTS.md`, `.cursor/rules/zamm.mdc`, and `.cursorignore`.
 
 ## Keeping Up to Date
 
