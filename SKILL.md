@@ -9,40 +9,17 @@ Use this skill to run the ZAMM workflow with minimal context overhead.
 
 ## Required References
 
-Read these files as needed instead of duplicating policy in this file:
+For all MUST-level protocol details, follow: `<zamm-skill>/references/scaffold/protocol-body.template.md`.
 
-1. `<zamm-skill>/references/scaffold/protocol-body.template.md` (shared protocol source template)
-2. `<zamm-skill>/references/scaffold/agents-header.template.md` (AGENTS header fragment template)
-3. `<zamm-skill>/references/scaffold/rule-header.mdc` (Cursor rule header fragment)
-4. `<zamm-skill>/references/scaffold/` (scaffold seed templates consumed by `zamm-scaffold.sh`)
-5. `<zamm-skill>/references/templates/plan-template.plan.template.md` (agent copy-edit template for new plans)
+This template is compiled into `.cursor/rules/zamm.mdc` and `AGENTS.md` by `bash <zamm-skill>/scripts/zamm-scaffold.sh`.
 
-For all MUST-level protocol details, follow:
-`<zamm-skill>/references/scaffold/protocol-body.template.md`.
+## Installation
 
-## Script Path Resolution
-
-Resolve `<zamm-skill>` once per session using:
-`<zamm-skill>/references/scaffold/protocol-body.template.md` under `## Script Path Resolution`.
-Scripts are always under `<zamm-skill>/scripts/`.
-
-## Core Commands
-
-```bash
-bash <zamm-skill>/scripts/zamm-scaffold.sh [--project-root <path>] [--overwrite-templates]
-bash <zamm-skill>/scripts/zamm-archive.sh [--project-root <path>] [--archive]
-bash <zamm-skill>/scripts/zamm-status.sh [--project-root <path>]
-```
+Run `bash <zamm-skill>/scripts/zamm-scaffold.sh --project-root <repo-root>` to compile templates and generate the directory structure.
+Use `--overwrite-templates` when refreshing existing runtime files.
 
 ## Minimal Runbook
 
-1. Session start: follow `Session Start (MUST)` in
-   `<zamm-skill>/references/scaffold/protocol-body.template.md`.
+1. Session start: follow `Session Start (MUST)` in the compiled runtime files (`AGENTS.md` or `.cursor/rules/zamm.mdc`).
 2. During work: follow `Plan Directory Model (MUST)` and `Plan Status Transitions (MUST)`.
 3. Session end: follow `Session End (MUST)`.
-
-## Maintenance Rule
-
-Keep this file concise. Put detailed contracts and examples in `references/`.
-When editing protocol templates, update canonical scaffold fragments.
-`zamm-scaffold.sh` composes runtime files directly from those fragments.
