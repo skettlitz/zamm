@@ -1,27 +1,83 @@
 # Z-Agents Memory Mill (ZAMM)
 
-ZAMM is a bounded memory system for agentic software work. It helps humans and
-agents re-enter fast, keep parallel initiatives coordinated, and preserve
-history without polluting day-to-day search.
+ZAMM is a bounded memory system for agentic software work. It provides a framework for plan execution and learnings distillation.
 
-Core model: **WEEKLY -> MONTHLY -> EVERGREEN** knowledge tiers with hard limits,
-plus initiative-scoped work areas and explicit archive boundaries.
+Learnings from implementation are distilled into **WEEKLY -> MONTHLY -> EVERGREEN** knowledge tiers with hard limits to keep context compact.
 
-Canonical skill name/folder is `zamm` (from `SKILL.md` frontmatter `name`).
+Canonical skill name/folder is `zamm`.
 
 ## Project Status
 
-**Early testing.** The core protocol and scripts work, but expect rough edges,
-breaking changes, and missing documentation. Feedback and bug reports are
-welcome.
+Development and testing iterations. The structure is still evolving and tested on internal projects.
 
-## What This Repo Contains
+## Current Structure (Plan-Only Model)
 
-- `SKILL.md`: the skill definition and operating protocol.
-- `scripts/`: scaffold + maintenance + reporting + packaging/self-test helpers.
-- `references/zamm-spec.md`: full design spec.
-- `references/AGENTS.md.template`: template for non-Cursor agent runtimes.
-- `references/zamm-rule.mdc.template`: Cursor rule template.
+`<zamm-skill>` means your installed skill directory (for example `~/.agents/skills/zamm` or `.agents/skills/zamm`).
+
+Canonical files in this skill:
+
+- `<zamm-skill>/SKILL.md`: skill definition.
+- `<zamm-skill>/scripts/scaffold.sh`: creates/refreshes scaffold-managed runtime files.
+- `<zamm-skill>/scripts/archive-done-initiatives.sh`: archives terminal plan directories.
+- `<zamm-skill>/scripts/zamm-status.sh`: snapshots active plan statuses by bucket.
+- `<zamm-skill>/references/scaffold/`: scaffold-consumed canonical files.
+  - `agents-header.template.md`
+  - `rule-header.mdc`
+  - `protocol-body.template.md`
+  - scaffold seed templates (`knowledge-*`, `cursorignore`)
+- `<zamm-skill>/references/templates/plan-template.plan.template.md`: agent-authored plan template.
+
+Runtime surfaces `AGENTS.md` and `zamm.mdc` are composed directly by `scaffold.sh` from:
+- `<zamm-skill>/references/scaffold/agents-header.template.md`
+- `<zamm-skill>/references/scaffold/rule-header.mdc`
+- `<zamm-skill>/references/scaffold/protocol-body.template.md`
+
+No separate render script is required.
+
+## Scaffold Output (Fresh Project)
+
+Running `bash <zamm-skill>/scripts/scaffold.sh --project-root <repo-root>` produces:
+
+```text
+<repo-root>/
+  AGENTS.md
+  .cursor/rules/zamm.mdc
+  .cursorignore
+  zamm-memory/
+    active/
+      knowledge/
+        EVERGREEN.md
+        MONTHLY.md
+        WEEKLY.md
+      plans/
+    archive/
+      plans/
+```
+
+Current active model:
+
+- Active plans live in `zamm-memory/active/plans/<plan-dir>/`.
+- Each plan directory has one main `.plan.md` and optional `workdir/`.
+- Terminal plan directories archive to `zamm-memory/archive/plans/<plan-dir>/`.
+- Status snapshot helper: `bash <zamm-skill>/scripts/zamm-status.sh [--project-root <repo-root>]`.
+
+Knowledge motion model (symbolic tiers, not calendar-bound):
+
+- WEEKLY cap window: 30..37 cards (reset target: 30)
+- MONTHLY cap window: 12..16 cards (reset target: 12)
+- EVERGREEN cap window: 10..14 cards (reset target: 10)
+- Plan learnings are appended into WEEKLY first.
+- Consolidation is triggered when tiers are read and counted (Session Start) or when append reaches upper bounds (37/16/14).
+- Consolidation pass order is WEEKLY -> MONTHLY -> EVERGREEN; repeat passes until all tiers are within tolerance windows.
+
+Legacy paths are not part of current active workflow:
+
+- `zamm-memory/active/workstreams/`
+- `zamm-memory/active/indexes/`
+
+## Legacy Migration Note
+
+If an older repo still has active workstream/index trees, move them out of `active` and preserve them in archive to avoid operator confusion. Keep active plans in `zamm-memory/active/plans/`.
 
 ## Installation
 
@@ -29,25 +85,19 @@ Get the source first, then copy it to the right location for your environment.
 
 ### Step 1 — Get the Source
 
-**Clone from GitHub:**
+Clone from GitHub:
 
 ```bash
 git clone https://github.com/skettlitz/zamm.git
 ```
 
-**Or download and unzip:**
-
-Download the latest zip from the repository and unzip it. GitHub names the
-folder `zamm-main` by default — rename it to `zamm`.
+Or download and unzip, then rename `zamm-main` to `zamm`.
 
 ### Step 2 — Install for Your Environment
 
-Choose **one** of the targets below (or combine them).
+Choose one target.
 
 #### A. Codex — Repo-local (recommended)
-
-Put ZAMM inside the repo so any collaborator who clones it gets the skill
-automatically:
 
 ```bash
 cd /path/to/your/project
@@ -55,28 +105,14 @@ mkdir -p .agents/skills
 cp -r /path/to/zamm .agents/skills/zamm
 ```
 
-Commit `.agents/skills/zamm/` so collaborators pick it up automatically.
-
-If you keep ZAMM in this repo but want to *use* it in another repo, symlink it:
-
-```bash
-ln -s /path/to/zamm /path/to/other-repo/.agents/skills/zamm
-```
-
 #### B. Codex — User-global
-
-Install once per user profile so ZAMM is available in any repo:
 
 ```bash
 mkdir -p ~/.agents/skills
 cp -r /path/to/zamm ~/.agents/skills/zamm
-# or symlink instead of copy
 ```
 
 #### C. Codex — Admin / shared machine (optional)
-
-For managed dev boxes or containers where you want a standard skill set for
-every user:
 
 ```bash
 sudo mkdir -p /etc/codex/skills
@@ -90,8 +126,6 @@ mkdir -p ~/.cursor/skills
 cp -r /path/to/zamm ~/.cursor/skills/zamm
 ```
 
-The skill is available in every Cursor project after restart.
-
 #### E. Cursor — project-level (shared via repo)
 
 ```bash
@@ -100,33 +134,22 @@ mkdir -p .cursor/skills
 cp -r /path/to/zamm .cursor/skills/zamm
 ```
 
-Commit `.cursor/skills/zamm/` so collaborators pick it up automatically.
-
-#### Legacy note
-
-If you previously used `${CODEX_HOME:-$HOME/.codex}/skills` in older Codex
-setups, that path may still work as a backward-compatibility fallback, but it is
-no longer the primary discovery path. Prefer `.agents/skills/` (repo or user
-scope) going forward.
-
 ### Step 3 — Verify
 
 Open a project in Cursor (or start a Codex session) and ask the agent:
 
 > Scaffold ZAMM in this project.
 
-The agent will run `scaffold.sh`, creating the `zamm-memory/` tree, `AGENTS.md`,
-`.cursor/rules/zamm.mdc`, and `.cursorignore`. Everything after this point is
-agent-driven — see `SKILL.md` for the full operating protocol.
+The agent runs `scaffold.sh`, creating the plan-only `zamm-memory/` tree, `AGENTS.md`, `.cursor/rules/zamm.mdc`, and `.cursorignore`.
 
 ## Keeping Up to Date
 
-If you cloned the repo, pull the latest changes and re-copy:
+If you cloned the repo, pull and re-copy:
 
 ```bash
 cd /path/to/zamm
 git pull
-cp -r . ~/.agents/skills/zamm   # or whichever target from Step 2
+cp -r . ~/.agents/skills/zamm
 ```
 
 If you downloaded a zip, replace the folder with the new version.
@@ -134,6 +157,24 @@ If you downloaded a zip, replace the folder with the new version.
 ## Read Next
 
 - Full operating protocol: `SKILL.md`
-- Full design spec: `references/zamm-spec.md`
-- Agent runtime template: `references/AGENTS.md.template`
-- Cursor rule template: `references/zamm-rule.mdc.template`
+- Shared protocol source: `<zamm-skill>/references/scaffold/protocol-body.template.md`
+- Plan template: `<zamm-skill>/references/templates/plan-template.plan.template.md`
+
+
+# Appendix
+
+## Animal tiers for complexity estimation
+
+`Complexity-forecast: ant|gecko|raccoon|capybara|badger|octopus|manatee|shark|godzilla`
+
+| Level | Animal       | The character it signals | Typical cues                                                     |
+| ----- | ------------ | ------------------------ | ---------------------------------------------------------------- |
+| 1     | **ant**      | tiny + obvious           | one tiny surface, no debate, trivial validation                  |
+| 2     | **gecko**    | small + quick            | small change, minimal side effects, easy to revert               |
+| 3     | **raccoon**  | small but sneaky         | edge cases, odd environments, “it depends” lurking               |
+| 4     | **capybara** | medium + chill           | normal feature slice, known path, steady work                    |
+| 5     | **badger**   | medium + stubborn        | tricky testing, awkward constraints, needs persistence           |
+| 6     | **octopus**  | many tentacles           | multiple components/dependencies, integration work, coordination |
+| 7     | **manatee**  | big but gentle           | lots of work, **low drama**: predictable, repeatable steps       |
+| 8     | **shark**    | big + toothy             | high consequence / blast radius, rollout/rollback matters        |
+| 9     | **godzilla** | city-level               | initiative-sized, unknown unknowns, must be sliced + discovery   |

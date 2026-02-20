@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ZAMM initiative janitor:
-# - List initiatives in active/workstreams that are marked done
+# ZAMM plan archive helper:
+# - List plan directories in active/plans that are terminal
 # - Optionally archive them with git mv
 #
 # Usage:
@@ -13,7 +13,7 @@ set -euo pipefail
 usage() {
   echo "Usage: archive-done-initiatives.sh [--archive] [--project-root <path>]"
   echo ""
-  echo "  --archive          Move matching initiatives to zamm-memory/archive/workstreams via git mv"
+  echo "  --archive          Move matching plan directories to zamm-memory/archive/plans via git mv"
   echo "  --project-root     Optional explicit repository root (default: current directory)"
   exit 1
 }
@@ -27,18 +27,14 @@ resolve_explicit_root() {
   (cd "$path" && pwd)
 }
 
-resolve_workstream_state_file() {
-  local init_dir="$1"
-  if [ -f "$init_dir/WORKSTREAM_STATE.md" ]; then
-    printf '%s\n' "$init_dir/WORKSTREAM_STATE.md"
-    return 0
-  fi
-  if [ -f "$init_dir/STATE.md" ]; then
-    # Legacy compatibility fallback.
-    printf '%s\n' "$init_dir/STATE.md"
-    return 0
-  fi
-  return 1
+resolve_main_plan_file() {
+  local plan_dir="$1"
+  find "$plan_dir" -maxdepth 1 -type f -name "*.plan.md" ! -name "*.subplan-*.plan.md" | sort | head -n1
+}
+
+read_plan_status() {
+  local plan_file="$1"
+  sed -n 's/^Status:[[:space:]]*//p' "$plan_file" | head -n1 | awk '{print $1}'
 }
 
 ARCHIVE_MODE=0
@@ -74,11 +70,11 @@ else
   PROJECT_ROOT="$PWD"
 fi
 
-ACTIVE_DIR="$PROJECT_ROOT/zamm-memory/active/workstreams"
-ARCHIVE_DIR="$PROJECT_ROOT/zamm-memory/archive/workstreams"
+ACTIVE_DIR="$PROJECT_ROOT/zamm-memory/active/plans"
+ARCHIVE_DIR="$PROJECT_ROOT/zamm-memory/archive/plans"
 
 if [ ! -d "$ACTIVE_DIR" ]; then
-  echo "ERROR: active workstreams directory not found: $ACTIVE_DIR"
+  echo "ERROR: active plans directory not found: $ACTIVE_DIR"
   echo "       Run scaffold.sh in repo root or pass --project-root <repo-root>."
   exit 1
 fi
@@ -94,63 +90,37 @@ if [ "$ARCHIVE_MODE" -eq 1 ]; then
   fi
 fi
 
-# Check if all main plans (not subplans) in an initiative have terminal status.
-# A main plan being Done or Abandoned implies all its subplans are already terminal.
-# Terminal statuses: Done, Abandoned.
-all_main_plans_terminal() {
-  local init_dir="$1"
-  local plans_dir="$init_dir/plans"
-  if [ ! -d "$plans_dir" ]; then
-    return 1
-  fi
-  local main_plan_count=0
-  local terminal_count=0
-  while IFS= read -r plan_file; do
-    main_plan_count=$((main_plan_count + 1))
-    local plan_status
-    plan_status=$(sed -n 's/^Status:[[:space:]]*//p' "$plan_file" | head -n1 | awk '{print $1}')
-    case "$plan_status" in
-      Done|Abandoned) terminal_count=$((terminal_count + 1)) ;;
-    esac
-  done < <(find "$plans_dir" -maxdepth 1 -name "*.plan.md" ! -name "*.subplan-*.plan.md" 2>/dev/null)
-  if [ "$main_plan_count" -gt 0 ] && [ "$main_plan_count" -eq "$terminal_count" ]; then
-    return 0
-  fi
-  return 1
-}
-
 declare -a READY_SLUGS
 declare -a READY_REASONS
 
-while IFS= read -r init_dir; do
-  slug=$(basename "$init_dir")
-  state_file=$(resolve_workstream_state_file "$init_dir" || true)
-  status=""
+while IFS= read -r plan_dir; do
+  slug=$(basename "$plan_dir")
+  main_plan_file=$(resolve_main_plan_file "$plan_dir")
 
-  if [ -n "$state_file" ] && [ -f "$state_file" ]; then
-    status=$(sed -n 's/^Status:[[:space:]]*//p' "$state_file" | head -n1 | awk '{print $1}')
+  if [ -z "$main_plan_file" ]; then
+    continue
   fi
 
-  if [ "$status" = "Done" ]; then
-    READY_SLUGS+=("$slug")
-    READY_REASONS+=("Status: Done")
-  elif all_main_plans_terminal "$init_dir"; then
-    READY_SLUGS+=("$slug")
-    READY_REASONS+=("all main plans terminal")
-  fi
-done < <(find "$ACTIVE_DIR" -mindepth 1 -maxdepth 1 -type d ! -name "_TEMPLATE" | sort)
+  status=$(read_plan_status "$main_plan_file")
+  case "$status" in
+    Done|Abandoned)
+      READY_SLUGS+=("$slug")
+      READY_REASONS+=("status: $status")
+      ;;
+  esac
+done < <(find "$ACTIVE_DIR" -mindepth 1 -maxdepth 1 -type d | sort)
 
-echo "ZAMM: initiative janitor"
+echo "ZAMM: plan archive helper"
 echo "Project root: $PROJECT_ROOT"
-echo "Archive-ready when: Status: Done OR all main plans terminal"
+echo "Archive-ready when: main plan status is Done or Abandoned"
 echo ""
 
 if [ "${#READY_SLUGS[@]}" -eq 0 ]; then
-  echo "No archive-ready initiatives found in active/workstreams."
+  echo "No archive-ready plan directories found in active/plans."
   exit 0
 fi
 
-echo "Archive-ready initiatives:"
+echo "Archive-ready plan directories:"
 i=0
 for slug in "${READY_SLUGS[@]}"; do
   reason="${READY_REASONS[$i]}"
@@ -164,14 +134,14 @@ if [ "$ARCHIVE_MODE" -eq 0 ]; then
   exit 0
 fi
 
-echo "Archiving initiatives..."
+echo "Archiving plan directories..."
 moved=0
 skipped=0
 failed=0
 i=0
 for slug in "${READY_SLUGS[@]}"; do
-  src_rel="zamm-memory/active/workstreams/$slug"
-  dst_rel="zamm-memory/archive/workstreams/$slug"
+  src_rel="zamm-memory/active/plans/$slug"
+  dst_rel="zamm-memory/archive/plans/$slug"
   reason="${READY_REASONS[$i]}"
   i=$((i + 1))
 
@@ -181,21 +151,8 @@ for slug in "${READY_SLUGS[@]}"; do
     continue
   fi
 
-  # If WORKSTREAM_STATE.md doesn't say Done yet, update it before archiving.
-  state_file=$(resolve_workstream_state_file "$PROJECT_ROOT/$src_rel" || true)
-  if [ -n "$state_file" ] && [ -f "$state_file" ]; then
-    current_status=$(sed -n 's/^Status:[[:space:]]*//p' "$state_file" | head -n1 | awk '{print $1}')
-    if [ "$current_status" != "Done" ]; then
-      sed -i.bak "s/^Status:[[:space:]]*.*/Status: Done/" "$state_file"
-      rm -f "$state_file.bak"
-      rel_state_file="${state_file#"$PROJECT_ROOT/"}"
-      git -C "$PROJECT_ROOT" add "$rel_state_file"
-      echo "  SET:   $slug $(basename "$state_file") -> Status: Done (was: $current_status)"
-    fi
-  fi
-
-  # Ensure source is in the index so git mv works (handles untracked initiatives)
-  git -C "$PROJECT_ROOT" add "$src_rel"
+  # Ensure source is in the index so git mv works (handles ignored/untracked plan dirs).
+  git -C "$PROJECT_ROOT" add -f "$src_rel"
 
   if git -C "$PROJECT_ROOT" mv "$src_rel" "$dst_rel"; then
     echo "  MOVED: $slug ($reason) via git mv"
