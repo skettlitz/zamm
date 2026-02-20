@@ -156,6 +156,7 @@ write_from_template_if_new \
 # --- Plan roots ---
 ensure_dir "$PROJECT_ROOT/zamm-memory/active/plans"
 ensure_dir "$PROJECT_ROOT/zamm-memory/archive/plans"
+ensure_dir "$PROJECT_ROOT/zamm-memory/archive/knowledge/consolidations"
 
 # --- Cursor ignore rules ---
 write_from_template_if_new \

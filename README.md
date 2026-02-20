@@ -58,6 +58,8 @@ Running `bash <zamm-skill>/scripts/zamm-scaffold.sh --project-root <repo-root>` 
       plans/
     archive/
       plans/
+      knowledge/
+        consolidations/
 ```
 
 Current active model:
