@@ -1,65 +1,80 @@
 ## Script Path Resolution
 
-The `zamm` skill directory is `<zamm-skill>` with scripts in `scripts/` subdirectory.
-
+The `zamm` skill directory is `<zamm-skill>` with scripts in subdirectory scripts/.
 
 ## Session Start (MUST — do this before any other work)
 
 1. Read these files in order:
-   - `zamm-memory/active/knowledge/EVERGREEN.md`
-   - `zamm-memory/active/knowledge/MONTHLY.md`
-   - `zamm-memory/active/knowledge/WEEKLY.md`
+   - `zamm-memory/active/knowledge/BEDROCK.md`
+   - `zamm-memory/active/knowledge/COBBLES.md`
+   - `zamm-memory/active/knowledge/PEBBLES.md`
+   - `zamm-memory/active/knowledge/SAND.md`
 
-2. Count tier entries (`Wn`, `Mn`, `En`) in those files.
-   - If any tier is at or above its upper tolerance bound, run consolidation per `## Knowledge Tier Motion (MUST)` before primary task work.
+2. Count tier entries (`Bn`, `Cn`, `Pn`, `Sn`) in those files.
+   - Use `Cn`/`Pn`/`Sn` for automatic cap checks; Bedrock is ritual-gated (human-triggered updates only) and excluded from automated consolidation.
+   - If any automated tier is at or above its upper tolerance bound, run consolidation per `## Knowledge Tier Motion (MUST)` before primary task work.
 
-3. Identify the active plan directory under `zamm-memory/active/plans/` - if multiple plans exist, select using your own judgment.
-
+3. Identify the active plan directory under `zamm-memory/active/plans/`.
 4. If no plan matches the user request, create a new plan directory and `.plan.md` file using:
-   - `<zamm-skill>/references/templates/plan-template.plan.template.md`
-
+   - `<zamm-skill>/references/templates/plan.template.md`
+5. Soft focus rule: prefer one active implementing plan at a time; if unclear, auto-pick by best match and ask the human only when ambiguity remains.
 
 ## Knowledge Tier Motion (MUST)
 
 Tier names are symbolic, not calendar-bound. Treat them as memory layers with fixed caps and explicit motion rules.
 
 Tier caps:
-- WEEKLY: 30..37 cards
-- MONTHLY: 12..16 cards
-- EVERGREEN: 10..14 cards
+- BEDROCK: ritual-gated anchor tier; uncapped and excluded from automated consolidation.
+- SAND: 30..37 cards
+- PEBBLES: 12..16 cards
+- COBBLES: 10..14 cards
+
+Card schema (MUST):
+- Use this field order for every memory card: `Lineage`, `Statement`, `Last updated`, `Upvotes`, `Downvotes`.
+- New cards start with `Upvotes: 1` and `Downvotes: 0`.
+- For every newly added learning-derived card, increment exactly one memory-card vote once (`Upvotes` or `Downvotes`) to capture whether prior memory helped or misled.
+- Do not use legacy fields (`Claim`, `Evidence`, `Last verified`, `Confidence`, `Expiry hint`).
 
 Distillation ingress rule:
-- When plan learnings are distilled, edit existing or append new WEEKLY cards at the end of `WEEKLY.md` first.
-- After append, if any tier is at or above its upper tolerance bound, run consolidation immediately.
+- When plan learnings are distilled, edit existing or append new SAND cards at the end of `SAND.md` first.
+- After append, if any automated tier is at or above its upper tolerance bound, run consolidation immediately.
 
 Consolidation trigger:
-- Trigger on Session Start after reading + counting when any tier is at or above its upper bound.
-- Trigger whenever distillation append pushes a tier to or above its upper bound.
+- Trigger on Session Start after reading + counting when any automated tier is at or above its upper bound.
+- Trigger whenever distillation append pushes an automated tier to or above its upper bound.
 
 Consolidation pass order:
-1. WEEKLY consolidation
-2. MONTHLY consolidation
-3. EVERGREEN consolidation
-4. Recount all tiers; repeat the pass order until all tiers are within tolerance windows.
+1. SAND consolidation
+2. PEBBLES consolidation
+3. COBBLES consolidation
+4. Recount all tiers; repeat the pass order until all automated tiers are within tolerance windows.
 
+Consolidation archive record (MUST):
+- For every consolidation event, write one dated record file under:
+  - `zamm-memory/archive/knowledge/consolidations/`
+- Filename format:
+  - `YYYY-MM-DD-HHMM-tier-consolidation.md`
+- Do not use a single append-only log file; use one file per consolidation event.
+- The record MUST include:
+  1. Trigger (`session-start` or `post-distillation`)
+  2. Tier counts before and after (`B`, `C`, `P`, `S`)
+  3. Promotions, demotions, and drops performed
+  4. One-line rationale for each dropped card
+  5. Links/IDs for cards moved between tiers where applicable
 
-WEEKLY consolidation (run when WEEKLY >= 37; reset to 30):
-- Promote exactly 1 high-value WEEKLY card to MONTHLY (append at end of MONTHLY).
-- Unify/edit overlapping WEEKLY cards when it improves clarity.
-- Archive lowest-value/redundant WEEKLY cards until WEEKLY is 30.
-  - Write one dated record file under: `zamm-memory/archive/knowledge/consolidations/`
-  - Filename format: `YYYY-MM-DD-HHMM-consolidation.md`
-  - Every element that gets dropped from WEEKLY is appended to the consolidation file.
+SAND consolidation (run when SAND >= 37; reset to 30):
+- Promote exactly 1 high-value SAND card to PEBBLES (append at end of PEBBLES).
+- Unify/edit overlapping SAND cards when it improves clarity.
+- Archive lowest-value/redundant SAND cards until SAND is 30.
 
-MONTHLY consolidation (run when MONTHLY >= 16; reset to 12):
-- Promote exactly 1 high-value MONTHLY card to EVERGREEN (append at end of EVERGREEN).
-- Unify/edit overlapping MONTHLY cards when it improves clarity.
-- Demote lower-value MONTHLY cards to WEEKLY (remove from MONTHLY; append to WEEKLY) until MONTHLY is 12.
+PEBBLES consolidation (run when PEBBLES >= 16; reset to 12):
+- Promote exactly 1 high-value PEBBLES card to COBBLES (append at end of COBBLES).
+- Unify/edit overlapping PEBBLES cards when it improves clarity.
+- Demote lower-value PEBBLES cards to SAND (remove from PEBBLES; append to SAND) until PEBBLES is 12.
 
-EVERGREEN consolidation (run when EVERGREEN >= 14; reset to 10):
-- Keep the 10 best, most durable cards in EVERGREEN.
-- Consolidate by demotion only: demote overly similar/lower-signal EVERGREEN cards to MONTHLY (remove from EVERGREEN; append to MONTHLY) until EVERGREEN is 10.
-
+COBBLES consolidation (run when COBBLES >= 14; reset to 10):
+- Keep the 10 best, most durable cards in COBBLES.
+- Consolidate by demotion only: demote overly similar/lower-signal COBBLES cards to PEBBLES (remove from COBBLES; append to PEBBLES) until COBBLES is 10.
 
 ## Plan Directory Model (MUST)
 
@@ -72,7 +87,6 @@ EVERGREEN consolidation (run when EVERGREEN >= 14; reset to 10):
 - `Done` and `Abandoned` are terminal; continue with a new plan directory.
 - Do not maintain separate workstream state/index files. Discover plans by searching `zamm-memory/active/plans/**/*.plan.md` and reading `Status:`.
 
-
 ## Offsite Planning Backfill (MUST)
 
 Cursor planning mode may generate an offsite `.plan.md` that does not follow ZAMM format.
@@ -84,7 +98,7 @@ Trigger:
 
 Required actions (same turn, immediately after planning):
 1. Create or update `zamm-memory/active/plans/<plan-dir>/<plan-dir>.plan.md` using
-   `<zamm-skill>/references/templates/plan-template.plan.template.md`.
+   `<zamm-skill>/references/templates/plan.template.md`.
 2. Mirror essential scope into the ZAMM plan (`Scope`, `Done-when`, `Approach`).
 3. Record the offsite plan source path in the ZAMM plan for traceability.
 4. Set ZAMM status:
@@ -92,7 +106,6 @@ Required actions (same turn, immediately after planning):
    - `Review` when execution is complete and waiting for human approval/closure.
 5. From that point on, apply all transition bookkeeping only in the ZAMM plan file.
    Offsite plan files are non-authoritative scratch artifacts.
-
 
 ## Plan Status Transitions (MUST)
 
@@ -119,20 +132,20 @@ Transition-time requirements:
   - Record rationale under `## Loose ends`.
 - `Implementing -> Review`:
   - Ensure all existing `Done-when` todos are checked. If an item became obsolete, remove it before moving to `Review`.
-  - Reconcile stale/conflicting knowledge claims touched by this work before appending learnings:
+  - Reconcile stale/conflicting knowledge statements touched by this work before appending learnings:
     - Prefer editing existing cards in place when a claim is outdated.
     - Merge or retire duplicates when two cards encode the same rule.
-    - Do not leave contradictory active cards across WEEKLY/MONTHLY/EVERGREEN; if verification is pending, mark `suspected drift` and add a verification note.
+    - Do not leave contradictory active cards across BEDROCK/COBBLES/PEBBLES/SAND; if verification is pending, mark `suspected drift` and add a verification note.
   - Fill `## Learnings` (required; if no durable learning emerged, state that explicitly with a reason).
-  - Append new WEEKLY cards from those learnings (required), then consolidate tiers if any upper tolerance bound is reached.
+  - Append new SAND cards from those learnings (required), then consolidate tiers if any upper tolerance bound is reached.
   - Fill `Wellbeing-after`, `Complexity-felt`, and `Complexity-delta`.
   - Ask for human approval before `Done`.
 - `Implementing -> Abandoned`:
   - Check off completed `Done-when` todos.
   - Record rationale and cleanup notes.
-  - Reconcile stale/conflicting knowledge claims touched by partial work before appending learnings, using the same rules as `Implementing -> Review`.
+  - Reconcile stale/conflicting knowledge statements touched by partial work before appending learnings, using the same rules as `Implementing -> Review`.
   - Fill `## Learnings` (required; if no durable learning emerged, state that explicitly with a reason).
-  - Append new WEEKLY cards from those learnings (required), then consolidate tiers if any upper tolerance bound is reached.
+  - Append new SAND cards from those learnings (required), then consolidate tiers if any upper tolerance bound is reached.
   - Fill `Wellbeing-after`, `Complexity-felt`, and `Complexity-delta`.
 - `Review -> Implementing`:
   - Capture requested changes and re-open relevant `Done-when` items.
@@ -141,15 +154,15 @@ Transition-time requirements:
   - Fill `Done-approved-by`, `Done-approved-at`, and `Done-approval-evidence`.
   - After setting `Status: Done` and finishing file edits, run:
     - `bash <zamm-skill>/scripts/zamm-archive.sh --archive`
-- Update `Memory-upvotes` / `Memory-downvotes` when memory cards materially helped or misled execution.
-
+- For each newly added learning-derived card, increment one memory-card vote exactly once (`Upvotes` or `Downvotes`).
+- Record those card IDs in plan `Memory-upvotes` / `Memory-downvotes`.
 
 ## Wellbeing Telemetry (Plan Files)
 
 Plans should include:
 - `Wellbeing-before:` free text
 - `Complexity-forecast:` one of `ant|gecko|raccoon|capybara|badger|octopus|manatee|shark|godzilla`
-- `Memory-upvotes:` optional memory IDs that helped (for example `W14, M18`)
+- `Memory-upvotes:` optional memory IDs that helped (for example `S14, P18, C3`)
 - `Memory-downvotes:` optional memory IDs that were misleading/inconsistent (only when problems were observed)
 - `Wellbeing-after:` free text (fill on `Review` or `Abandoned`)
 - `Complexity-felt:` same scale (fill on `Review` or `Abandoned`)
@@ -158,15 +171,12 @@ Plans should include:
 - `Done-approved-at:` required when `Status: Done`
 - `Done-approval-evidence:` required when `Status: Done`
 
-
 ## Session End (MUST)
 
 1. Execute plan transition bookkeeping for touched plans (if applicable), per `## Plan Status Transitions (MUST)`.
 2. Ensure touched plans have current `Last updated:` date.
-3. Ensure touched knowledge cards were reconciled for staleness/conflicts and durable learnings were appended to WEEKLY; then reconcile tier caps per `## Knowledge Tier Motion (MUST)` (required).
+3. Ensure touched knowledge cards were reconciled for staleness/conflicts and durable learnings were appended to SAND; then reconcile tier caps per `## Knowledge Tier Motion (MUST)` (required).
 4. If the human requests cleanup or plans are terminal, run archive flow per `## Archive Flow (Optional)`.
-5. Ask the human for approval on plans with `Status: Review`.
-
 
 ## Archive Flow (Optional)
 
@@ -174,16 +184,24 @@ Plans should include:
 - Run `bash <zamm-skill>/scripts/zamm-archive.sh --archive` to move ready plan directories into `zamm-memory/archive/plans/`.
 - Archive flow shall be triggered every time after a plan was marked `Status: Done` after file edits are finished.
 
-
 ## Plan Status Snapshot (Optional)
 
 - Run `bash <zamm-skill>/scripts/zamm-status.sh` to view grouped plan counts and listings by status.
 - Buckets are: `Draft`, `Implementing`, `Review`, `Done`, `Abandoned`, and `Unknown`.
 
+## Precedence (when sources conflict)
+
+1. Explicit current human instruction
+2. Code, tests, contracts (executable truth)
+3. Active plan file and terminal status semantics
+4. Knowledge tiers (BEDROCK > COBBLES > PEBBLES > SAND)
+5. Archive and historical notes
 
 ## Key Constraints
 
 - Knowledge tiers are advisory, not authoritative. Verify before high-impact actions.
+- Bedrock updates are ritual-gated. Agents MUST read Bedrock at session start; Bedrock edits happen only during special human-triggered rituals (not automatic/periodic passes).
 - Never store secrets, tokens, or credentials in memory files.
+- If a memory statement conflicts with code/tests, mark as `suspected drift` and verify.
 - Prefer correction over accretion: update stale cards in place before adding new cards that could duplicate or conflict.
 - During primary task work, avoid unnecessary knowledge churn; keep edits targeted and durable.

@@ -54,11 +54,9 @@ fi
 TODAY=$(date +%Y-%m-%d)
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SCAFFOLD_DIR="$SKILL_DIR/references/scaffold"
-PLAN_TEMPLATE="$SKILL_DIR/references/templates/plan-template.plan.template.md"
+PLAN_TEMPLATE="$SKILL_DIR/references/templates/plan.template.md"
 ZAMM_AGENTS_BEGIN_MARKER_REGEX="^<!-- SKILL-BLOCK:zamm:BEGIN"
 ZAMM_AGENTS_END_MARKER="<!-- SKILL-BLOCK:zamm:END -->"
-ZAMM_AGENTS_LEGACY_BEGIN_MARKER="<!-- ZAMM-BEGIN -->"
-ZAMM_AGENTS_LEGACY_END_MARKER="<!-- ZAMM-END -->"
 ZAMM_BLOCK_VERSION="local"
 
 display_runtime_path() {
@@ -135,31 +133,27 @@ upsert_managed_block_at_end() {
   local begin_marker="$2"
   local begin_marker_regex="$3"
   local end_marker="$4"
-  local legacy_begin_marker="$5"
-  local legacy_end_marker="$6"
-  local content="$7"
+  local content="$5"
   local had_existing_block=0
   local filtered_file
 
   ensure_file_exists "$path"
 
-  if grep -Eq "$begin_marker_regex" "$path" || grep -Fqx "$legacy_begin_marker" "$path"; then
+  if grep -Eq "$begin_marker_regex" "$path"; then
     had_existing_block=1
   fi
 
   filtered_file="$(mktemp)"
   awk \
     -v begin_regex="$begin_marker_regex" \
-    -v end_marker="$end_marker" \
-    -v legacy_begin="$legacy_begin_marker" \
-    -v legacy_end="$legacy_end_marker" '
+    -v end_marker="$end_marker" '
     BEGIN { in_block = 0 }
     {
-      if (in_block == 0 && ($0 ~ begin_regex || $0 == legacy_begin)) {
+      if (in_block == 0 && ($0 ~ begin_regex)) {
         in_block = 1
         next
       }
-      if (in_block == 1 && ($0 == end_marker || $0 == legacy_end)) {
+      if (in_block == 1 && ($0 == end_marker)) {
         in_block = 0
         next
       }
@@ -219,14 +213,17 @@ write_from_template_if_new() {
 
 # --- Knowledge tier files ---
 write_from_template_if_new \
-  "$PROJECT_ROOT/zamm-memory/active/knowledge/WEEKLY.md" \
-  "$SCAFFOLD_DIR/knowledge-weekly.template.md"
+  "$PROJECT_ROOT/zamm-memory/active/knowledge/BEDROCK.md" \
+  "$SCAFFOLD_DIR/knowledge-bedrock.template.md"
 write_from_template_if_new \
-  "$PROJECT_ROOT/zamm-memory/active/knowledge/MONTHLY.md" \
-  "$SCAFFOLD_DIR/knowledge-monthly.template.md"
+  "$PROJECT_ROOT/zamm-memory/active/knowledge/SAND.md" \
+  "$SCAFFOLD_DIR/knowledge-sand.template.md"
 write_from_template_if_new \
-  "$PROJECT_ROOT/zamm-memory/active/knowledge/EVERGREEN.md" \
-  "$SCAFFOLD_DIR/knowledge-evergreen.template.md"
+  "$PROJECT_ROOT/zamm-memory/active/knowledge/PEBBLES.md" \
+  "$SCAFFOLD_DIR/knowledge-pebbles.template.md"
+write_from_template_if_new \
+  "$PROJECT_ROOT/zamm-memory/active/knowledge/COBBLES.md" \
+  "$SCAFFOLD_DIR/knowledge-cobbles.template.md"
 
 # --- Plan roots ---
 ensure_dir "$PROJECT_ROOT/zamm-memory/active/plans"
@@ -253,8 +250,6 @@ if [ -f "$AGENTS_HEADER" ] && [ -f "$RULE_HEADER" ] && [ -f "$PROTOCOL_BODY" ]; 
     "$ZAMM_AGENTS_BEGIN_MARKER" \
     "$ZAMM_AGENTS_BEGIN_MARKER_REGEX" \
     "$ZAMM_AGENTS_END_MARKER" \
-    "$ZAMM_AGENTS_LEGACY_BEGIN_MARKER" \
-    "$ZAMM_AGENTS_LEGACY_END_MARKER" \
     "$AGENTS_CONTENT"
   write_template_file "$PROJECT_ROOT/.cursor/rules/zamm.mdc" "$RULE_CONTENT"
 else
@@ -267,7 +262,7 @@ echo ""
 echo "ZAMM scaffold complete."
 echo "Next steps:"
 echo "  1. Review .cursor/rules/zamm.mdc, AGENTS.md, and .cursorignore"
-echo "  2. Add initial EVERGREEN cards (architecture, key entry points)"
+echo "  2. Add initial BEDROCK cards (ritual-gated anchors, human-triggered updates) and COBBLES cards (stable agent context)"
 echo "  3. Create your first plan directory and plan file:"
 echo "     PLAN_SLUG=\"$(date +%Y-%m-%d)-YOUR-PLAN-SLUG\""
 echo "     mkdir -p zamm-memory/active/plans/\$PLAN_SLUG/workdir"

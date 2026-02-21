@@ -3,7 +3,7 @@
 ZAMM is a lightweight operating workflow for agentic software work.
 It combines three things:
 - task execution through plan directories,
-- bounded memory distillation through **WEEKLY -> MONTHLY -> EVERGREEN** tiers,
+- bounded memory distillation through **BEDROCK (ritual-gated) + SAND -> PEBBLES -> COBBLES** tiers,
 - archive hygiene that moves finished plan contexts out of active memory.
 
 In short: plan while doing, distill what lasts, archive the rest.
@@ -23,10 +23,12 @@ Data is stored in `zamm-memory` in the project root with `active` and `archive` 
 
 ## Knowledge motion model
 
-- WEEKLY cap window: 30..37 cards
-- MONTHLY cap window: 12..16 cards
-- EVERGREEN cap window: 10..14 cards
-- Plan learnings are collected during plan execution and appended into WEEKLY first.
+- BEDROCK: ritual-gated anchor tier (human-triggered updates only; no automated consolidation)
+- SAND cap window: 30..37 cards
+- PEBBLES cap window: 12..16 cards
+- COBBLES cap window: 10..14 cards
+- Tier ID prefixes: `B` = Bedrock, `C` = Cobbles, `P` = Pebbles, `S` = Sand
+- Plan learnings are collected during plan execution and appended into SAND first.
 - Consolidation is triggered when upper bounds are reached and then reduced to lower bounds.
 - Distillation of valuable information via promotion into higher tier.
 - Consolidation by demotion into lower tier or offloading into archive log.
@@ -52,7 +54,7 @@ Update `zamm` in skill directory, then run `zamm-scaffold.sh --overwrite-templat
 
 - Full operating protocol: `SKILL.md`
 - Shared protocol source: `<zamm-skill>/references/scaffold/protocol-body.template.md`
-- Plan template: `<zamm-skill>/references/templates/plan-template.plan.template.md`
+- Plan template: `<zamm-skill>/references/templates/plan.template.md`
 
 
 # Appendix
