@@ -30,9 +30,13 @@ Tier caps:
 - COBBLES: 10..14 cards
 
 Card schema (MUST):
-- Use this field order for every memory card: `Lineage`, `Statement`, `Last updated`, `Upvotes`, `Downvotes`.
-- New cards start with `Upvotes: 1` and `Downvotes: 0`.
-- For every newly added learning-derived card, increment exactly one memory-card vote once (`Upvotes` or `Downvotes`) to capture whether prior memory helped or misled.
+- Use this field order for every memory card: `Ln`, `St`, `Lu`, `Up`, `Dn`.
+- `Ln` means lineage (source card chain).
+- `St` means statement, the essence of the knowledge/learning.
+- `Lu` means last updated date (`YYYY-MM-DD`).
+- `Up` means number of upvotes; starts at 1.
+- `Dn` means number of downvotes; starts at 0.
+- For every newly added learning-derived card, increment exactly one memory-card vote once (`Up` or `Dn`) to capture whether prior memory helped or misled.
 - Do not use legacy fields (`Claim`, `Evidence`, `Last verified`, `Confidence`, `Expiry hint`).
 
 Distillation ingress rule:
@@ -154,7 +158,7 @@ Transition-time requirements:
   - Fill `Done-approved-by`, `Done-approved-at`, and `Done-approval-evidence`.
   - After setting `Status: Done` and finishing file edits, run:
     - `bash <zamm-skill>/scripts/zamm-archive.sh --archive`
-- For each newly added learning-derived card, increment one memory-card vote exactly once (`Upvotes` or `Downvotes`).
+- For each newly added learning-derived card, increment one memory-card vote exactly once (`Up` or `Dn`).
 - Record those card IDs in plan `Memory-upvotes` / `Memory-downvotes`.
 
 ## Wellbeing Telemetry (Plan Files)
