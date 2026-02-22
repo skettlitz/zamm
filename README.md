@@ -3,7 +3,7 @@
 ZAMM is a lightweight operating workflow for agentic software work.
 It combines three things:
 - task execution through plan directories,
-- bounded memory distillation through **BEDROCK (ritual-gated) + SAND -> PEBBLES -> COBBLES** tiers,
+- bounded memory distillation through **SAND -> PEBBLES -> COBBLES -> BEDROCK** tiers,
 - archive hygiene that moves finished plan contexts out of active memory.
 
 In short: plan while doing, distill what lasts, archive the rest.
@@ -23,10 +23,10 @@ Data is stored in `zamm-memory` in the project root with `active` and `archive` 
 
 ## Knowledge motion model
 
-- BEDROCK: ritual-gated anchor tier (human-triggered updates only; no automated consolidation)
 - SAND cap window: 30..37 cards
 - PEBBLES cap window: 12..16 cards
 - COBBLES cap window: 10..14 cards
+- BEDROCK: content only updated on special occasions
 - Tier ID prefixes: `B` = Bedrock, `C` = Cobbles, `P` = Pebbles, `S` = Sand
 - Plan learnings are collected during plan execution and appended into SAND first.
 - Consolidation is triggered when upper bounds are reached and then reduced to lower bounds.
