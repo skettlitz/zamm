@@ -31,6 +31,10 @@ Tier caps:
 
 Card schema (MUST):
 - Use this field order for every memory card: `Ln`, `St`, `Lu`, `Up`, `Dn`.
+- Each tier file MUST maintain a `Next ID: Xn` header above the card list.
+- `Next ID` is a monotonic per-tier allocator. Never recompute it from the current cards, never decrement it, and never reuse an old suffix after promotion, demotion, deletion, or archival.
+- When creating a new card in a tier, consume that tier's current `Next ID`, write the card, then increment the header immediately.
+- When a card moves to another tier, create a fresh destination-tier ID there; keep prior IDs only in `Ln`.
 - `Ln` means lineage (source card chain).
 - `St` means statement, the essence of the knowledge/learning.
 - `Lu` means last updated date (`YYYY-MM-DD`).
@@ -40,7 +44,7 @@ Card schema (MUST):
 - Do not use legacy fields (`Claim`, `Evidence`, `Last verified`, `Confidence`, `Expiry hint`).
 
 Distillation ingress rule:
-- When plan learnings are distilled, edit existing or append new SAND cards at the end of `SAND.md` first.
+- When plan learnings are distilled, edit existing or append new SAND cards at the end of `SAND.md` first, using SAND's current `Next ID` for each newly created card.
 - After append, if any automated tier is at or above its upper tolerance bound, run consolidation immediately.
 
 Consolidation trigger:
@@ -67,18 +71,18 @@ Consolidation archive record (MUST):
   5. Links/IDs for cards moved between tiers where applicable
 
 SAND consolidation (run when SAND >= 37; reset to 30):
-- Promote exactly 1 high-value SAND card to PEBBLES (append at end of PEBBLES).
+- Promote exactly 1 high-value SAND card to PEBBLES by appending a new Pebbles card at the end of `PEBBLES.md` using `PEBBLES.md`'s current `Next ID`; preserve the prior source ID in `Ln`.
 - Unify/edit overlapping SAND cards when it improves clarity.
 - Archive lowest-value/redundant SAND cards until SAND is 30.
 
 PEBBLES consolidation (run when PEBBLES >= 16; reset to 12):
-- Promote exactly 1 high-value PEBBLES card to COBBLES (append at end of COBBLES).
+- Promote exactly 1 high-value PEBBLES card to COBBLES by appending a new Cobbles card at the end of `COBBLES.md` using `COBBLES.md`'s current `Next ID`; preserve the prior source ID in `Ln`.
 - Unify/edit overlapping PEBBLES cards when it improves clarity.
-- Demote lower-value PEBBLES cards to SAND (remove from PEBBLES; append to SAND) until PEBBLES is 12.
+- Demote lower-value PEBBLES cards to SAND by removing them from PEBBLES and appending new Sand cards to `SAND.md` using `SAND.md`'s current `Next ID` until PEBBLES is 12; preserve prior IDs in `Ln`.
 
 COBBLES consolidation (run when COBBLES >= 14; reset to 10):
 - Keep the 10 best, most durable cards in COBBLES.
-- Consolidate by demotion only: demote overly similar/lower-signal COBBLES cards to PEBBLES (remove from COBBLES; append to PEBBLES) until COBBLES is 10.
+- Consolidate by demotion only: demote overly similar/lower-signal COBBLES cards to PEBBLES by removing them from COBBLES and appending new Pebbles cards to `PEBBLES.md` using `PEBBLES.md`'s current `Next ID` until COBBLES is 10; preserve prior IDs in `Ln`.
 
 ## Plan Directory Model (MUST)
 

@@ -3,6 +3,8 @@ Last maintained: __TODAY__
 
 <!-- Symbolic tier (not calendar-bound). Cap window 10..14 cards (reset target: 10), ~220 lines. One line = max 200 chars. -->
 <!-- Card format: Cn (Scope: ...) / Ln: Sn | Pn | Cn / St / Lu / Up / Dn -->
+<!-- Auto-increment this ID counter every time a new entry is added here; never recompute from existing cards or reuse old suffixes. -->
+Next ID: C2
 
 ---
 

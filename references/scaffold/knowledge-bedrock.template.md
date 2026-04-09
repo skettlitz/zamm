@@ -4,6 +4,8 @@ Last maintained: __TODAY__
 <!-- Highest tier, content only updated in special human-triggered ceremonies. Agents MUST read this file at Session Start. -->
 <!-- Bedrock is intentionally uncapped and excluded from automatic consolidation. -->
 <!-- Card format: Bn (Scope: ...) / Ln: Bn [| Cn | Pn | Sn] / St / Lu / Up / Dn -->
+<!-- Auto-increment this ID counter every time a new entry is added here; never recompute from existing cards or reuse old suffixes. -->
+Next ID: B13
 
 ---
 
