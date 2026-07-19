@@ -1,77 +1,168 @@
 # Zippy Agentic Memory Mill (ZAMM)
 
-ZAMM is a lightweight operating workflow for agentic software work.
-It combines three things:
+Coding agents forget everything between sessions. The usual fix — one growing memory file — bloats
+until nobody reads it, and merge-conflicts the moment two machines or branches write to it.
+
+ZAMM gives agents durable project memory that prunes itself and merges cleanly, wrapped in a
+lightweight operating workflow that combines three things:
+
 - task execution through plan directories,
-- bounded memory distillation through **SAND -> PEBBLES -> COBBLES -> BEDROCK** tiers,
+- an **append-only knowledge ledger** of immutable record files, compiled into a bounded ranked
+  digest at session start,
 - archive hygiene that moves finished plan contexts out of active memory.
 
-In short: plan while doing, distill what lasts, archive the rest.
+In short: plan while doing, distill what lasts as immutable records, let the compiler rank the
+rest. The ledger is unbounded; attention is bounded.
+
+ZAMM memory is advisory: it complements code, tests, and documentation and never outranks them.
 
 Canonical skill name/folder is `zamm`.
 
-## Project Status
+## How it works in sixty seconds
 
-In **development and testing**; The structure is still evolving and tested on internal projects.
+1. Plans hold current work: mutable files with explicit status transitions and human-approved
+   closure.
+2. Durable learnings become small immutable record files under `zamm-memory/knowledge/<year>/`.
+   Writers only ever add uniquely named files; committed records are never edited.
+3. Corrections do not touch old records: a new record declares `supersedes: <old-id>` and the old
+   file simply drops out of view while staying in history.
+4. At session start the agent runs `zamm-compile.sh`, which ranks all live records — author-rated
+   importance, decaying over an author-rated shelf-life, corrected by votes from plan outcomes —
+   and emits a bounded digest: an actionable top section balanced across knowledge areas (so one
+   hot topic cannot drown the rest), one-line reminders below it, and counts for everything else.
+   Fully decayed records go dormant: unlisted, but still greppable in the ledger. The digest
+   ends with a compact listing of active plans (status, progress, title) plus the most
+   recently archived plan IDs, so session start needs no separate plan discovery and a plan
+   that moved to the archive on another machine stays findable after a pull.
+5. Finished plans move to the archive.
 
-## Current Structure (Plan-Only Model)
+Here is one record file — skeleton created by `zamm-new-memory.sh`, filled by the agent,
+immutable once committed. Everything above `## Background` is what the digest shows; the rest is
+read on demand:
 
-`<zamm-skill>` means your installed skill directory (for example `~/.agents/skills/zamm` or `.agents/skills/zamm`).
+```markdown
+# zamm-memory/knowledge/2026/2026-07-18-awk-posix-only-7k3fq.md
+---
+type: memory
+scope: tooling/shell
+importance: guardrail
+durability: years
+created: 2026-07-18
+schema: 3
+---
+Keep every script POSIX sh + awk; stock macOS awk has no gawk extensions, so
+gawk-isms break the toolchain for Mac users.
 
-Data is stored in `zamm-memory` in the project root with `active` and `archive` subdirectories.
+Applies to scripts/ and any generated hooks.
 
+## Background
+Found when gensub() failed on macOS 14 (awk 20200816). ...
+```
 
-## Knowledge motion model
+The digest entry it becomes (`!` marks a guardrail — do not violate; `+bg` flags a Background
+section worth opening before high-impact action; votes join the bracket as they accumulate):
 
-- SAND cap window: 30..37 cards
-- PEBBLES cap window: 12..16 cards
-- COBBLES cap window: 10..14 cards
-- BEDROCK: content only updated on special occasions
-- Tier ID prefixes: `B` = Bedrock, `C` = Cobbles, `P` = Pebbles, `S` = Sand
-- Each tier file keeps a monotonic `Next ID: Xn` header; consume it for new cards, then increment it immediately. Never recalculate from live cards or reuse old suffixes.
-- Plan learnings are collected during plan execution and appended into SAND first with fresh Sand IDs.
-- Consolidation is triggered when upper bounds are reached and then reduced to lower bounds.
-- Distillation of valuable information via promotion into higher tier with fresh destination-tier IDs and preserved lineage in `Ln`.
-- Consolidation by demotion into lower tier with fresh destination-tier IDs or offloading into archive log.
+```markdown
+### tooling/shell
+- ! Keep every script POSIX sh + awk; stock macOS awk has no gawk extensions, so
+  gawk-isms break the toolchain for Mac users. [2026-07-18-awk-posix-only-7k3fq +bg]
+  Applies to scripts/ and any generated hooks.
+```
 
+To update this memory later, the agent writes a new record with
+`supersedes: 2026-07-18-awk-posix-only-7k3fq` — the old file never changes. If two branches
+update the same memory independently, git merges cleanly (two added files) and the next digest
+flags both heads under `Needs reconciliation`; the agent resolves them by writing one record
+that supersedes both.
 
-## Installation
+Digest budgets and scoring constants are deliberately not documented here: they are tuning
+knobs, and their single authoritative home is the commented header of `scripts/zamm-compile.sh`.
+The digest itself explains its own entry format at the top of every compile.
 
-Clone from github
+## What the human does
+
+ZAMM runs mostly agent-side. The human:
+
+- approves plan closure (`Review -> Done`) — agents cannot self-approve,
+- approves one-time operations before they run: project scaffolding, initialization scans,
+  protocol migrations, and any git-history erasure,
+- occasionally answers "is this still true?" when the agent flags suspected-stale knowledge,
+- sees every ledger write in ordinary code review — records are plain markdown files in git.
+
+## What gets added to a project
+
+| Path | Purpose | Committed? |
+| --- | --- | --- |
+| `zamm-memory/knowledge/<YYYY>/` | immutable ledger records | yes |
+| `zamm-memory/active/plans/`, `zamm-memory/archive/plans/` | plan contexts | yes |
+| `zamm-memory/VERSION` | installed protocol version (`3`) | yes |
+| `zamm-memory/.compiled/memory.md` | generated digest | no (gitignored) |
+| `AGENTS.md` managed block | rendered runtime protocol | yes |
+| `.cursor/rules/zamm.mdc` | rendered runtime protocol (Cursor) | when used |
+| `.gitignore`, `.gitattributes`, `.cursorignore` | required lines appended / created | yes |
+
+## Install the skill (human)
 
 ```bash
 git clone https://github.com/skettlitz/zamm.git
 ```
 
-Copy into skills subdirectory (e.g. `.cursor/skills` or `.agents/skills`). Ensure that the subdirectory is named `zamm` and contains `SKILL.md`.
+Copy into your skills subdirectory (e.g. `.cursor/skills` or `.agents/skills`). Ensure the
+subdirectory is named `zamm` and contains `SKILL.md`.
 
-The agent runs `zamm-scaffold.sh`, creating the plan-only `zamm-memory/` tree, `AGENTS.md`, `.cursor/rules/zamm.mdc`, and `.cursorignore`.
+## Set up a project (agent, with your consent)
+
+Ask your agent to set up ZAMM in the repository. It runs
+`zamm-scaffold.sh --project-root <repo-root>`, which creates the `zamm-memory/` tree and
+writes the runtime files listed in the table above, printing every path it touched. The script
+is idempotent and safe to rerun. If the ledger is empty afterwards, the agent asks before
+running the initialization scan — a deliberate, human-approved pass over the existing project.
 
 ## Updating
 
-Update `zamm` in skill directory, then run `zamm-scaffold.sh --overwrite-templates`.
+Update the `zamm` skill directory, then have the agent run
+`zamm-scaffold.sh --overwrite-templates`: it re-renders every scaffold-managed runtime file
+(`AGENTS.md` managed block, `.cursor/rules/zamm.mdc`, `.cursorignore`) from the installed skill.
+Rendered runtime files carry a skill-version stamp; agents notice the drift and offer this
+refresh on their own.
 
-## Read Next
+Upgrading a project from tiered card memory (v1/v2): run the migration guide
+`references/migrations/v1-v2-to-v3-memory.md` first; the scaffold refuses to run over a pre-v3
+memory tree.
 
-- Full operating protocol: `SKILL.md`
-- Shared protocol source: `<zamm-skill>/references/scaffold/protocol-body.template.md`
+## Safety and limitations
+
+- Never store secrets, tokens, credentials, or personal data in records. The ledger is
+  append-only and lives in git, so true erasure is an exceptional, human-approved operation
+  (see the Erasure section of the protocol).
+- **Conflict-resistant, not conflict-free.** Normal knowledge writes add uniquely named files,
+  so ordinary git content conflicts on memory are rare by construction. Semantic conflicts still
+  exist — competing updates survive the merge and are reconciled explicitly — and plan files
+  remain mutable and can conflict like any other file.
+- Memory is advisory. Agents verify records against code and tests before high-impact actions
+  and supersede suspected-stale entries instead of trusting them.
+
+## Requirements and supported runtimes
+
+- POSIX sh + awk plus standard tools (find, sort, sed); no third-party runtime dependencies.
+  Runs on stock macOS, Linux, and Windows via Git Bash.
+- git is recommended (merging, history, erasure) but the ledger itself works without it.
+- Runtime surfaces: `SKILL.md` for skill-based harnesses, the `AGENTS.md` managed block for
+  AGENTS.md-reading runtimes, `.cursor/rules/zamm.mdc` for Cursor.
+
+## Project Status
+
+In **development and testing**; the structure is still evolving and tested on internal projects.
+
+## Learn more
+
+- Full operating contract: `<zamm-skill>/references/scaffold/protocol-body.template.md`
+  (rendered into each project's runtime files by the scaffold)
+- Agent entry point and dispatcher: `SKILL.md`
 - Plan template: `<zamm-skill>/references/templates/plan.template.md`
+- Memory record template: `<zamm-skill>/references/templates/memory-record.template.md`
+- Existing project initialization: `<zamm-skill>/references/initialization/existing-project.md`
+- Major-version migrations: `<zamm-skill>/references/migrations/`
+- Design rationale and change map vs. v2: `DELTAS.md`
 
-
-# Appendix
-
-## Animal tiers for complexity estimation
-
-`Complexity-forecast: ant|gecko|raccoon|capybara|badger|octopus|manatee|shark|godzilla`
-
-| Level | Animal       | The character it signals | Typical cues                                                     |
-| ----- | ------------ | ------------------------ | ---------------------------------------------------------------- |
-| 1     | **ant**      | tiny + obvious           | one tiny surface, no debate, trivial validation                  |
-| 2     | **gecko**    | small + quick            | small change, minimal side effects, easy to revert               |
-| 3     | **raccoon**  | small but sneaky         | edge cases, odd environments, “it depends” lurking               |
-| 4     | **capybara** | medium + chill           | normal feature slice, known path, steady work                    |
-| 5     | **badger**   | medium + stubborn        | tricky testing, awkward constraints, needs persistence           |
-| 6     | **octopus**  | many tentacles           | multiple components/dependencies, integration work, coordination |
-| 7     | **manatee**  | big but gentle           | lots of work, **low drama**: predictable, repeatable steps       |
-| 8     | **shark**    | big + toothy             | high consequence / blast radius, rollout/rollback matters        |
-| 9     | **godzilla** | city-level               | initiative-sized, unknown unknowns, must be sliced + discovery   |
+(`<zamm-skill>` means your installed skill directory, for example `~/.agents/skills/zamm`.)

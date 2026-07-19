@@ -2,3 +2,7 @@
 AGENTS.md
 /zamm-memory
 .DS_Store
+
+# Local dogfood fixtures (copied live project data)
+/data/
+zamm-memory/.compiled/

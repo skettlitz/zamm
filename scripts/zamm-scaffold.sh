@@ -10,8 +10,10 @@ usage() {
   echo ""
   echo "  --project-root   Optional explicit repository root (default: current directory)"
   echo "  --overwrite-templates"
-  echo "                   Overwrite scaffold-managed runtime rule file if it exists"
-  echo "                   (.cursor/rules/zamm.mdc)"
+  echo "                   Re-render every scaffold-managed runtime file from the"
+  echo "                   installed skill: overwrites .cursor/rules/zamm.mdc and"
+  echo "                   .cursorignore if present (default: existing files are kept)."
+  echo "                   The AGENTS.md managed block is re-rendered either way."
   exit 1
 }
 
@@ -55,6 +57,9 @@ TODAY=$(date +%Y-%m-%d)
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SCAFFOLD_DIR="$SKILL_DIR/references/scaffold"
 PLAN_TEMPLATE="$SKILL_DIR/references/templates/plan.template.md"
+VERSION_TEMPLATE="$SCAFFOLD_DIR/version.template"
+VERSION_FILE="$PROJECT_ROOT/zamm-memory/VERSION"
+CURRENT_ZAMM_VERSION="3"
 ZAMM_AGENTS_BEGIN_MARKER_REGEX="^<!-- SKILL-BLOCK:zamm:BEGIN"
 ZAMM_AGENTS_END_MARKER="<!-- SKILL-BLOCK:zamm:END -->"
 ZAMM_BLOCK_VERSION="local"
@@ -92,7 +97,33 @@ if version_sha="$(git -C "$SKILL_DIR" rev-parse --short HEAD 2>/dev/null)"; then
 fi
 ZAMM_AGENTS_BEGIN_MARKER="<!-- SKILL-BLOCK:zamm:BEGIN version=${ZAMM_BLOCK_VERSION} date=${TODAY} -->"
 
+read_zamm_version() {
+  if [ -f "$VERSION_FILE" ]; then
+    sed -n '1p' "$VERSION_FILE" | tr -d '[:space:]'
+  fi
+}
+
+# Refuse to scaffold while pre-v3 tier card files still exist; card conversion
+# needs agent judgment and is covered by the migration guide instead. A stale
+# pre-v3 VERSION with no tier files left means the migration guide is mid-run
+# (tier files deleted, finalization pending) — proceed and overwrite VERSION.
+require_v3_or_fresh() {
+  local current_version
+  current_version="$(read_zamm_version)"
+  if [ "$current_version" = "$CURRENT_ZAMM_VERSION" ]; then
+    return 0
+  fi
+  if ls "$PROJECT_ROOT/zamm-memory/active/knowledge/"*.md >/dev/null 2>&1; then
+    echo "ERROR: pre-v3 tier card files exist under zamm-memory/active/knowledge/ (VERSION='${current_version:-missing}')."
+    echo "       Run the migration guide first:"
+    echo "       $SKILL_DIR/references/migrations/v1-v2-to-v3-memory.md"
+    exit 1
+  fi
+  rmdir "$PROJECT_ROOT/zamm-memory/active/knowledge" 2>/dev/null || true
+}
+
 echo "ZAMM: scaffolding in ${PROJECT_ROOT}"
+require_v3_or_fresh
 
 write_if_new() {
   local path="$1"
@@ -125,6 +156,18 @@ ensure_file_exists() {
   if [ ! -f "$path" ]; then
     : > "$path"
     echo "  created: $path"
+  fi
+}
+
+ensure_line() {
+  local path="$1"
+  local line="$2"
+  if [ -f "$path" ] && grep -Fqx "$line" "$path"; then
+    echo "  exists: $path ($line)"
+  else
+    mkdir -p "$(dirname "$path")"
+    printf '%s\n' "$line" >> "$path"
+    echo "  appended: $path ($line)"
   fi
 }
 
@@ -199,41 +242,42 @@ render_template_file() {
 
 render_runtime_surface_content() {
   local content="$1"
-  content="${content//<zamm-skill>/$RESOLVED_ZAMM_SKILL}"
+  # Expand only the FIRST <zamm-skill> token — the definition line in
+  # "## Script Path Resolution". Later occurrences stay literal and read as
+  # the alias defined there; repeating the full path ~12x costs every agent
+  # ~300 tokens per session for zero information.
+  content="${content/<zamm-skill>/$RESOLVED_ZAMM_SKILL}"
   printf '%s' "$content"
 }
 
-write_from_template_if_new() {
-  local dest_path="$1"
-  local source_path="$2"
+write_current_zamm_version() {
   local content
-  content="$(render_template_file "$source_path")"
-  write_if_new "$dest_path" "$content"
+
+  if [ -f "$VERSION_TEMPLATE" ]; then
+    content="$(render_template_file "$VERSION_TEMPLATE")"
+  else
+    content="$CURRENT_ZAMM_VERSION"
+  fi
+
+  mkdir -p "$(dirname "$VERSION_FILE")"
+  printf '%s\n' "$content" > "$VERSION_FILE"
+  echo "  version: $VERSION_FILE -> $CURRENT_ZAMM_VERSION"
 }
 
-# --- Knowledge tier files ---
-write_from_template_if_new \
-  "$PROJECT_ROOT/zamm-memory/active/knowledge/BEDROCK.md" \
-  "$SCAFFOLD_DIR/knowledge-bedrock.template.md"
-write_from_template_if_new \
-  "$PROJECT_ROOT/zamm-memory/active/knowledge/SAND.md" \
-  "$SCAFFOLD_DIR/knowledge-sand.template.md"
-write_from_template_if_new \
-  "$PROJECT_ROOT/zamm-memory/active/knowledge/PEBBLES.md" \
-  "$SCAFFOLD_DIR/knowledge-pebbles.template.md"
-write_from_template_if_new \
-  "$PROJECT_ROOT/zamm-memory/active/knowledge/COBBLES.md" \
-  "$SCAFFOLD_DIR/knowledge-cobbles.template.md"
-
-# --- Plan roots ---
+# --- Ledger + plan roots ---
+ensure_dir "$PROJECT_ROOT/zamm-memory/knowledge"
 ensure_dir "$PROJECT_ROOT/zamm-memory/active/plans"
 ensure_dir "$PROJECT_ROOT/zamm-memory/archive/plans"
-ensure_dir "$PROJECT_ROOT/zamm-memory/archive/knowledge/consolidations"
+ensure_dir "$PROJECT_ROOT/zamm-memory/archive/knowledge/initializations"
+
+# --- Git hygiene for the ledger ---
+ensure_line "$PROJECT_ROOT/.gitignore" "zamm-memory/.compiled/"
+ensure_line "$PROJECT_ROOT/.gitattributes" "zamm-memory/**/*.md text eol=lf"
 
 # --- Cursor ignore rules ---
-write_from_template_if_new \
-  "$PROJECT_ROOT/.cursorignore" \
-  "$SCAFFOLD_DIR/cursorignore"
+if [ -f "$SCAFFOLD_DIR/cursorignore" ]; then
+  write_template_file "$PROJECT_ROOT/.cursorignore" "$(cat "$SCAFFOLD_DIR/cursorignore")"
+fi
 
 # --- AGENTS.md + Cursor rule (composed from canonical fragments) ---
 AGENTS_HEADER="$SCAFFOLD_DIR/agents-header.template.md"
@@ -258,20 +302,27 @@ else
   [ -f "$PROTOCOL_BODY" ] || echo "  warning: missing template fragment: $PROTOCOL_BODY"
 fi
 
+write_current_zamm_version
+
 echo ""
 echo "ZAMM scaffold complete."
-echo "Next steps:"
-echo "  1. Review .cursor/rules/zamm.mdc, AGENTS.md, and .cursorignore"
-echo "  2. Add initial BEDROCK cards (ritual-gated anchors, human-triggered updates) and COBBLES cards (stable agent context)"
-echo "  3. Create your first plan directory and plan file:"
+echo "Next steps (commands are safe from any cwd):"
+echo "  1. Review .cursor/rules/zamm.mdc, AGENTS.md, .cursorignore, .gitignore, .gitattributes"
+echo "  2. Compile the (empty) digest and confirm the toolchain works:"
+echo "     bash \"$SKILL_DIR/scripts/zamm-compile.sh\" --project-root \"$PROJECT_ROOT\""
+echo "  3. If the digest reports no live records, ask whether to run"
+echo "     \"$SKILL_DIR/references/initialization/existing-project.md\""
+echo "  4. Create memory records with:"
+echo "     bash \"$SKILL_DIR/scripts/zamm-new-memory.sh\" --project-root \"$PROJECT_ROOT\" --scope '<area[/subpath][, area2]>' <topic-slug>"
+echo "  5. Create your first plan directory and plan file:"
 echo "     PLAN_SLUG=\"$(date +%Y-%m-%d)-YOUR-PLAN-SLUG\""
-echo "     mkdir -p zamm-memory/active/plans/\$PLAN_SLUG/workdir"
+echo "     mkdir -p \"$PROJECT_ROOT/zamm-memory/active/plans/\$PLAN_SLUG/workdir\""
 if [ -f "$PLAN_TEMPLATE" ]; then
-  echo "     cp \"$PLAN_TEMPLATE\" zamm-memory/active/plans/\$PLAN_SLUG/\$PLAN_SLUG.plan.md"
+  echo "     cp \"$PLAN_TEMPLATE\" \"$PROJECT_ROOT/zamm-memory/active/plans/\$PLAN_SLUG/\$PLAN_SLUG.plan.md\""
 else
   echo "     (plan template missing at $PLAN_TEMPLATE; create the .plan.md file manually)"
 fi
-echo "  4. Check current plan status buckets anytime:"
-echo "     bash \"$SKILL_DIR/scripts/zamm-status.sh\""
-echo "  5. Archive finished plan directories when ready:"
-echo "     bash \"$SKILL_DIR/scripts/zamm-archive.sh\""
+echo "  6. Check current plan status buckets anytime:"
+echo "     bash \"$SKILL_DIR/scripts/zamm-status.sh\" --project-root \"$PROJECT_ROOT\""
+echo "  7. Archive finished plan directories when ready:"
+echo "     bash \"$SKILL_DIR/scripts/zamm-archive.sh\" --project-root \"$PROJECT_ROOT\""

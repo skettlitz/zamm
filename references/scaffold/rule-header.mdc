@@ -1,6 +1,6 @@
 ---
-description: ZAMM — Bedrock/Cobbles/Pebbles/Sand memory protocol for agentic development
+description: ZAMM - append-only ledger memory protocol for agentic development
 alwaysApply: true
 ---
 
-# ZAMM — Agent Session Protocol
+# ZAMM - Agent Session Protocol

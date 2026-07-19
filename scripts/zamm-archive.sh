@@ -169,6 +169,17 @@ done
 
 echo ""
 echo "Archive summary: moved=$moved skipped=$skipped failed=$failed"
+
+# Keep the digest's Plans tail current: recompile after any successful move.
+if [ "$moved" -gt 0 ]; then
+  COMPILE_SCRIPT="$(cd "$(dirname "$0")" && pwd)/zamm-compile.sh"
+  if [ -f "$COMPILE_SCRIPT" ] && sh "$COMPILE_SCRIPT" --project-root "$PROJECT_ROOT" >/dev/null 2>&1; then
+    echo "Digest recompiled."
+  else
+    echo "WARNING: digest recompile failed; run zamm-compile.sh manually."
+  fi
+fi
+
 if [ "$failed" -gt 0 ]; then
   exit 1
 fi
