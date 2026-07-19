@@ -1,7 +1,7 @@
-# Draft v3 — change map vs. v2
+# v3 — change map vs. v2
 
-This directory is a complete draft of the v3 skill tree. Design rationale and
-citations: `../research-report.md`. Decisions locked 2026-07-14/16: random
+This file records what changed in the v3 skill tree and why. Decisions
+locked 2026-07-14/16: random
 5-char base32 suffix; votes as one batch record per plan closure; plan
 directories unchanged; digest attention budget Digests 75 full blocks +
 Headlines 150 one-line reminders (tunable; ~same space as 100 full entries,
@@ -254,4 +254,4 @@ behavior — it never restates numbers.
 | digest entry format | the digest's own self-describing header |
 | activation, state dispatch, command mechanics | `SKILL.md` |
 | concepts, pitch, human workflow | `README.md` |
-| design rationale and change history | `DELTAS.md`, `research-report.md` |
+| design rationale and change history | `DELTAS.md` |
