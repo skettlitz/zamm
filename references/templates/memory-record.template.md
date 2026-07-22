@@ -23,6 +23,6 @@ of it at session start.>
 <Optional deep detail: full reasoning, evidence paths, history. Only read
 on demand (+bg marker). Delete this whole section when the digest block
 carries everything. Delete the supersedes line when not replacing an older
-record. Prefer creating records via scripts/zamm-new-memory.sh, which
+record. Prefer creating records via `zamm-run.sh memory create`, which
 generates the collision-safe filename and the frontmatter skeleton
 automatically.>

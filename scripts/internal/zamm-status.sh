@@ -13,7 +13,7 @@ usage() {
   echo "Usage: zamm-status.sh [--project-root <path>]"
   echo ""
   echo "  --project-root   Optional explicit repository root (default: current directory)"
-  exit 1
+  exit "${1:-1}"
 }
 
 resolve_explicit_root() {
@@ -86,7 +86,7 @@ while [ $# -gt 0 ]; do
       shift 2
       ;;
     -h|--help)
-      usage
+      usage 0
       ;;
     *)
       echo "ERROR: unknown argument: $1"

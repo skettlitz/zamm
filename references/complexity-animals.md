@@ -1,7 +1,7 @@
 # Animal scale for complexity estimation
 
 Plans rate `Complexity-forecast:` and `Complexity-felt:` on this nine-animal
-scale (see `Wellbeing Telemetry` in the protocol). The compact canonical
+scale (see `Execution Telemetry` in the protocol). The compact canonical
 definitions travel as a comment in `references/templates/plan.template.md`;
 this file holds the fuller cues for calibration.
 

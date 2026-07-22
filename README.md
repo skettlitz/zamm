@@ -26,7 +26,7 @@ Canonical skill name/folder is `zamm`.
    Writers only ever add uniquely named files; committed records are never edited.
 3. Corrections do not touch old records: a new record declares `supersedes: <old-id>` and the old
    file simply drops out of view while staying in history.
-4. At session start the agent runs `zamm-compile.sh`, which ranks all live records — author-rated
+4. At session start the agent runs `zamm-run.sh memory digest`, which ranks all live records — author-rated
    importance, decaying over an author-rated shelf-life, corrected by votes from plan outcomes —
    and emits a bounded digest: an actionable top section balanced across knowledge areas (so one
    hot topic cannot drown the rest), one-line reminders below it, and counts for everything else.
@@ -36,7 +36,7 @@ Canonical skill name/folder is `zamm`.
    that moved to the archive on another machine stays findable after a pull.
 5. Finished plans move to the archive.
 
-Here is one record file — skeleton created by `zamm-new-memory.sh`, filled by the agent,
+Here is one record file — skeleton created by `zamm-run.sh memory create`, filled by the agent,
 immutable once committed. Everything above `## Background` is what the digest shows; the rest is
 read on demand:
 
@@ -76,7 +76,7 @@ flags both heads under `Needs reconciliation`; the agent resolves them by writin
 that supersedes both.
 
 Digest budgets and scoring constants are deliberately not documented here: they are tuning
-knobs, and their single authoritative home is the commented header of `scripts/zamm-compile.sh`.
+knobs, and their single authoritative home is the commented header of `scripts/internal/zamm-compile.sh`.
 The digest itself explains its own entry format at the top of every compile.
 
 ## What the human does
@@ -113,7 +113,7 @@ subdirectory is named `zamm` and contains `SKILL.md`.
 ## Set up a project (agent, with your consent)
 
 Ask your agent to set up ZAMM in the repository. It runs
-`zamm-scaffold.sh --project-root <repo-root>`, which creates the `zamm-memory/` tree and
+`zamm-run.sh scaffold`, which creates the `zamm-memory/` tree and
 writes the runtime files listed in the table above, printing every path it touched. The script
 is idempotent and safe to rerun. If the ledger is empty afterwards, the agent asks before
 running the initialization scan — a deliberate, human-approved pass over the existing project.
@@ -121,7 +121,7 @@ running the initialization scan — a deliberate, human-approved pass over the e
 ## Updating
 
 Update the `zamm` skill directory, then have the agent run
-`zamm-scaffold.sh --overwrite-templates`: it re-renders every scaffold-managed runtime file
+`zamm-run.sh scaffold`: it re-renders every scaffold-managed runtime file
 (`AGENTS.md` managed block, `.cursor/rules/zamm.mdc`, `.cursorignore`) from the installed skill.
 Rendered runtime files carry a skill-version stamp; agents notice the drift and offer this
 refresh on their own.
@@ -142,10 +142,41 @@ memory tree.
 - Memory is advisory. Agents verify records against code and tests before high-impact actions
   and supersede suspected-stale entries instead of trusting them.
 
+## Commands
+
+Everything runs through one entrypoint, which finds the project root itself
+(nearest ancestor holding `zamm-memory/`, else the git top level):
+
+```
+zamm-run.sh scaffold             install/refresh ZAMM in this project
+zamm-run.sh status               health overview: ledger, plans, drift
+zamm-run.sh help [<topic>]
+
+zamm-run.sh memory digest       rebuild the digest from the ledger
+zamm-run.sh memory check         validate the ledger, write nothing
+zamm-run.sh memory create <slug> create a new record
+
+zamm-run.sh plan list          plan directories grouped by status
+zamm-run.sh plan archive         move terminal plan directories to the archive
+```
+
+Pass `--project-root <path>` to override root detection. The underlying
+scripts remain callable directly, but `zamm-run.sh` is the supported surface.
+
+**One entrypoint means one permission rule.** Agent harnesses allowlist
+commands by prefix, so a single entry covers every ZAMM operation:
+
+```json
+{ "permissions": { "allow": ["Bash(bash /path/to/zamm/scripts/zamm-run.sh:*)"] } }
+```
+
 ## Requirements and supported runtimes
 
-- POSIX sh + awk plus standard tools (find, sort, sed); no third-party runtime dependencies.
-  Runs on stock macOS, Linux, and Windows via Git Bash.
+- Bash plus POSIX awk and standard tools (find, sort, sed); no third-party runtime
+  dependencies. Everything is reached through one entrypoint, `zamm-run.sh`, which
+  picks the right interpreter per command: the compiler and record creator are POSIX
+  sh, while scaffold, archive and status use bash features.
+  Targets stock macOS, Linux, and Windows via Git Bash.
 - git is recommended (merging, history, erasure) but the ledger itself works without it.
 - Runtime surfaces: `SKILL.md` for skill-based harnesses, the `AGENTS.md` managed block for
   AGENTS.md-reading runtimes, `.cursor/rules/zamm.mdc` for Cursor.

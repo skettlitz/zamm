@@ -38,6 +38,20 @@ Durability `days`/`weeks`: a heat-of-the-moment signal enters the ledger as a
 cheap hypothesis, not doctrine. Supersede with longer durability if it proves
 out.
 
+**Attention lifetime is not storage retention.** `durability` controls only
+how fast a record decays out of the digest; the file itself stays in the
+repository and in git history permanently. A `durability: days` record about
+a bad afternoon is forgotten by the ranking within weeks and readable by the
+whole team in five years.
+
+So the trigger is the resulting technical rule, never the episode that
+produced it. Record "the staging deploy needs the migration run first — this
+broke twice" and not who was frustrated, who broke it, or what was said about
+them. Do not write records that identify interpersonal friction, name
+colleagues in a critical light, or characterise anyone's performance or
+mood, unless the human explicitly asks for that to be retained. When the only
+durable content would be the interpersonal event itself, write nothing.
+
 ### Exceptional praise
 
 The symmetric positive trigger: record *what earned it* — the approach,

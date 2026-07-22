@@ -2,6 +2,8 @@
 
 The `zamm` skill directory is `<zamm-skill>`. Every `<zamm-skill>` token below stands for that directory (scripts live in its `scripts/` subdirectory); expand it when running the commands.
 
+Commands are reached through one entrypoint, `zamm-run.sh`, which finds the project root itself: the nearest ancestor directory holding `zamm-memory/`, else the git top level. That is why no command below passes a root — running from a subdirectory resolves correctly on its own. Pass `--project-root <path>` only when the working directory is genuinely outside the target project.
+
 ## Session Start (MUST - do this before primary task work)
 
 1. Protocol version check:
@@ -12,7 +14,7 @@ The `zamm` skill directory is `<zamm-skill>`. Every `<zamm-skill>` token below s
    - Migration work updates `zamm-memory/VERSION` only after migration is complete.
 
 2. Digest compile and cold-start read:
-   - Run `bash <zamm-skill>/scripts/zamm-compile.sh` (always; it is fast, deterministic, and safe to rerun).
+   - Run `bash <zamm-skill>/scripts/zamm-run.sh memory digest` (always; it is fast, deterministic, and safe to rerun).
    - On a new chat/session, read `zamm-memory/.compiled/memory.md` once.
    - The digest has two attention layers (same approximate space budget as ~100 full entries, ~2.25× coverage):
      - `## Digest` — up to ~75 actionable full blocks (headline + elaboration). A leading `!` marks a guardrail — do not violate it.
@@ -24,26 +26,31 @@ The `zamm` skill directory is `<zamm-skill>`. Every `<zamm-skill>` token below s
    - If the ledger contains no memory records, tell the human active memory has not been initialized and ask whether to run `<zamm-skill>/references/initialization/existing-project.md`. Do not create placeholder records to silence initialization prompts.
 
 3. Identify the active plan from the digest's `## Plans` tail — a compact entry per active plan (status line with progress, then title), ranked Review, Implementing, Draft; terminal plans still in `active/` are flagged archive-ready. A short recently-archived list follows: check it before treating a referenced plan directory as missing after a pull.
-4. If no plan matches the user request, create a new plan directory and `.plan.md` file using:
+4. If no plan matches the user request AND the request warrants a plan, create a new plan directory and `.plan.md` file using:
    - `<zamm-skill>/references/templates/plan.template.md`
    Then recompile the digest so its Plans tail lists the new plan.
+   - Warrants a plan: multi-step work, changes that persist beyond the session, anything producing research artifacts or a decision worth revisiting, or work you expect to span sessions.
+   - Does NOT warrant a plan: answering a question, reading or explaining code, a lookup, a one-line or single-file trivial edit, running a command for the human. Plan-less sessions are normal and expected — `## Session End (MUST)` covers them, and distillation still applies (a durable learning from a plan-less session is still written to the ledger).
+   - The human overrides in either direction on request; when genuinely unsure, ask rather than defaulting to a plan directory nobody wanted.
 5. Soft focus rule: prefer one active implementing plan at a time; if unclear, auto-pick by best match and ask the human only when ambiguity remains.
 
 ## Ledger Memory Model (MUST)
 
 Active knowledge is an append-only ledger of immutable record files under `zamm-memory/knowledge/<YYYY>/`. There are no tiers, no ID counters, and no consolidation rituals: the compiler (`zamm-compile.sh`) derives liveness, vote totals, ranking, and supersede links from the records at read time. Ranking = author-rated importance decayed over the author-rated durability horizon, corrected by votes; fully decayed records go dormant (counted in the digest, not listed, always greppable in the ledger). Attention is bounded in two layers: up to ~75 full Digest blocks (actionable) and up to ~150 Headlines (reminders); further live records stay greppable but unlisted. Digest seats are balanced across top-level scope areas by a per-area score penalty (a weighted compromise, not a quota) so one hot topic cannot drown the others; a record with several area tags competes through its least-crowded area but pays a small score cost per extra tag, so precise tagging wins over tag-sprawl. Live guardrails never go dormant and are always included in the Digest layer: `!` is a safety contract, so a guardrail leaves the digest only through supersession or a tombstone, never through silent decay or downvotes.
 
+What is and is not bounded: the ~75 Digest blocks and ~150 Headlines are the only capped sections. Live guardrails are admitted BEFORE that cap and can exceed it; competing heads under `Needs reconciliation`, every active plan, and the recently-archived tail are all listed in full. The digest is therefore bounded in its ranked layers, not in total size — an inflated guardrail count or a large conflict backlog grows it without limit. Keep guardrails rare (`memory check` warns past 15 live ones) and resolve conflicts rather than letting them accumulate.
+
 Record file rules:
 - One file is one immutable record. Never edit, rename, or delete a record file once committed (sole exception: `## Erasure (exceptional)`).
 - Filename is the record ID: `YYYY-MM-DD-<topic-slug>-<suffix>.md`.
   - All lowercase; charset `[a-z0-9-]` only; slug at most 40 chars; date is the creation date.
-  - `<suffix>` is 5 random chars from the alphabet `23456789abcdefghjkmnpqrstvwxyz` (lowercase Crockford base32 without `0 1 i l o u`). The suffix exists so uncoordinated writers on different machines cannot collide.
-- Prefer creating records with `bash <zamm-skill>/scripts/zamm-new-memory.sh <topic-slug>`; hand-written files MUST follow the same naming and schema rules.
-- Never rename or move files or directories under `zamm-memory/knowledge/` (the add-only layout is what keeps ledger merges conflict-resistant; renames reintroduce ordinary git conflicts).
+  - `<suffix>` is 5 random chars from the 30-symbol alphabet `23456789abcdefghjkmnpqrstvwxyz` (lowercase Crockford base32 minus the visually ambiguous `0 1 i l o u` — 30 symbols, not 32). The suffix exists so uncoordinated writers on different machines cannot collide: collisions are only possible between records sharing the same date AND the same slug, so the 30^5 space is far larger than the risk it covers.
+- Prefer creating records with `bash <zamm-skill>/scripts/zamm-run.sh memory create --scope '<area[/subpath][, area2]>' <topic-slug>`; hand-written files MUST follow the same naming and schema rules.
+- Never rename or move files or directories under `zamm-memory/knowledge/` (the add-only layout is what keeps ledger merges conflict-resistant; renames reintroduce ordinary git conflicts). Two documented exceptions: `## Erasure (exceptional)`, and `zamm-run.sh memory archive`, which moves whole retired chains to `zamm-memory/archive/knowledge/`. A chain qualifies only when nothing in it still affects the digest — no live memory record and no live votes record — because votes aggregate over the whole ancestor chain of a record, so a dead ancestor of a live head is load-bearing. Archived records stay greppable in the working tree and their ids stay resolvable; the command verifies the digest is unchanged and rolls back if it is not.
 - Never store secrets, tokens, or credentials in records; ledger records are effectively permanent.
 - Never quote the human verbatim in a record: paraphrase the substance and, where the register matters, describe the emotion (e.g. "strong frustration with rebuild times") instead of the raw words. Records are permanent and team-visible; profanity and heat-of-the-moment phrasing must not be immortalized.
 
-Record schema — frontmatter is flat `key: value` lines between two `---` lines; every value is a plain string; lists are comma-separated; unknown keys are ignored; omit empty keys (one exception: a fresh votes skeleton from `zamm-new-memory.sh` carries empty `up:`/`down:` lines — fill at least one before committing; `--check` rejects a votes record with both empty):
+Record schema — frontmatter is flat `key: value` lines between two `---` lines; every value is a plain string; lists are comma-separated; unknown keys are ignored; omit empty keys (one exception: a fresh votes skeleton from `zamm-run.sh memory create --type votes` carries empty `up:`/`down:` lines — fill at least one before committing; `memory check` rejects a votes record with both empty):
 - `type`: `memory` | `tombstone` | `votes`
 - `scope`: 1-3 comma-separated area tags, e.g. `contracts/record-schema, conventions`. The first (primary) tag is `<area>[/<subpath>]` and is where the record displays; secondary tags are bare areas that give the record extra selection doors. Areas MUST come from the fixed v3 set:
   - `domain` — what the product is for: purpose, users, requirements, external constraints (e.g. "this tool targets solo maintainers, not enterprise fleets")
@@ -54,7 +61,7 @@ Record schema — frontmatter is flat `key: value` lines between two `---` lines
   - `tooling` — dev-time things used, not shipped: commands, environment, platform quirks (e.g. "awk on macOS lacks gawk extensions; keep scripts POSIX")
   - `ops` — ship/run-time mechanics: release, versioning, deploy, migration (e.g. "bump zamm-memory/VERSION only after migration completes")
   - `meta` — agent/process failure patterns, corrections, collaboration norms with the human (e.g. "prefer reading the digest over re-scanning the ledger at cold start")
-  - `other` — catch-all when none of the eight areas fit cleanly. MUST be the sole tag with no subpath. Prefer the closest real area first; use `other` only as temporary parking, then refile via supersession (`--check` fails above 5 live `other` records)
+  - `other` — catch-all when none of the eight areas fit cleanly. MUST be the sole tag with no subpath. Prefer the closest real area first; use `other` only as temporary parking, then refile via supersession (`memory check` fails above 5 live `other` records)
 
   Tag only areas the record genuinely serves: each extra tag adds a selection chance but costs ranking, so tag-sprawl is self-defeating. Never invent new top-level areas. Boundary-straddle example: a CLI flag that is both an interop surface and a naming rule → `contracts/cli-flags, conventions`.
 - `importance`: `guardrail` | `useful` (default) | `minor`. `guardrail` means violating the statement breaks the project or wastes hours — expect a handful per project, not per week; rating inflation gets corrected by downvotes and erodes trust in the digest.
@@ -75,6 +82,7 @@ Semantics:
 - Retire a memory: write a tombstone record (`type: tombstone`, `supersedes: <target-id>`).
 - Merge duplicates: write ONE record whose body unifies the statements and whose `supersedes:` lists all merged record IDs.
 - Vote: never edit counters anywhere; votes are their own records (see `## Plan Status Transitions (MUST)`).
+- Correct a vote: supersede the votes record. A votes record that is superseded or tombstoned stops counting entirely, so superseding it with a corrected votes record (or retiring it with a tombstone) IS the correction path — never edit the original, and never cast an opposite vote to cancel one out. A votes record may only supersede another votes record.
 
 ## Distillation (MUST)
 
@@ -82,7 +90,7 @@ Mechanics:
 - Prefer correction over accretion: supersede stale records, merge overlaps, add only genuinely new knowledge.
 - Rate `importance`/`durability` honestly — they are the whole ranking system. Refresh a still-true record near its horizon by superseding with re-rated fields.
 - Suspected-stale but unverified: supersede with a `suspected drift` record plus a verification note.
-- A write is complete only after `zamm-compile.sh --check` passes and the digest is recompiled. Records are drafts until committed, immutable after.
+- A write is complete only after `bash <zamm-skill>/scripts/zamm-run.sh memory check` passes and the digest is recompiled. Records are drafts until committed, immutable after.
 
 Write a record when (compact cues; full semantics in `<zamm-skill>/references/distillation-triggers.md`):
 - the human says remember this — same turn, no damping
@@ -95,9 +103,11 @@ Do not write: free-floating values with nowhere to recheck; external changes tha
 
 ## Reconciliation (MUST)
 
-- After a `git merge`/`git pull`, two branches may have independently superseded the same record. Both successors stay live (git does not conflict on added files) and the digest lists them under `Needs reconciliation`.
-- Resolve in the same session the digest surfaces it: write ONE new record whose body merges the competing statements (or picks the correct one, stating why) and whose `supersedes:` lists ALL competing head IDs.
-- If ground truth cannot be determined from code, git history, or context, still resolve now: write the merge record as the conservative union of the competing claims (keep every restriction, drop no warning), mark it `suspected drift` with a one-line verification note, and confirm with the human at the next opportunity. Never leave the heads unmerged because certainty is missing.
+- After a `git merge`/`git pull`, two branches may have independently superseded the same record. Both successors stay live (git does not conflict on added files) and the digest lists them under `Needs reconciliation` — an index; each competing head also keeps its FULL block in `## Digest`, marked `~`, so conflicting detail is never hidden.
+- Attempt resolution in the session the digest surfaces it: when ground truth IS determinable from code, git history, tests, or context, write ONE new record whose body merges the competing statements (or picks the correct one, stating why) and whose `supersedes:` lists ALL competing head IDs.
+- If ground truth CANNOT be determined, leave the heads unmerged. Do not invent a merged claim to clear the warning: this ledger is append-only, so a fabricated union is permanent, while the `suspected drift` marker that excuses it decays out of the digest long before the claim does. An unresolved conflict is information; a manufactured resolution is a durable false record wearing a resolved badge.
+  - Instead: tell the human the group is unresolved, state what evidence would settle it (a file to read, a test to run, a person to ask), and leave both heads live. The digest keeps surfacing the group until it is genuinely resolved — that is the intended steady state, not a failure.
+  - Write a merge record ONLY when you believe it. "Keep every restriction from both heads" is a legitimate merge when the claims are compatible and you can say so; it is not a default escape hatch, and it is wrong when the heads contradict each other, when one describes retired behavior, or when combining the restrictions would block work that should be possible.
 - Never resolve by deleting or editing the head files, and never silently prefer one head by timestamp; timestamps across machines are display metadata, not causality.
 
 ## Erasure (exceptional)
@@ -106,6 +116,8 @@ Only for secrets or personal data committed by mistake:
 1. Append the record ID to `zamm-memory/knowledge/shun.md` (one ID per line, `#` comments allowed) so compilers ignore any stray copy.
 2. Delete the record file.
 3. Git history rewriting (`git filter-repo` or equivalent) is a separate, explicitly human-approved operation; ask, never assume.
+
+A shunned ID stays a valid graph node, so erasure does not break the ledger: records that supersede it remain valid and keep their place in the chain (`memory check` does not report a missing target), while the erased record contributes no content, no votes, and no durability credit. Votes pointing at it are dropped silently. Successors are NOT rewritten — never edit a committed record to remove a `supersedes:` pointer at an erased ID.
 
 ## Plan Directory Model (MUST)
 
@@ -117,7 +129,7 @@ Only for secrets or personal data committed by mistake:
 - Archive moves the full plan directory to `zamm-memory/archive/plans/<plan-dir>/`.
 - `Done` and `Abandoned` are terminal; continue with a new plan directory.
 - Do not maintain separate workstream state/index files. The compiled digest lists active plans compactly; when digging deeper, search `zamm-memory/active/plans/**/*.plan.md` and read `Status:`.
-- Recompile the digest whenever a plan directory is created or archived (`zamm-archive.sh --archive` recompiles on its own); other status transitions are picked up by the recompile step of the ledger-write transaction during transition distillation.
+- Recompile the digest whenever a plan directory is created or archived (`zamm-run.sh plan archive` recompiles on its own); other status transitions are picked up by the recompile step of the ledger-write transaction during transition distillation.
 
 ## Offsite Planning Backfill (MUST)
 
@@ -159,7 +171,7 @@ Transition-time requirements:
   - `Done` and `Abandoned` are terminal. Do not resume work on a terminal plan; create a new plan.
 - `Draft -> Implementing`:
   - Ensure scope + `Done-when` are filled.
-  - Fill `Wellbeing-before` and `Complexity-forecast`.
+  - Fill `Execution-context-before` and `Complexity-forecast`.
 - `Draft -> Abandoned`:
   - Record rationale under `## Loose ends`.
 - `Implementing -> Review`:
@@ -169,28 +181,33 @@ Transition-time requirements:
   - Distill durable learnings into the ledger as new records (superseding stale ones where applicable).
   - Fill `Memory-upvotes` / `Memory-downvotes` in the plan file with the ledger record IDs that helped or misled during this plan.
   - Write ONE votes record (`type: votes`, `plan: <plan-dir>`, `up:`/`down:` mirroring those plan fields). Skip only when both lists are empty.
-  - Fill `Wellbeing-after`, `Complexity-felt`, and `Complexity-delta`.
+  - Fill `Execution-friction-after`, `Complexity-felt`, and `Complexity-delta`.
   - Ask for human approval before `Done`.
 - `Implementing -> Abandoned`:
   - Check off completed `Done-when` todos.
   - Record rationale and cleanup notes.
-  - Apply the same distillation, learnings, votes-record, and wellbeing requirements as `Implementing -> Review`.
+  - Apply the same distillation, learnings, votes-record, and telemetry requirements as `Implementing -> Review`.
 - `Review -> Implementing`:
   - Capture requested changes and re-open relevant `Done-when` items.
 - `Review -> Done`:
   - Only after explicit human approval while plan is in `Review`.
   - Fill `Done-approved-by`, `Done-approved-at`, and `Done-approval-evidence`.
   - After setting `Status: Done` and finishing file edits, run:
-    - `bash <zamm-skill>/scripts/zamm-archive.sh --archive`
+    - `bash <zamm-skill>/scripts/zamm-run.sh plan archive`
 
-## Wellbeing Telemetry (Plan Files)
+## Execution Telemetry (Plan Files)
+
+These fields describe the WORK — its friction, its uncertainty, how the
+estimate held up. They are not about anyone's inner state: plan files are
+committed and team-visible, so keep personal and health-adjacent detail out
+of them entirely.
 
 Plans should include:
-- `Wellbeing-before:` free text
+- `Execution-context-before:` free text — what makes this hard or uncertain going in: unknowns, missing access, risky surfaces, coordination needed
 - `Complexity-forecast:` one of `ant|gecko|raccoon|capybara|badger|octopus|manatee|shark|godzilla|kraken` (`kraken` is the off-scale wicked marker: the problem never truly resolves, so scope the plan as a bounded probe with closeable `Done-when` items, never as "solve it")
 - `Memory-upvotes:` optional ledger record IDs that helped (for example `2026-05-14-tier-motion-x2f4a`)
 - `Memory-downvotes:` optional ledger record IDs that were misleading/inconsistent (only when problems were observed)
-- `Wellbeing-after:` free text (fill on `Review` or `Abandoned`)
+- `Execution-friction-after:` free text (fill on `Review` or `Abandoned`) — what actually cost time: tooling failures, flaky steps, missing docs, rework, waiting on answers
 - `Complexity-felt:` same scale (fill on `Review` or `Abandoned`)
 - `Complexity-delta:` `lighter|as-expected|heavier` (fill on `Review` or `Abandoned`)
 - `Done-approved-by:` required when `Status: Done`
@@ -207,14 +224,14 @@ Plans should include:
 
 ## Archive Flow (Optional)
 
-- Run `bash <zamm-skill>/scripts/zamm-archive.sh` to list archive-ready plan directories.
-- Run `bash <zamm-skill>/scripts/zamm-archive.sh --archive` to move ready plan directories into `zamm-memory/archive/plans/`; it recompiles the digest afterwards so the Plans tail reflects the move.
+- Run `bash <zamm-skill>/scripts/zamm-run.sh plan archive` to list archive-ready plan directories.
+- Run `bash <zamm-skill>/scripts/zamm-run.sh plan archive` to move ready plan directories into `zamm-memory/archive/plans/`; it recompiles the digest afterwards so the Plans tail reflects the move.
 - Archive flow shall be triggered every time after a plan was marked `Status: Done` after file edits are finished.
 - Ledger records are never archived by this flow; superseded and tombstoned records simply stay in place and drop out of the digest.
 
 ## Plan Status Snapshot (Optional)
 
-- Run `bash <zamm-skill>/scripts/zamm-status.sh` to view grouped plan counts and listings by status.
+- Run `bash <zamm-skill>/scripts/zamm-run.sh plan list` to view grouped plan counts and listings by status.
 - Buckets are: `Draft`, `Implementing`, `Review`, `Done`, `Abandoned`, and `Unknown`.
 
 ## Precedence (when sources conflict)

@@ -21,7 +21,7 @@ authoritative.
 
 Drift rule: the `SKILL-BLOCK:zamm:BEGIN version=...` stamp in `AGENTS.md` records the skill
 version that rendered it. When it differs from the installed skill, tell the human and offer
-`zamm-scaffold.sh --overwrite-templates` before proceeding under the old rules.
+`zamm-run.sh scaffold` before proceeding under the old rules.
 
 ## Dispatch by repository state
 
@@ -34,7 +34,7 @@ version that rendered it. When it differs from the installed skill, tell the hum
 | digest shows `Needs reconciliation` | resolve it this session | `Reconciliation (MUST)` |
 | digest shows no live records | ask before initialization; never write placeholder records | `references/initialization/existing-project.md` |
 | a distillation cue fires: remember-this; correction/standing rule; strong emotion with substance; repeated failure or dead end; pointable research result | ledger write transaction (below) | `Distillation (MUST)`; full semantics: `references/distillation-triggers.md` |
-| plan moves to `Review` or `Abandoned` | learnings + votes record + wellbeing fields | `Plan Status Transitions (MUST)` |
+| plan moves to `Review` or `Abandoned` | learnings + votes record + telemetry fields | `Plan Status Transitions (MUST)` |
 | plan `Done` (human-approved, from `Review` only) | archive flow | `Archive Flow (Optional)` |
 | secrets or personal data landed in a record | exceptional erasure; git-history rewriting needs separate human approval | `Erasure (exceptional)` |
 
@@ -42,18 +42,24 @@ Referenced section names live in the rendered runtime files / protocol template 
 
 ## Ledger write transaction
 
-1. `bash <zamm-skill>/scripts/zamm-new-memory.sh --project-root <repo-root> --scope '<area[/subpath][, area2]>' <topic-slug>` — prints the created file path. Add `--type`, `--importance`, `--durability`, `--supersedes`, `--plan` as applicable.
+1. `bash <zamm-skill>/scripts/zamm-run.sh memory create --scope '<area[/subpath][, area2]>' <topic-slug>` — prints the created file path. Add `--type`, `--importance`, `--durability`, `--supersedes`, `--plan` as applicable.
 2. Fill the skeleton: memory → digest block (headline paragraph + optional elaboration, optional `## Background`); tombstone → one-line reason; votes → at least one of `up:`/`down:`. Paraphrase the human — never verbatim quotes; describe the emotion instead of the raw words.
-3. `bash <zamm-skill>/scripts/zamm-compile.sh --check --project-root <repo-root>` — fix every violation until it prints `ZAMM check passed.`
-4. `bash <zamm-skill>/scripts/zamm-compile.sh --project-root <repo-root>` — refresh the digest (prints `ZAMM digest: <path>`).
+3. `bash <zamm-skill>/scripts/zamm-run.sh memory check` — fix every violation until it prints `ZAMM check passed.`
+4. `bash <zamm-skill>/scripts/zamm-run.sh memory digest` — rebuild the digest and print its contents.
 5. Never edit a committed record; correct it with a new record carrying `supersedes:`.
 
 ## Commands
 
-- Scaffold / refresh: `bash <zamm-skill>/scripts/zamm-scaffold.sh --project-root <repo-root>` — idempotent; creates the `zamm-memory/` tree, edits `.gitignore`/`.gitattributes`, writes `AGENTS.md` (managed block), `.cursor/rules/zamm.mdc`, `.cursorignore`; prints a summary and next steps. Add `--overwrite-templates` after a skill update to re-render every scaffold-managed runtime file. Refuses to run over a pre-v3 memory tree.
+- Scaffold / refresh: `bash <zamm-skill>/scripts/zamm-run.sh scaffold` — idempotent; creates the `zamm-memory/` tree, edits `.gitignore`/`.gitattributes`, writes `AGENTS.md` (managed block), `.cursor/rules/zamm.mdc`, `.cursorignore`; prints a summary and next steps. Always re-renders the managed surfaces, so it is also how you refresh after a skill update. Refuses to run over a pre-v3 memory tree.
 - Compile / validate: see the transaction above.
-- Plan status buckets: `bash <zamm-skill>/scripts/zamm-status.sh --project-root <repo-root>`
-- Archive terminal plans: `bash <zamm-skill>/scripts/zamm-archive.sh --project-root <repo-root> [--archive]` — lists ready plan directories; `--archive` moves them.
+- Plan status buckets: `bash <zamm-skill>/scripts/zamm-run.sh plan list`
+- Archive terminal plans: `bash <zamm-skill>/scripts/zamm-run.sh plan archive` — moves terminal plan directories; refuses any plan that fails `plan check`.
+- Validate plans: `bash <zamm-skill>/scripts/zamm-run.sh plan check` — required fields for the declared status, unchecked Done-when items.
+- Validate everything: `bash <zamm-skill>/scripts/zamm-run.sh check` — ledger + plans, one exit code.
+- Health overview: `bash <zamm-skill>/scripts/zamm-run.sh status` — read-only.
+- Browse the ledger: `bash <zamm-skill>/scripts/zamm-run.sh memory list [--all] [--scope <area>]` and `memory show <slug|id>`.
+- Retire storage: `bash <zamm-skill>/scripts/zamm-run.sh memory archive` — moves fully-retired chains out of the scan path; verifies the digest is unchanged.
+- New plan: `bash <zamm-skill>/scripts/zamm-run.sh plan create '<title>'`; inspect one with `plan show <slug>`.
 
 ## Gated guides
 

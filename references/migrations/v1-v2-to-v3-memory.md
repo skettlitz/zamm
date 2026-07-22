@@ -33,6 +33,26 @@ merged; other clones are protected by the version check until they pull.
 3. The v3 skill is installed (this guide, `zamm-compile.sh`,
    `zamm-new-memory.sh`, and the v3 scaffold templates are present).
 
+### If plans were still open when the migration ran
+
+Precondition 2 is routinely missed, so handle it rather than assume it. Any
+plan that crossed the migration still carries v2-era `Memory-upvotes:` /
+`Memory-downvotes:` values — old tier card IDs (`S28`, `B3`, ...) that no
+longer name anything in a v3 ledger.
+
+**Clear those fields; do NOT convert them into v3 votes records.** The card
+counters they fed were already migrated into `seed-up:` / `seed-dn:` on the
+new records, so re-emitting them double-counts. Worse, a votes record written
+today carries today's date, and vote weight is recency-decayed — a vote cast
+months ago would land with full fresh weight and outrank genuinely current
+signal.
+
+Note the reason in the plan's `## Loose ends` when closing it, so the cleared
+fields do not read as an oversight later. If the arithmetic does not
+reconcile (counters that do not match the number of plans citing a card),
+that history is not recoverable — say so and move on; do not reconstruct
+votes by guesswork.
+
 ## Source files by starting version
 
 - v1 (Bedrock era): `zamm-memory/active/knowledge/BEDROCK.md`, `COBBLES.md`,
@@ -79,11 +99,11 @@ archive tree) as a migration source.
      fresh lowercase `[a-z0-9-]` slug derived from the card's Scope and
      statement gist (max 40 chars), and `<suffix>` is 5 random chars from
      `23456789abcdefghjkmnpqrstvwxyz`.
-   - Recommended: `bash <zamm-skill>/scripts/zamm-new-memory.sh --date <Lu> --scope <scope> <slug>`
+   - Recommended: `bash <zamm-skill>/scripts/zamm-run.sh memory create --date <Lu> --scope <scope> <slug>`
      creates the file with the `Lu`-dated filename in the matching year
      directory and a matching `created:` line in one step. The filename date,
      `created:` field, and year directory MUST all agree;
-     `zamm-compile.sh --check` fails on any mismatch.
+     `zamm-run.sh memory check` fails on any mismatch.
    - Frontmatter:
      - `type: memory`
      - `scope:` mapped per step 1
@@ -121,7 +141,7 @@ archive tree) as a migration source.
 4. Delete the four tier files (git history preserves them). Leave
    `zamm-memory/archive/knowledge/` untouched — it is not part of the v3
    ledger and is not scanned by the compiler.
-5. Run `bash <zamm-skill>/scripts/zamm-scaffold.sh` — on a repo without
+5. Run `bash <zamm-skill>/scripts/zamm-run.sh scaffold` — on a repo without
    `active/knowledge/` and with the new records in place it will create the
    ledger directories, append `zamm-memory/.compiled/` to `.gitignore`,
    append the `.gitattributes` line, refresh `AGENTS.md` and
@@ -130,9 +150,9 @@ archive tree) as a migration source.
    `zamm-memory/active/knowledge/` — the guard that you completed step 4. A
    leftover pre-v3 `VERSION` value is expected at this point; the scaffold
    overwrites it.)
-6. Run `bash <zamm-skill>/scripts/zamm-compile.sh --check` and fix any
+6. Run `bash <zamm-skill>/scripts/zamm-run.sh memory check` and fix any
    reported naming/schema violations.
-7. Run `bash <zamm-skill>/scripts/zamm-compile.sh` and verify:
+7. Run `bash <zamm-skill>/scripts/zamm-run.sh memory digest` and verify:
    - the digest's live-record count equals the total live card count from
      step 2,
    - former Boulder/Bedrock cards appear as `!` guardrails in ## Digest,
@@ -148,7 +168,7 @@ archive tree) as a migration source.
 ```bash
 grep -RIl "Next ID" zamm-memory/ && echo "FAIL: counter headers remain" || echo "ok: no counters"
 find zamm-memory/active/knowledge -type f 2>/dev/null | grep . && echo "FAIL: tier files remain" || echo "ok: no tier files"
-bash <zamm-skill>/scripts/zamm-compile.sh --check
+bash <zamm-skill>/scripts/zamm-run.sh memory check
 cat zamm-memory/VERSION   # must be exactly: 3
 grep -Fx "zamm-memory/.compiled/" .gitignore
 ```
@@ -159,7 +179,7 @@ grep -Fx "zamm-memory/.compiled/" .gitignore
   hierarchy into the new ranking (guardrails sit at the top and do not decay);
   `seed-up`/`seed-dn` seed the vote totals. Later corrections happen through
   supersession and votes, never by editing the migrated files.
-- The v2 wellbeing/plan model is unchanged; plan files and the archive flow
+- The v2 plan model is unchanged (the wellbeing fields are renamed to `Execution-context-before` / `Execution-friction-after`); plan files and the archive flow
   migrate as-is.
 - After migration, memory updates follow v3 rules only: new records, never
   in-place edits.

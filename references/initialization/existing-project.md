@@ -57,7 +57,7 @@ The top-level scope areas are fixed by the protocol — the same 8 knowledge-kin
 - `internals` — how shipped things work and why they have that shape
   - Example: "digest ranking = importance × durability-decay + votes"
 - `quality` — how correctness is verified: test strategy, checks, known failure modes of the artifact. Test vs `internals`: describing behavior vs describing how behavior is proven.
-  - Example: "run `zamm-compile.sh --check` before committing ledger writes"
+  - Example: "run `zamm-run.sh memory check` before committing ledger writes"
 - `tooling` — dev-time things used, not shipped: commands, environment, platform quirks. Test vs `internals`: things you use vs things you ship.
   - Example: "macOS awk is not gawk; keep compile scripts POSIX"
 - `ops` — ship/run-time mechanics: release, versioning, deploy, migration. Test vs `tooling`: matters while developing vs while shipping/running.
@@ -69,7 +69,7 @@ The top-level scope areas are fixed by the protocol — the same 8 knowledge-kin
 Every scope is 1-3 comma-separated tags, primary first (`<area>[/<subpath>]`, secondary tags bare). A record straddling a boundary takes both areas instead of forcing a choice (example: a CLI flag that is both an interop surface and a naming rule → `contracts/cli-flags, conventions`). A record that truly fits nowhere takes `other` alone and gets refiled later. Tag only what the record genuinely serves — extra tags cost ranking. Finer separation belongs in subpaths (`internals/archive-script`), never in invented areas.
 
 Create one ledger record per accepted candidate with
-`bash <zamm-skill>/scripts/zamm-new-memory.sh --scope '<area/subpath>[, <area2>]' --importance <i> --durability <d> <slug>`, then fill the body (digest block: headline first paragraph + optional elaboration; optional `## Background`).
+`bash <zamm-skill>/scripts/zamm-run.sh memory create --scope '<area/subpath>[, <area2>]' --importance <i> --durability <d> <slug>`, then fill the body (digest block: headline first paragraph + optional elaboration; optional `## Background`).
 
 Rating rubric (these two fields are the whole ranking system):
 
@@ -80,7 +80,7 @@ Rating rubric (these two fields are the whole ranking system):
 
 A completed initialization should normally create at least one guardrail record. Initialization seed records are exempt from the plan-closure votes flow because there is no plan context; capture the seed rationale in the initialization record instead.
 
-After seeding, run `bash <zamm-skill>/scripts/zamm-compile.sh` and confirm the digest reflects the seeds.
+After seeding, run `bash <zamm-skill>/scripts/zamm-run.sh memory digest` and confirm the digest reflects the seeds.
 
 ## Initialization Record
 

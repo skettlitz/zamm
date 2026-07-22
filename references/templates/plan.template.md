@@ -1,7 +1,7 @@
 # <Plan title>
 
 Status: Draft
-Wellbeing-before:
+Execution-context-before:
 Complexity-forecast:
 <!-- canonical scale: ant=tiny+obvious | gecko=small+quick | raccoon=small-but-sneaky | capybara=medium+chill | badger=medium+stubborn | octopus=many-components | manatee=big-but-predictable | shark=high-blast-radius | godzilla=initiative-sized | kraken=wicked-off-scale:never-truly-solved,scope-a-bounded-probe-not-a-solution; fuller cues: <zamm-skill>/references/complexity-animals.md -->
 
@@ -30,7 +30,7 @@ Scope:
 
 - (none yet)
 
-Wellbeing-after:
+Execution-friction-after:
 Complexity-felt:
 Complexity-delta:
 Done-approved-by:

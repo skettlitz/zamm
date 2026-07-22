@@ -1,0 +1,36 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    # The suite shells out to the real scripts, so the matrix is what
+    # actually verifies the portability claim in README.md: BSD awk and
+    # BSD stat on macOS, GNU on Linux.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Show shell toolchain
+        run: |
+          echo "awk:  $(awk --version 2>&1 | head -1 || awk -W version 2>&1 | head -1)"
+          echo "bash: $(bash --version | head -1)"
+          echo "sh:   $(readlink -f /bin/sh 2>/dev/null || echo /bin/sh)"
+      - name: Run tests
+        env:
+          ZAMM_SLOW: '1'
+          # Linux runners are case-sensitive, so the case-fold collision
+          # check must actually execute there. Without this the test could
+          # skip on every platform forever and guard nothing.
+          ZAMM_REQUIRE_CASE_SENSITIVE: ${{ matrix.os == 'ubuntu-latest' && '1' || '' }}
+        working-directory: tests
+        run: python3 -m unittest discover -s . -t . -v

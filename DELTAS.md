@@ -1,9 +1,9 @@
 # v3 — change map vs. v2
 
 This file records what changed in the v3 skill tree and why. Decisions
-locked 2026-07-14/16: random
-5-char base32 suffix; votes as one batch record per plan closure; plan
-directories unchanged; digest attention budget Digests 75 full blocks +
+locked 2026-07-14/16: random 5-char suffix from a 30-symbol
+reduced-Crockford alphabet; votes as one batch record per plan closure;
+plan directories unchanged; digest attention budget Digests 75 full blocks +
 Headlines 150 one-line reminders (tunable; ~same space as 100 full entries,
 ~2.25× coverage); two-form records (digest block above `## Background` =
 headline paragraph (~300 chars soft guide, not a hard cap) + optional
@@ -246,7 +246,7 @@ behavior — it never restates numbers.
 
 | Fact class | Normative home |
 | --- | --- |
-| tuning constants (budgets, penalties, floor, vote weight) | `scripts/zamm-compile.sh` header |
+| tuning constants (budgets, penalties, floor, vote weight) | `scripts/internal/zamm-compile.sh` header |
 | record schema, ledger + plan semantics, MUST rules | `references/scaffold/protocol-body.template.md` |
 | distillation trigger semantics | `references/distillation-triggers.md` |
 | fill-in shapes | `references/templates/` |
@@ -255,3 +255,303 @@ behavior — it never restates numbers.
 | activation, state dispatch, command mechanics | `SKILL.md` |
 | concepts, pitch, human workflow | `README.md` |
 | design rationale and change history | `DELTAS.md` |
+
+## Locked 2026-07-20 (post external-review hardening)
+
+An external technical review found nine defect classes; every one was
+reproduced locally before any code changed. Two governing invariants came
+out of that work:
+
+- **Fail open on content, fail closed on authority.** An invalid record may
+  be dropped from the digest, but it must never suppress, supersede, or
+  outrank a valid one. Invalid input degrades itself, not its neighbours.
+- **"No memory" and "unreadable memory" are different states.** Session
+  start offers initialization when the digest is empty, so a compile failure
+  that produced an empty-looking digest could invite re-seeding over an
+  intact ledger. That path is now unreachable.
+
+Compiler correctness:
+- Per-process temp files + `trap` + one atomic `mv`. Concurrent compiles
+  previously raced on a shared `memory.md.tmp`: 12 parallel runs left a
+  56-byte digest with zero records. Now 0 failures, no stray temps.
+- Digest header carries provenance: `files=N parsed=M live=L quarantined=Q`.
+  Publishing is refused (exit 3, previous digest untouched) when records
+  exist but none survived validation. A genuinely empty ledger still
+  compiles the "not initialized" digest, so initialization stays reachable.
+- Quarantine replaces fail-open leniency: a record failing the contract is
+  excluded from liveness, supersession, votes and ranking, and its
+  `supersedes:` edges are ignored — previously an invalid successor silently
+  retired a valid guardrail while the compile exited 0. Casualties are listed
+  under `## Degraded`. `--check` still exits non-zero.
+- Reconciliation no longer consumes digest eligibility. Competing heads keep
+  their FULL blocks in `## Digest` marked `~`; the reconciliation section is
+  an index. Previously two conflicting guardrails collapsed to one-line
+  headlines and their elaboration vanished exactly when knowledge conflicted.
+- Superseded/tombstoned votes records stop counting, so superseding a votes
+  record is a working correction path.
+- Shunned IDs are valid redacted graph nodes: the documented erasure
+  procedure (shun + delete) no longer leaves the ledger permanently failing
+  `--check`.
+
+Validator (one authoritative contract across `--check`, normal compile and
+`zamm-new-memory.sh`): real Gregorian dates (leap years included), exact
+filename contract (slug ≤40, suffix from the 30-symbol alphabet), scope
+integrity (empty components, duplicate supersede targets), graph integrity
+(self-supersession, cycles, supersede type rules), duplicate frontmatter keys
+rejected, unknown keys warned with `x-` reserved for extensions, tombstone
+reason required, votes body required empty. The generator gained calendar
+validation for `--date` and now requires `--scope` for memory records rather
+than emitting a skeleton that cannot compile.
+
+Scaffold safety: `ensure_line` and the managed-block writer detect a missing
+trailing newline before appending (a `.gitignore` ending without one had its
+last rule and ours glued into a single invalid line) and write via temp +
+rename with permissions preserved. VERSION gating became a strict state
+machine — 3 proceeds, any other value refuses, missing-with-content refuses,
+missing-and-empty is a fresh install — replacing an inference that silently
+relabelled a v2 project as v3. Malformed AGENTS blocks refuse instead of
+deleting from the begin marker to EOF. `.cursorignore` became a managed block
+so user rules and ZAMM rules coexist. Non-git installs stamp a content hash
+instead of the literal `local`, which could never detect drift. Missing
+template fragments are fatal, so VERSION is never stamped by an install that
+could not render the protocol.
+
+Performance: insertion sort → heapsort, conflict grouping → single bucketing
+pass, and a provably-safe early exit in greedy digest selection (scores are
+descending and penalties are non-negative). 4000 records: 9.9s → 1.07s;
+8000 records: 2.64s. Digest output verified byte-identical to the previous
+compiler on a 400-record ledger exercising crowded areas, multi-tag records
+and guardrails.
+
+Protocol changes:
+- **Reconciliation no longer forces fabrication.** The old rule required a
+  "conservative union" merge record even when ground truth was undeterminable.
+  In an append-only ledger that permanently records a claim nobody believed,
+  and the `suspected drift` marker excusing it decays out of the digest long
+  before the claim does. Unresolved groups now stay unresolved and visible,
+  with a note of what evidence would settle them. A merge record is written
+  only when its author believes it.
+- Plans are required for substantive work only; question-answering, lookups
+  and trivial single-file edits need none. Session start and session end
+  previously contradicted each other on this.
+- `Wellbeing-before`/`Wellbeing-after` → `Execution-context-before`/
+  `Execution-friction-after`. The fields had no defined referent, and plan
+  files are committed and team-visible, making a psychological reading a
+  privacy problem. The renamed fields describe the work: uncertainty,
+  missing access, tooling friction, rework. The Complexity
+  forecast/felt/delta triple is unchanged — forecast-vs-actual is the
+  measurable signal in that block.
+- Chain-depth credit capped at 2 hops. Uncapped it compounded with inherited
+  ancestor votes, so the statements revised most often — the least settled —
+  ranked highest.
+- `--check` warns above 15 live guardrails: guardrails bypass the digest
+  budget and never decay, so inflation grows the surface silently.
+- Bounded-attention claims corrected: only the 75 Digest blocks and 150
+  Headlines are capped. Guardrails, conflict heads, active plans and the
+  archived tail are listed in full.
+- Every rendered command carries `--project-root <repo-root>`; the token is
+  defined alongside `<zamm-skill>` in Script Path Resolution.
+- Distillation triggers now separate attention lifetime from storage
+  retention (`durability: days` still means "in git forever") and direct
+  distillation at the technical rule, never identifiable interpersonal events.
+- The migration guide gained a remediation path for plans left open across a
+  migration: clear their v2 vote fields rather than converting them, since
+  the signal already lives in migrated `seed-up`/`seed-dn` and a
+  today-dated votes record would carry full recency weight.
+
+Portability and naming honesty: README no longer claims the whole toolchain
+is POSIX sh (`zamm-compile.sh` and `zamm-new-memory.sh` are; scaffold,
+archive and status need bash). The ID suffix alphabet is documented as
+30 symbols, not base32, with collision risk framed as birthday-bounded within
+a shared date and slug.
+
+Deferred, not rejected: the executable plan state machine (its "Done implies
+approval" guarantee needs a second user to pay for its surface), a
+machine-checkable `evidence:` field, a 6-char suffix, a total-token digest
+budget engine, and the vote-inheritance redesign (topic utility vs statement
+correctness). The `.md.draft` record lifecycle the review proposed is
+resolved rather than deferred: quarantine makes an unfinished skeleton
+harmless.
+
+Testing is tracked separately: synthetic-only fixtures ship in the repo, the
+real playthrough data stays local, and a `ZAMM_TODAY` clock override (added
+here) makes golden digests possible.
+
+### Follow-on fixes found while building the test suite
+
+- **Vote targets must be memory records.** The hardening pass specified this
+  and shipped only the existence check, so a votes record could upvote a
+  tombstone and pass `--check`. Now rejected. The offending target is
+  skipped rather than quarantining the whole votes record, so co-listed
+  valid votes still count.
+- **`zamm-scaffold.sh` honours `ZAMM_TODAY`.** Its managed-block markers
+  embed the date, so rendered surfaces were not reproducible and golden
+  comparison of `AGENTS.md` / `.cursorignore` was impossible.
+- **`--help` exits 0.** `zamm-scaffold.sh`, `zamm-archive.sh` and
+  `zamm-status.sh` shared one `usage()` between an explicit help request and
+  a bad argument, so `--help` exited 1 — which reads as failure and breaks
+  `cmd --help && ...`. `usage()` now takes an exit code; bad arguments still
+  exit 1.
+
+### Test suite
+
+`tests/` holds 101 standard-library tests (`python3 -m unittest discover`),
+no dependencies and no virtualenv. Layers: happy paths, one regression lock
+per defect reproduced on 2026-07-19, contract validation by family, exit-code
+and warning semantics, a byte-compared golden digest, the attention budgets,
+and the previously untested surfaces (`zamm-status.sh`,
+`--overwrite-templates`, `--help`). CI runs ubuntu + macos, which is what
+verifies the portability claim above.
+
+Two disciplines are documented in `tests/README.md` because they are what
+make the suite mean anything. Regression locks written after their fix are
+run against the pre-fix scripts via `ZAMM_SCRIPTS_DIR` to prove they fail
+there — 15 of 17 do, and the check caught one later test that was wrongly
+claimed falsifiable. And the case-fold collision test, which can only run on
+a case-sensitive filesystem, is protected by `ZAMM_REQUIRE_CASE_SENSITIVE=1`
+on the Linux CI leg so it cannot silently skip everywhere and guard nothing.
+
+## Locked 2026-07-20 (single entrypoint)
+
+Everything is now reached through `scripts/zamm-run.sh`, a git-style
+dispatcher over the five existing scripts. The scripts are unchanged and
+still callable; they simply stop being the documented surface.
+
+    zamm-run.sh scaffold             install/refresh ZAMM in this project
+    zamm-run.sh status               health overview: ledger, plans, drift
+    zamm-run.sh help [<topic>]
+    zamm-run.sh memory compile       rebuild the digest
+    zamm-run.sh memory check         validate the ledger, write nothing
+    zamm-run.sh memory record <slug> create a record
+    zamm-run.sh plan status          plan directories by status
+    zamm-run.sh plan archive         archive terminal plan directories
+
+**Driver: the permission surface.** Agent harnesses allowlist commands by
+prefix, so five scripts meant five entries — and this repo's own config had
+drifted to two exact-match entries covering two invocations of one script,
+which stopped matching the moment a flag was added. One entrypoint means one
+rule: `Bash(bash .../zamm-run.sh:*)`.
+
+**The dispatcher resolves the project root**: nearest ancestor holding
+`zamm-memory/`, else the git top level, with `--project-root` as an override
+accepted in any position. Hardening item 5.8 had added that flag to every
+rendered command because scripts resolving against cwd silently targeted the
+wrong tree from a subdirectory; resolving in one place deletes the bug class
+instead of documenting around it, and shortens every command in the
+always-on surfaces. `scaffold` falls back to the working directory, since
+installing into a fresh project must work where no ledger exists yet.
+
+Naming decisions worth not relitigating:
+- **`memory` / `plan` groups**, with `status`, `scaffold` and `help` at top
+  level (the git shape). The grouping leaves room for the deferred
+  `zamm-plan` state machine to land as `plan transition` without another
+  pass over every doc site.
+- **`record`, not `new`** — `new` is ambiguous beside a project-creating
+  command, and `record` is the schema's umbrella noun (memory, tombstone and
+  votes are all records), so it stays accurate for every `--type`.
+- **`scaffold`, not `init`** — `init` names the act but not the thing, and
+  collides with ledger initialization, which is a separate real operation
+  with its own guide.
+- **`check` as a first-class subcommand**, not `compile --check`.
+
+`zamm-run.sh status` is new behaviour rather than re-plumbing: a read-only
+health view aggregating what was previously scattered across compile stderr
+and a separate script — version, rendered-surface drift against the
+installed skill, ledger counts, dormant and unlisted totals, guardrail count
+against its ceiling, `other` backlog, pending reconciliation groups, plan
+buckets and archive-ready plans. It parses the existing digest rather than
+recomputing, and reports a missing or stale digest instead of silently
+regenerating one: a status command that mutates state makes "check the
+state" change the state.
+
+Exit codes pass through unchanged via `exec` — specifically the compiler's
+exit 3 ("records exist but none survived; previous digest kept"), which a
+dispatcher that flattened it to 1 would destroy. The test suite now reaches
+the scripts through the dispatcher, so it exercises the documented path;
+`Ledger.run()` remains as an escape hatch for addressing a wrapped script
+directly.
+
+## Locked 2026-07-20 (command surface v2)
+
+The entrypoint grew into a user-centric surface. Four verbs mean the same
+thing in both groups, and the gaps teach the data model: there is no
+`update` (records are immutable — supersede) and no `delete` (append-only —
+tombstone, or archive).
+
+    zamm-run.sh scaffold / status / check / help
+    zamm-run.sh memory digest | list | show | check | create | archive
+    zamm-run.sh plan   list | show | check | create | archive
+
+Naming, decided against the alternatives:
+- **`create` in both groups.** `record` promises capture but the command
+  writes an empty skeleton, and it reads wrong for `--type tombstone|votes`.
+- **`list`, not `status`,** for enumeration — `plan status` described how
+  output was grouped, not what it was, and it squatted on the name a future
+  `plan status <slug>` should own.
+- **`scaffold`, not `init`** — `init` collides with ledger initialization,
+  which is a separate gated operation.
+- Flags that set frontmatter keep the frontmatter key as their name.
+
+**All mode flags deleted.** `--rebuild` went because compiling costs less
+than deciding whether to skip it (0.27s at 1000 records), taking the whole
+staleness-cache bug class with it. `--apply` went because `status` and
+`plan list` already answer "what would move". `--overwrite-templates` went
+because managed surfaces are generated and stamped, so refresh is simply
+what `scaffold` means. What remains is `--project-root` and the content
+flags on `create`.
+
+New behaviour, not renames:
+- **`status`** — read-only health view: version, rendered-surface drift
+  against the installed skill, ledger counts, dormant and unlisted totals,
+  guardrail and `other` backlogs, pending reconciliation, plan buckets,
+  archive-ready and inert counts. Parses the existing digest; reports a
+  stale or missing one rather than silently regenerating.
+- **`plan check`** — validates the CURRENT STATE of every active plan:
+  required fields for the declared status, no unchecked Done-when items at
+  closure, valid dates. It does not validate transitions, so it does not
+  reopen the deferred state machine. `plan archive` now runs it and refuses
+  any plan that fails — which closes the external review's High 2 finding
+  that a `Done` plan with empty approval evidence archived cleanly.
+- **`memory archive`** — moves fully-retired chains out of the compiler scan
+  path. The rule is narrow on purpose: votes aggregate over the whole
+  ancestor chain of a record, so a dead ancestor of a live head is
+  load-bearing and must not move. Measured on this repo, 8 of 14 dead
+  records are exactly that. A component qualifies only when it holds no live
+  memory record and no live votes record. `zamm-compile.sh --list-inert`
+  owns the rule because it already owns the graph; archived ids are globbed
+  by filename so references stay resolvable; and the command verifies the
+  digest is byte-identical afterwards, rolling back if it is not. Verified
+  by sabotaging the rule in a copy: the rollback restored all 67 files.
+  This is the second documented exception to the never-move-records MUST,
+  alongside Erasure.
+
+## Locked 2026-07-22 (scripts/internal reorganization)
+
+`scripts/` held nine scripts flat, but only one — `zamm-run.sh` — is a user
+surface: the single-entrypoint design routes every command through it (one
+permission-allowlist entry, `Bash(bash .../zamm-run.sh:*)`), and the other
+eight are internal implementation it `exec`s. The flat layout hid that, and it
+was exactly what made a raw helper like `zamm-archive.sh` *look* invocable —
+the direct-invocation risk two review passes flagged.
+
+The eight internal scripts moved to `scripts/internal/`; `zamm-run.sh` stays at
+the top of `scripts/`. So `ls scripts/` now shows the entrypoint and an
+`internal/` directory, and nothing else.
+
+- `zamm-run.sh` resolves the internal scripts through a new `INTERNAL=`
+  `$SCRIPT_DIR/internal` variable; its own `../references/...` template path
+  still hangs off `SCRIPT_DIR`.
+- `zamm-scaffold.sh` and `zamm-skill-stamp.sh` walk to the skill root as
+  `$(dirname "$0")/../..` (one level deeper than before); sibling references
+  (`zamm-memory-archive.sh` → `zamm-compile.sh`, `zamm-archive.sh` →
+  `zamm-plan-check.sh`) are unchanged, since those scripts moved together.
+- No permission change: the internal scripts are child processes of an
+  already-allowed `zamm-run.sh`, never invoked directly.
+- The stamp already hashes `scripts/` recursively, so the content stamp shifts
+  once (a one-time re-scaffold), and the syntax-check test now globs
+  `scripts/` recursively.
+
+Naming: a subdirectory, not an `_internal` filename prefix — it groups all
+eight at once and signals "not the surface" more clearly, without churning
+every reference for a weaker signal. `zamm-run.sh` keeps its name so the
+permission rule and the ~48 doc references stay stable.

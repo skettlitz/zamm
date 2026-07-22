@@ -1,6 +1,6 @@
 #!/bin/sh
 # ZAMM new-memory — creates a ledger record file with a collision-safe name
-# (YYYY-MM-DD-<slug>-<5 random base32 chars>.md) and a frontmatter skeleton.
+# (YYYY-MM-DD-<slug>-<5 random chars>.md) and a frontmatter skeleton.
 # Prints the created file path; the caller fills the body afterwards
 # (and up:/down: lists for votes records).
 #
@@ -78,6 +78,10 @@ case "$SLUG" in
     echo "ERROR: slug must be lowercase [a-z0-9-] and not start with '-': $SLUG" >&2
     exit 1
     ;;
+  *-|*--*)
+    echo "ERROR: slug must not end with '-' or contain '--': $SLUG" >&2
+    exit 1
+    ;;
 esac
 if [ "${#SLUG}" -gt 40 ]; then
   echo "ERROR: slug longer than 40 chars: $SLUG" >&2
@@ -87,6 +91,24 @@ case "$RTYPE" in
   memory|tombstone|votes) ;;
   *)
     echo "ERROR: --type must be memory, tombstone, or votes" >&2
+    exit 1
+    ;;
+esac
+
+# Values that become frontmatter lines are DATA, never structure. A newline in
+# --supersedes or --plan would break out of its `key: value` line and forge
+# further keys (e.g. seed-up:, which the compiler honors as vote weight) while
+# still passing --check — a CLI authority forge. Reject anything outside the
+# record-id / slug charset, which excludes every control character.
+case "$SUPERSEDES" in
+  *[!a-z0-9,\ -]*)
+    echo "ERROR: --supersedes must be comma-separated record ids [a-z0-9-]" >&2
+    exit 1
+    ;;
+esac
+case "$PLAN" in
+  *[!a-z0-9-]*)
+    echo "ERROR: --plan must be a plan-directory slug [a-z0-9-]" >&2
     exit 1
     ;;
 esac
@@ -104,6 +126,15 @@ case "$DURABILITY" in
     exit 1
     ;;
 esac
+
+# a memory record without scope: is quarantined by the compiler, and the area
+# is known at creation time — emitting a skeleton that cannot compile only
+# defers the error. The empty body is the one documented fill-me-in exception.
+if [ "$RTYPE" = "memory" ] && [ -z "$SCOPE" ]; then
+  echo "ERROR: --scope is required for memory records (1-3 tags from: domain" >&2
+  echo "       contracts conventions internals quality tooling ops meta; or other alone)" >&2
+  exit 1
+fi
 
 # scope: 1-3 area tags from the fixed set; subpath on the first tag only;
 # other must stand alone (same contract zamm-compile.sh --check enforces)
@@ -174,6 +205,29 @@ if [ -n "$RDATE" ]; then
       exit 1
       ;;
   esac
+  # digit shape is not enough: the compiler requires a real calendar date, so
+  # a backdated migration record must not be able to create 2026-02-30
+  Y=${RECDATE%%-*}; MD=${RECDATE#*-}; M=${MD%%-*}; D=${MD#*-}
+  # strip ONE leading zero for base-10 arithmetic (fields are 2-digit, so a
+  # single strip is enough); "00" -> "0", not "" — stripping twice emptied a
+  # zero field and the `[` error below did not abort under set -e, so a
+  # zero-month date wrote an invalid ledger file.
+  Y=${Y#0}; Y=${Y#0}; Y=${Y#0}; M=${M#0}; D=${D#0}
+  : "${M:=0}" "${D:=0}" "${Y:=0}"
+  DIM=31
+  case "$M" in
+    4|6|9|11) DIM=30 ;;
+    2)
+      DIM=28
+      if [ $((Y % 4)) -eq 0 ] && { [ $((Y % 100)) -ne 0 ] || [ $((Y % 400)) -eq 0 ]; }; then
+        DIM=29
+      fi
+      ;;
+  esac
+  if [ "$M" -lt 1 ] || [ "$M" -gt 12 ] || [ "$D" -lt 1 ] || [ "$D" -gt "$DIM" ]; then
+    echo "ERROR: --date is not a real calendar date: $RDATE" >&2
+    exit 1
+  fi
 fi
 YEAR=${RECDATE%%-*}
 DIR="$PROJECT_ROOT/zamm-memory/knowledge/$YEAR"
@@ -182,7 +236,8 @@ mkdir -p "$DIR"
 FILE=""
 tries=0
 while [ "$tries" -lt 5 ]; do
-  # 5 chars from lowercase Crockford base32 (no 0 1 i l o u)
+  # 5 chars from a 30-symbol alphabet: lowercase Crockford base32 minus the
+  # visually ambiguous 0 1 i l o u (30 symbols, not 32)
   SUFFIX=$(LC_ALL=C tr -dc '23456789abcdefghjkmnpqrstvwxyz' < /dev/urandom \
     | dd bs=1 count=5 2>/dev/null)
   CANDIDATE="$DIR/$RECDATE-$SLUG-$SUFFIX.md"

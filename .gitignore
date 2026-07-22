@@ -6,3 +6,6 @@ AGENTS.md
 # Local dogfood fixtures (copied live project data)
 /data/
 zamm-memory/.compiled/
+
+*.pyc
+__pycache__/
