@@ -42,11 +42,11 @@ Referenced section names live in the rendered runtime files / protocol template 
 
 ## Ledger write transaction
 
-1. `bash <zamm-skill>/scripts/zamm-run.sh memory create --scope '<area[/subpath][, area2]>' <topic-slug>` — prints the created file path. Add `--type`, `--importance`, `--durability`, `--supersedes`, `--plan` as applicable.
+1. `bash <zamm-skill>/scripts/zamm-run.sh memory create --scope '<area[/subpath][, area2]>' <topic-slug>` — prints the path of the created draft (`<id>.md.draft`). Add `--type`, `--importance`, `--durability`, `--supersedes`, `--plan` as applicable. Drafts are invisible to check and the digest until published.
 2. Fill the skeleton: memory → digest block (headline paragraph + optional elaboration, optional `## Background`); tombstone → one-line reason; votes → at least one of `up:`/`down:`. Paraphrase the human — never verbatim quotes; describe the emotion instead of the raw words.
-3. `bash <zamm-skill>/scripts/zamm-run.sh memory check` — fix every violation until it prints `ZAMM check passed.`
-4. `bash <zamm-skill>/scripts/zamm-run.sh memory digest` — rebuild the digest and print its contents.
-5. Never edit a committed record; correct it with a new record carrying `supersedes:`.
+3. `bash <zamm-skill>/scripts/zamm-run.sh memory publish <topic-slug>` — validates the draft and, on success, lands it in the ledger and rebuilds the digest in one step (no separate digest command needed). On rejection the record returns to a draft with the violations printed; fix and re-run publish.
+4. `bash <zamm-skill>/scripts/zamm-run.sh memory check` — confirm the ledger still passes as a whole; fix every violation until it prints `ZAMM check passed.`
+5. Never edit a published record; correct it with a new record carrying `supersedes:`.
 
 ## Commands
 

@@ -555,3 +555,322 @@ Naming: a subdirectory, not an `_internal` filename prefix — it groups all
 eight at once and signals "not the surface" more clearly, without churning
 every reference for a weaker signal. `zamm-run.sh` keeps its name so the
 permission rule and the ~48 doc references stay stable.
+
+## Locked 2026-08-03 (second external review remediation)
+
+A second technical review scored the project a credible supervised beta and
+listed six P0 integrity defects plus a set of High/lower findings. Every claim
+was reproduced against the live scripts before any change; each fix ships with a
+regression lock in `tests/test_remediation5.py`. The compile exit codes are now
+a documented taxonomy: `0` clean, `1` check/usage failure, `2` published but
+degraded (a `## Degraded` section is present), `3` refused (records exist but
+none survived), `4` ledger enumeration failed (previous digest untouched), and,
+at the dispatcher, `5` protocol-version mismatch.
+
+P0 — trust boundary:
+- **Enumeration fails closed.** The record scan was `{ find; find; } | sort |
+  awk`, whose exit status is the pipeline tail, so a `find` that could not read
+  a subtree returned 0 and the digest silently dropped those records. It now
+  builds a manifest with every step checked; a traversal or sort failure exits 4
+  and leaves the previous digest in place. An unreadable individual file
+  quarantines with a clear reason instead of a misleading "missing frontmatter".
+- **All cycles detected.** The early-return DFS quarantined only the first cycle
+  and left stale grey state, so a second disjoint cycle reachable through a
+  shared node was applied silently. Replaced with iterative Tarjan SCC: every
+  strongly-connected component that is a cycle is quarantined as a unit,
+  regardless of overlap or discovery order, and there is no recursion depth to
+  overflow on a long chain.
+- **Aggregation walks only applied edges.** Vote/ancestry aggregation read the
+  raw `supersedes:` data, so a vote leaked into a valid head through a
+  quarantined or dangling ancestor, and the walk was capped at 500 enqueued
+  nodes (a silent truncation). It now traverses `asup[]` — the edges that
+  actually survived validation — with a visited set and no cap.
+- **Runtime version gate.** The scaffold refused an incompatible `VERSION`, but
+  operational commands ignored it. The dispatcher now refuses every command that
+  interprets ledger data when `VERSION` is missing/malformed/≠ 3 (exit 5),
+  pointing at migration; `status` reports the mismatch instead of refusing.
+- **Degraded is visible.** A dangling `supersedes:` target used to print to
+  stderr but exit 0 with `quarantined=0` and no marker. Dangling references (and
+  duplicate vote records) now render under `## Degraded` and force exit 2.
+
+High / data model:
+- **Vote hygiene.** A target repeated within `up:`/`down:`, or present in both,
+  quarantines the votes record (no more forged `+3` from one record); more than
+  one active votes record per plan is a degradation and only the newest counts.
+- **Migration seeds bounded.** `seed-up`/`seed-dn` must be non-negative integers
+  ≤ 10000 (a negative `seed-dn` used to ADD score); `migrated-from` must be a
+  provenance token, not free text.
+- **Archived records are supersede-addressable.** A new record may supersede an
+  archived id (treated as known-inert, like a shunned id) instead of failing
+  with "target not found".
+- **Abandon rule matches the protocol.** `plan check` requires the full
+  retrospective on an Abandoned plan only when work happened (an
+  `Execution-context-before` was filled or a `Done-when` item checked); a
+  never-started Draft→Abandoned needs only a `## Loose ends` rationale.
+- **Plans reconcile with the ledger.** Top-level `check` runs a new
+  `zamm-crosscheck.sh` that verifies a plan's `Memory-upvotes/downvotes` match
+  an active votes record naming that plan.
+
+Lifecycle, surfaces, docs:
+- **Two-phase record creation.** `memory create` writes an `<id>.md.draft` the
+  compiler ignores; `memory publish <id>` validates it and atomically renames it
+  into the ledger (rolling back to a draft on failure), so a record composed
+  over several edits never appears half-finished. `--immediate` keeps the old
+  one-step behaviour for scripted/migration use. The generator now rejects an
+  empty scope component (parity with the compiler) and every value-taking option
+  reports a missing argument instead of a `set -u` crash.
+- **Machine-readable state sidecar.** The compiler writes `.compiled/state.tsv`
+  (counts + the ids the digest selected) beside `memory.md`; `status` and
+  `memory list` read it instead of reverse-parsing Markdown — this fixes the
+  contested-guardrail double-count in `status` and stops `memory list` from
+  treating a record id embedded in a plan title as selected.
+- **Drift stamp covers all normative inputs** (`SKILL.md`, all of `references/`,
+  all of `scripts/`), not just the scaffold fragments — one-time re-scaffold.
+- **Scaffold** writes its managed block through a sibling temp file (atomic
+  rename on the repo's own filesystem), and its next-steps use `plan create`
+  and `memory create/publish` rather than manual `mkdir`/`cp`.
+- **`plan archive --list`** is a real read-only preview; the docs no longer
+  describe a nonexistent two-run flow. The README narrows the platform claim to
+  macOS/Linux (CI-verified), Git Bash noted as unverified. The approximate
+  372-day/31-month `daynum` is documented as decay-only, not a calendar count.
+
+## Locked 2026-08-04 (second-pass review of the remediation)
+
+An independent in-house review of the remediation above found ten further
+defects, several at the trust boundary. All reproduced before fixing; locks are
+the `Rev2*` classes in `tests/test_remediation5.py`.
+
+- **`memory publish` is now interrupt-safe and pre-existing-degradation-safe.**
+  The draft was renamed into place before validation with no rollback, so a
+  Ctrl-C (or SIGKILL) between the rename and the recompile left a live record
+  with a stale digest and no draft. A rollback trap now returns the record to a
+  draft on any non-clean exit or signal (SIGKILL remains unpreventable, but an
+  interrupted commit of a VALID record just needs a recompile, and an invalid
+  one is quarantined+surfaced on the next compile — it fails safe). Validation
+  also now blames only the draft (checks whether `--check` names its id) instead
+  of gating on the whole ledger, so a valid draft publishes even when unrelated
+  records are already quarantined, and the recompile treats exit 2 as success.
+- **Invalid vote references degrade the publish.** A votes record naming a
+  missing or non-memory target printed to stderr but published exit 0 with no
+  Degraded section (normal compile and `--check` disagreed). Bad vote refs now
+  render under `## Degraded` and force exit 2, matching dangling supersedes.
+- **The plan↔votes cross-check reads the compiler graph.** A new compiler mode,
+  `--list-votes`, emits the active (counted) votes records (`id<TAB>plan<TAB>up
+  <TAB>down`); `zamm-crosscheck.sh` consumes it instead of reconstructing "which
+  votes record is superseded" from the filesystem. This fixes three defects at
+  once: a votes record naming a nonexistent plan is now caught (orphan guard); a
+  vote id that is a substring of a longer id on a `supersedes:` line no longer
+  reads as a false supersede; and a project path containing spaces no longer
+  breaks the check (no word-split of `$(...)` output).
+- **`plan archive` accepts a degraded recompile.** Exit 2 (a digest published
+  but degraded by unrelated records) was treated as a failure and rolled the
+  archive back, so unrelated ledger degradation blocked archiving a valid
+  terminal plan. Both archive scripts now treat 0 and 2 as success.
+- **Worked-on Abandoned plans are fully validated.** The work-happened branch
+  required only the retrospective; it now also requires Execution-context-before,
+  Complexity-forecast, and a `## Loose ends` rationale (matching
+  Implementing→Abandoned). The Loose-ends check filters the trailing telemetry
+  fields the template places under that heading.
+- **The generator writes a normalized scope.** It validated trimmed tags but
+  wrote the raw `--scope` argument, so a leading newline survived into a record
+  the compiler then rejected. The written scope is now rebuilt from the trimmed
+  tags.
+- **No buggy sidecar fallback.** `status` and default `memory list` no longer
+  fall back to reverse-parsing the digest when `state.tsv` is absent (that
+  fallback reproduced the double-count and plan-title-leak bugs); they ask for a
+  recompile instead. The sidecar is now renamed BEFORE the digest, so a fresh
+  `memory.md` never pairs with a stale sidecar.
+- **Help never hits the version gate.** `memory list/create/publish/show --help`
+  and `plan create/check --help` exit 0 on a version-mismatched project; only
+  real commands refuse.
+
+## Locked 2026-08-04 (third-pass review: trust-boundary gaps)
+
+A re-review of the second-pass remediation confirmed the first-order fixes but
+found the trust boundaries around them still porous. All reproduced before
+fixing; locks are `tests/test_remediation6.py` (`Rev3*` classes), each seen
+failing against the pre-fix scripts.
+
+- **Publish verdicts come from a before/after error diff, not a substring
+  match.** `memory publish` judged the candidate by grepping its id in `--check`
+  stderr. That failed both ways: an unrelated error whose path embedded the
+  candidate id as a substring of a longer id rejected a valid draft, and a bad
+  draft PUBLISHED whenever its new error named some other record (duplicate
+  votes blame the canonical id) or none at all (`other holds 6 live records`).
+  The ledger's `--check` error set is now captured before the rename and again
+  after; any error line present only after was introduced by the candidate and
+  rolls it back. Pre-existing errors still do not block a valid draft. A check
+  that cannot run at all (rc >1, e.g. enumeration failure) fails closed. Both
+  verdict paths roll back inline so the EXIT trap no longer misreports a
+  validation failure as "publish interrupted". An automated process-group
+  SIGINT test now covers the interrupt rollback.
+- **`plan:` is a slug, never a path.** The compiler accepted any non-empty
+  `plan:`, and the cross-check used the value in a filesystem lookup — so
+  `plan: ..`, `plan: ../plans`, and `plan: ../../knowledge` all resolved to
+  real directories and an orphan votes record passed `check` while applying its
+  votes. The compiler now quarantines any `plan:` not matching
+  `[a-z0-9][a-z0-9-]*`; the cross-check keeps a charset guard as defense in
+  depth and requires an actual `<slug>/<slug>.plan.md` (an empty directory
+  under `archive/plans/` is not a plan).
+- **Vote bookkeeping cannot be laundered through Abandoned or the archive.**
+  Agreement checking covered only active Review/Done plans. Now: a counted
+  votes record must match its plan's declared sets whatever the status and
+  whether the plan is active or archived; declared `Memory-upvotes/downvotes`
+  with no votes record is an error for Review/Done/Abandoned and for archived
+  plans whose declared targets look like v3 record ids. Pre-v3 archived plans
+  declaring legacy card ids (`W2`, `S18`) are exempt — their votes were
+  migrated as record seeds and have no votes record to reconcile.
+- **Zero-live ledgers still degrade.** The zero-live branch exited 0 with a
+  clean "not initialized" digest even when the ledger held invalid vote
+  references or duplicate votes records. It now renders `## Degraded` under
+  the not-initialized line and exits 2, so known graph defects can no longer
+  masquerade as a healthy empty ledger.
+- **`--list-votes` is a real TSV surface.** It emitted raw frontmatter values;
+  a TAB is legal whitespace inside a vote list, so `up: a,<TAB>b` produced a
+  fifth column and the cross-check read `b` as a downvote. Lists are now
+  normalized (trimmed, empties dropped, interior tabs neutralized) before
+  emission.
+- **The digest/sidecar pair carries a generation token.** Rename ordering only
+  chooses which mismatched pairing survives a crash between the two renames.
+  Both files now carry the same generation token (a checksum of the digest
+  content); `status` and default `memory list` verify it and treat a mismatch
+  as "recompile" instead of mixing authorities. `memory archive`'s
+  digest-unchanged comparison excludes the trailer (it covers the header,
+  whose `files=` count legitimately drops).
+- **Worked-on Abandoned plans inherit Scope/Done-when validation.** The
+  work-happened branch now also requires In/Out scope content, at least one
+  Done-when item, and well-formed checkboxes, so an empty scope or a `- [?]`
+  marker cannot become valid by abandoning the plan.
+- **The cross-check fails closed.** `--list-votes … || true` swallowed compiler
+  failures, so an unenumerable ledger produced an empty votes list and the
+  cross-check passed a ledger nobody read. It now accepts rc 0/2 only and
+  fails loudly otherwise.
+
+Known accepted residual: SIGKILL between the publish rename and recompile
+still needs the next compile to reconcile (fails safe: the record is valid or
+quarantined-and-surfaced).
+
+## Locked 2026-08-04 (fourth pass: digest publication is serialized)
+
+A fourth review pass confirmed every third-pass fix and reproduced two
+remaining defects. Locks: `Rev4*` classes in `tests/test_remediation6.py`,
+both seen failing against the pre-fix scripts.
+
+- **Concurrent publishes can no longer lose a record from the digest.** Each
+  compile snapshots the ledger into a private manifest and atomically renames
+  its result into place — atomic against torn reads, but a lost-update hazard:
+  an older, slower compile could land LAST and overwrite a newer digest with a
+  stale but internally-coherent digest/sidecar pair (the generation token
+  pairs the two files; it cannot rank two coherent pairs). Two interleaved
+  publishes both reported success while the final digest silently omitted one
+  record. Publish-mode compiles now take a project-scoped lock
+  (`.compiled/.compile.lock`, portable mkdir mutex) held from BEFORE manifest
+  enumeration until exit, so published ledger views are monotonically fresh:
+  every published digest was enumerated after the previously published one,
+  and a completed publish can never vanish from a later digest. Read-only
+  modes (`--check`, `--list-*`) skip the lock; a lock abandoned by a killed
+  compile is stolen once its recorded owner pid is gone; a lock held over 60s
+  fails with exit 4 (previous digest untouched) and points at the directory.
+  The regression lock interleaves two publishes deterministically via a
+  PATH awk shim and asserts both records reach the final digest and sidecar.
+- **Tabs in plan vote fields reconcile.** The cross-check normalized only
+  commas and spaces when comparing a plan's `Memory-upvotes/downvotes` with
+  the votes record, so a legal TAB separator made semantically identical sets
+  disagree. `norm_set` now splits on tabs as well, both plan- and ledger-side.
+
+## Locked 2026-08-04 (fifth pass: stale-lock recovery serialized)
+
+A fifth review pass confirmed the fourth-pass fixes in normal operation and
+reproduced one narrower race in the new stale-lock recovery itself. Lock:
+`Rev5StaleLockReap` in `tests/test_remediation6.py`, seen failing against the
+pre-fix scripts with the exact symptom (a record lost from the final digest).
+
+- **Reaping a dead-owner lock is now serialized and revalidated.** Every
+  contender independently read the stale pid, decided it was dead, and ran
+  `rm -rf` on the lock — so two contenders could both authorize removal of
+  the same stale lock, and the slower rm then destroyed the lock the faster
+  contender had already REACQUIRED, putting two compiles back in flight (the
+  original lost-update, resurrected through the recovery path). Removal now
+  happens only while holding a second mutex (`.compiled/.compile.reaper`)
+  and only after re-reading the pid file and confirming it still names the
+  SAME dead owner. That revalidation is sound because a new owner can only
+  appear after the stale directory is removed, and removal only happens
+  inside the reaper mutex — a fresh owner that has not yet written its pid
+  file reads as a changed pid and is left alone.
+- **The cleanup trap checks ownership before releasing.** The EXIT trap
+  removed the lock whenever this process had ever acquired it; it now
+  releases only while the lock's pid file still names the exiting process,
+  so even a hypothetical future mis-reap could not cascade into a second
+  lock destruction.
+- **Liveness probing tolerates EPERM.** `kill -0` reports failure for a live
+  process owned by someone else; a `ps -p` fallback keeps such a lock from
+  reading as dead.
+- A reaper mutex abandoned by a process killed inside its microseconds-wide
+  critical section is NOT auto-reaped (that would recurse the same problem);
+  the 60s timeout message names both directories for manual recovery, and
+  the previous digest stays untouched.
+
+## Locked 2026-08-05 (third external review remediation)
+
+Trust-boundary round: every reader of erasure policy, plans, and drafts now
+fails closed, and publication is overlay-validated under one held lock.
+
+- **shun.md fails closed.** An unreadable or symlinked shun file aborted
+  nothing before: the compiler silently proceeded with an EMPTY substitute
+  shun set and resurrected erased content into the digest. Both cases are now
+  fatal (exit 4, previous digest untouched) — a failing READ must never widen
+  validity. A missing shun.md stays a legal empty set.
+- **Plans enumerate through one checked manifest.**
+  `zamm-plan-manifest.sh` is the single tagged enumeration of both plan
+  trees (PLANDIR/PLANFILE/SUBPLAN/ARCHDIR/ARCHFILE/SYMLINK/NOTDIR/
+  UNREADABLE/DUP); plan check, the digest plans tail, status, plan list,
+  the archive helper and the cross-check all consume it. A private glob
+  over an unreadable tree used to report "0 plans" and `[ -d ]` followed
+  symlinked directories into external content; now an unreadable tree is
+  exit 4 everywhere and symlinked entries are rejected without ever being
+  read (digest renders name-only Invalid lines).
+- **Plan ids are unique across active AND archive.** `plan create` refuses a
+  slug present in either tree; the manifest tags hand-made collisions DUP
+  and plan check reports them.
+- **Publish validates by overlay, not rename-then-check.** The compiler
+  gained `--check --with-candidate <draft>`: it stages a private copy of the
+  draft under its final id and validates the ledger as if published, so the
+  live namespace never holds an unvalidated record. The verdict diffs
+  `zamm-compile: ERROR:` lines only against a same-lock baseline — a
+  warning-only candidate publishes cleanly even beside unrelated
+  pre-existing errors.
+- **The whole publish transaction runs under the compiler's publication
+  lock** (extracted to `zamm-lock.sh`, delegated to child compiles via
+  ZAMM_LOCK_HELD): baseline, overlay verdict, rename, recompile, sidecar
+  commit. No concurrent compile can publish a digest naming a record that is
+  later rolled back; the interruption trap recompiles under the still-held
+  lock. `status` additionally cross-checks the sidecar file count against
+  the records on disk and reports divergence as STALE.
+- **Archived and shunned supersede targets are inert graph nodes.** Their
+  ids, types and (for archived records, header-parsed) supersedes edges keep
+  union-find grouping, conflict detection and lineage alive — two live
+  successors of one retired target surface under Needs reconciliation again
+  — while contributing no content, votes, or ranking credit. Type
+  compatibility is enforced into the archive; "keep their place in the
+  chain" is now true rather than aspirational.
+- **`plan archive` gates on the plan/ledger cross-check** (both the
+  dispatcher and the helper), so a plan whose votes record disagrees with
+  its declared Memory-upvotes/downvotes cannot be laundered into history.
+  `--list`/`--dry-run` stay gate-free.
+- **Drafts are visible.** `memory drafts` lists unpublished `.md.draft`
+  files with age (STALE past ZAMM_DRAFT_STALE_DAYS, default 7), `status`
+  counts them, `memory discard` shows-then-deletes one (never a published
+  record). SKILL.md/README/help now document the real transaction:
+  create -> fill -> publish -> check.
+- **Always-on surfaces shrank to a router.** scaffold renders
+  `protocol-router.template.md` (~2.4KB per surface) into AGENTS.md and
+  `.cursor/rules/zamm.mdc` instead of the full ~27KB protocol body; the
+  full body stays in the skill, loaded on demand at the decision points the
+  router names. Re-scaffolding migrates existing installs; the stamp change
+  makes every scaffolded project read STALE once until re-scaffolded
+  (expected).
+- Mechanical: scaffold writes VERSION via temp-file + atomic rename; the
+  status version-mismatch line points at migration guides instead of
+  scaffold (which refuses pre-v3 trees); permission-bit tests skip with an
+  explicit reason under root (geteuid()==0), where chmod 000 does not deny
+  access.

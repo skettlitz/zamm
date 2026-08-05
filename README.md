@@ -154,7 +154,8 @@ zamm-run.sh help [<topic>]
 
 zamm-run.sh memory digest       rebuild the digest from the ledger
 zamm-run.sh memory check         validate the ledger, write nothing
-zamm-run.sh memory create <slug> create a new record
+zamm-run.sh memory create <slug> create a new record as a draft
+zamm-run.sh memory publish <slug> validate a filled draft, land it, recompile
 
 zamm-run.sh plan list          plan directories grouped by status
 zamm-run.sh plan archive         move terminal plan directories to the archive
@@ -176,7 +177,9 @@ commands by prefix, so a single entry covers every ZAMM operation:
   dependencies. Everything is reached through one entrypoint, `zamm-run.sh`, which
   picks the right interpreter per command: the compiler and record creator are POSIX
   sh, while scaffold, archive and status use bash features.
-  Targets stock macOS, Linux, and Windows via Git Bash.
+  Verified on stock macOS and Linux (both in CI). Windows via Git Bash is
+  intended to work but is not yet covered by CI — treat it as unverified until
+  a Git Bash job exists.
 - git is recommended (merging, history, erasure) but the ledger itself works without it.
 - Runtime surfaces: `SKILL.md` for skill-based harnesses, the `AGENTS.md` managed block for
   AGENTS.md-reading runtimes, `.cursor/rules/zamm.mdc` for Cursor.

@@ -1,14 +1,16 @@
 #!/bin/sh
-# ZAMM new-memory — creates a ledger record file with a collision-safe name
+# ZAMM new-memory — creates a ledger record with a collision-safe name
 # (YYYY-MM-DD-<slug>-<5 random chars>.md) and a frontmatter skeleton.
-# Prints the created file path; the caller fills the body afterwards
-# (and up:/down: lists for votes records).
+# By default it writes an <id>.md.draft the compiler ignores; the caller fills
+# the body, then `memory publish <id>` validates and lands it. Prints the draft
+# path. --immediate skips the draft and writes the final .md at once.
 #
 # Usage: zamm-new-memory.sh [--project-root <path>] [--type memory|tombstone|votes]
 #                           [--scope <tag[, tag2[, tag3]]>] [--supersedes <id[,id...]>]
 #                           [--importance guardrail|useful|minor]
 #                           [--durability days|weeks|months|years|permanent]
-#                           [--plan <plan-dir-slug>] [--date YYYY-MM-DD] <topic-slug>
+#                           [--plan <plan-dir-slug>] [--date YYYY-MM-DD]
+#                           [--immediate] <topic-slug>
 #
 # --scope takes 1-3 comma-separated area tags from the fixed set (domain,
 # contracts, conventions, internals, quality, tooling, ops, meta; or other
@@ -32,6 +34,16 @@ DURABILITY="months"
 PLAN=""
 RDATE=""
 SLUG=""
+IMMEDIATE=0
+
+# need_val <all remaining args>: the option is $1, its value $2. Called before
+# consuming a value so a missing one is a controlled error, not a set -u crash.
+need_val() {
+  if [ "$#" -lt 2 ]; then
+    echo "ERROR: $1 requires a value" >&2
+    exit 1
+  fi
+}
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -43,15 +55,23 @@ while [ $# -gt 0 ]; do
       PROJECT_ROOT=$(cd "$2" && pwd)
       shift 2
       ;;
-    --type)       RTYPE="$2"; shift 2 ;;
-    --scope)      SCOPE="$2"; shift 2 ;;
-    --supersedes) SUPERSEDES="$2"; shift 2 ;;
-    --importance) IMPORTANCE="$2"; shift 2 ;;
-    --durability) DURABILITY="$2"; shift 2 ;;
-    --plan)       PLAN="$2"; shift 2 ;;
-    --date)       RDATE="$2"; shift 2 ;;
+    # Each value-taking option requires its argument. Without this guard `$2`
+    # under `set -u` aborts with a raw "unbound variable" when the option is the
+    # last token (e.g. `... create foo --scope`), instead of clear usage text.
+    --type)       need_val "$@"; RTYPE="$2"; shift 2 ;;
+    --scope)      need_val "$@"; SCOPE="$2"; shift 2 ;;
+    --supersedes) need_val "$@"; SUPERSEDES="$2"; shift 2 ;;
+    --importance) need_val "$@"; IMPORTANCE="$2"; shift 2 ;;
+    --durability) need_val "$@"; DURABILITY="$2"; shift 2 ;;
+    --plan)       need_val "$@"; PLAN="$2"; shift 2 ;;
+    --date)       need_val "$@"; RDATE="$2"; shift 2 ;;
+    # --immediate writes the final <id>.md straight away (the old behaviour),
+    # for migration tooling and scripted creation. The default writes an
+    # <id>.md.draft the compiler ignores, so a half-filled record never appears
+    # in the ledger between creation and `memory publish`.
+    --immediate)  IMMEDIATE=1; shift ;;
     -h|--help)
-      sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     -*)
@@ -142,11 +162,25 @@ if [ -n "$SCOPE" ]; then
   VALID_AREAS=" domain contracts conventions internals quality tooling ops meta "
   NTAGS=0
   SEEN=" "
-  OLD_IFS=$IFS
-  IFS=', '
-  set -f
-  for TAG in $SCOPE; do
-    [ -z "$TAG" ] && continue
+  NORMSCOPE=""
+  # Split on commas preserving EMPTY fields, then trim each. The old
+  # `IFS=', '; for TAG in $SCOPE` collapsed adjacent separators, so a scope like
+  # "domain,,quality" silently dropped the empty middle and the generator wrote
+  # a record the compiler then rejected — a create must not produce a record its
+  # own checker refuses. An empty component is now a generator error too.
+  SCOPE_REST="$SCOPE"
+  while : ; do
+    case "$SCOPE_REST" in
+      *,*) TAG="${SCOPE_REST%%,*}"; SCOPE_REST="${SCOPE_REST#*,}"; MORE=1 ;;
+      *)   TAG="$SCOPE_REST"; MORE=0 ;;
+    esac
+    # POSIX whitespace trim, no subshell
+    TAG="${TAG#"${TAG%%[![:space:]]*}"}"
+    TAG="${TAG%"${TAG##*[![:space:]]}"}"
+    if [ -z "$TAG" ]; then
+      echo "ERROR: scope has an empty component (adjacent, leading or trailing comma): $SCOPE" >&2
+      exit 1
+    fi
     NTAGS=$((NTAGS + 1))
     case "$TAG" in
       *[!a-z0-9/-]*|/*|*/)
@@ -179,9 +213,14 @@ if [ -n "$SCOPE" ]; then
         ;;
     esac
     SEEN="$SEEN$AREA "
+    NORMSCOPE="$NORMSCOPE${NORMSCOPE:+, }$TAG"
+    [ "$MORE" -eq 0 ] && break
   done
-  set +f
-  IFS=$OLD_IFS
+  # Write the NORMALIZED scope (trimmed tags, rejoined), not the raw argument.
+  # The per-tag validation ran on trimmed tags, so a leading/embedded newline or
+  # stray whitespace in the raw --scope value would otherwise pass validation
+  # and then be written verbatim into the record, which the compiler rejects.
+  SCOPE="$NORMSCOPE"
   if [ "$NTAGS" -gt 3 ]; then
     echo "ERROR: scope has $NTAGS tags (max 3)" >&2
     exit 1
@@ -252,6 +291,9 @@ if [ -z "$FILE" ]; then
   exit 1
 fi
 
+# Build the skeleton in a private temp file, then publish it with one atomic
+# rename — a concurrent compile must never read a half-written frontmatter.
+WORK="$DIR/.zamm-new.$$-$SUFFIX"
 {
   echo "---"
   echo "type: $RTYPE"
@@ -269,9 +311,23 @@ fi
   echo "created: $RECDATE"
   echo "schema: 3"
   echo "---"
-} > "$FILE"
+} > "$WORK"
 
 if [ "$RTYPE" = "votes" ]; then
   echo "note: fill up:/down: in the created file (at least one must be non-empty; zamm-compile.sh --check rejects a votes record with both empty)" >&2
 fi
-echo "$FILE"
+
+if [ "$IMMEDIATE" -eq 1 ]; then
+  # Old behaviour: the final record lands immediately (migration/scripted use).
+  mv "$WORK" "$FILE"
+  echo "$FILE"
+else
+  # Default: land as <id>.md.draft. The compiler globs *.md, so a .md.draft is
+  # invisible to the ledger — a record composed over several edits never shows
+  # up half-finished. `memory publish` validates it and renames it into place.
+  DRAFT="$FILE.draft"
+  mv "$WORK" "$DRAFT"
+  echo "Draft created (NOT yet in the ledger). Fill in the body, then run:" >&2
+  echo "  zamm-run.sh memory publish $RECDATE-$SLUG-$SUFFIX" >&2
+  echo "$DRAFT"
+fi

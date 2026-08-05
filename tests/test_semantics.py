@@ -5,7 +5,13 @@ and exit 3 (nothing survived, refusing to publish) mean different things and
 call for different responses; a warning must never masquerade as either.
 """
 
-from harness import EXIT_CONTRACT, EXIT_OK, EXIT_REFUSED_PUBLISH, ZammTest
+from harness import (
+    EXIT_CONTRACT,
+    EXIT_DEGRADED,
+    EXIT_OK,
+    EXIT_REFUSED_PUBLISH,
+    ZammTest,
+)
 
 
 class TestExitCodes(ZammTest):
@@ -34,20 +40,22 @@ class TestExitCodes(ZammTest):
 
         r = self.led.compile()
 
-        self.assertCode(r, EXIT_OK)
+        # A quarantined record among valid ones publishes, but now signals the
+        # degradation with exit 2 rather than a healthy-looking exit 0.
+        self.assertCode(r, EXIT_DEGRADED)
         self.assertIn_("A valid statement.", self.led.digest())
         self.assertIn_("quarantined=1", self.header())
 
     def test_exit_three_is_reserved_for_the_publish_guard(self):
-        """Exit 3 must mean exactly one thing, so a caller can tell
-        'some records are broken' from 'the ledger is unreadable'."""
-        # one broken record among valid ones: not a refusal
+        """Each exit code means exactly one thing, so a caller can tell
+        'some records are broken' (2, degraded) from 'nothing survived' (3)."""
+        # one broken record among valid ones: degraded, not a refusal
         self.led.add("fine", "A valid statement.")
         self.led.write(
             "zamm-memory/knowledge/2026/2026-01-06-broken-33333.md",
             "---\ntype: memory\nscope: contracts/api\ncreated: 2026-01-06\n---\nBad.\n",
         )
-        self.assertCode(self.led.compile(), EXIT_OK)
+        self.assertCode(self.led.compile(), EXIT_DEGRADED)
 
         # now break the only valid one too: nothing survives
         self.led.write(

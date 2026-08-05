@@ -73,7 +73,7 @@ class TestScaffoldRefresh(ZammTest):
         self.assertCode(r, 0)
         content = self.led.read(rule)
         self.assertNotIn_("hand-edited nonsense", content)
-        self.assertIn_("Session Start", content)
+        self.assertIn_("Session start (MUST)", content)
 
     def test_always_rerenders_no_flag_needed(self):
         """The --overwrite-templates mode flag is gone: managed surfaces are
@@ -86,7 +86,7 @@ class TestScaffoldRefresh(ZammTest):
         self.assertCode(self.led.scaffold(), 0)
 
         self.assertNotIn_("stale local edit", self.led.read(rule))
-        self.assertIn_("Session Start", self.led.read(rule))
+        self.assertIn_("Session start (MUST)", self.led.read(rule))
 
     def test_does_not_delete_user_rules_from_cursorignore(self):
         """Before the managed-block fix, --overwrite-templates replaced the
@@ -115,7 +115,7 @@ class TestScaffoldRefresh(ZammTest):
                 content = self.led.read("AGENTS.md")
                 self.assertEqual(content.count("SKILL-BLOCK:zamm:BEGIN"), 1)
                 self.assertEqual(content.count("SKILL-BLOCK:zamm:END"), 1)
-                self.assertIn_("Session Start", content)
+                self.assertIn_("Session start (MUST)", content)
 
 
 class TestHelp(ZammTest):

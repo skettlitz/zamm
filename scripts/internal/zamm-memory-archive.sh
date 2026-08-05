@@ -141,7 +141,11 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 printf '%s\n' "$INERT" | grep -v '^[[:space:]]*$' > "$SRCLIST" || true
-tail -n +2 "$DIGEST" > "$BEFORE"
+# compare below the header AND without the generation trailer: the trailer is
+# a checksum over the whole file (header included), so it legitimately changes
+# whenever the header's files= count drops — it is pairing metadata, not
+# digest content.
+tail -n +2 "$DIGEST" | sed '/^<!-- zamm-generation: /d' > "$BEFORE"
 
 # 1. preflight: every source present, every destination absent. Refusing a
 #    collision here means the bare-mv fallback can never overwrite an existing
@@ -188,13 +192,17 @@ while IFS= read -r src; do
 done < "$SRCLIST"
 
 # 3. recompile and verify the digest is unchanged. A failed recompile and a
-#    changed digest each roll back (via the trap on exit 1).
-if ! sh "$COMPILE" --project-root "$PROJECT_ROOT" >/dev/null 2>&1; then
+#    changed digest each roll back (via the trap on exit 1). Exit 2 (a digest
+#    published but degraded by unrelated records) is a successful recompile —
+#    the diff below still verifies this archive changed nothing.
+crc=0
+sh "$COMPILE" --project-root "$PROJECT_ROOT" >/dev/null 2>&1 || crc=$?
+if [ "$crc" != "0" ] && [ "$crc" != "2" ]; then
   echo "" >&2
-  echo "ERROR: the ledger did not recompile after archiving; rolling back." >&2
+  echo "ERROR: the ledger did not recompile after archiving (rc=$crc); rolling back." >&2
   exit 1
 fi
-tail -n +2 "$DIGEST" > "$AFTER"
+tail -n +2 "$DIGEST" | sed '/^<!-- zamm-generation: /d' > "$AFTER"
 if ! diff -q "$BEFORE" "$AFTER" >/dev/null 2>&1; then
   echo "" >&2
   echo "ERROR: the digest changed after archiving; rolling back." >&2

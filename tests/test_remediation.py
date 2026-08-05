@@ -24,6 +24,7 @@ import subprocess
 
 from harness import (
     EXIT_CONTRACT,
+    EXIT_DEGRADED,
     EXIT_OK,
     SCRIPTS,
     ZammTest,
@@ -62,7 +63,9 @@ class TestCompilerAuthority(ZammTest):
 
         r = self.led.compile()
 
-        self.assertCode(r, EXIT_OK)
+        # quarantine publishes (with a ## Degraded section) but signals it via
+        # exit 2; the point of each case is that the valid neighbour survives.
+        self.assertCode(r, EXIT_DEGRADED)
         self._survives(victim)
         self.assertIn_("live=2", self.header(),
                        "both memory records must be live")
@@ -83,7 +86,9 @@ class TestCompilerAuthority(ZammTest):
 
         r = self.led.compile()
 
-        self.assertCode(r, EXIT_OK)
+        # quarantine publishes (with a ## Degraded section) but signals it via
+        # exit 2; the point of each case is that the valid neighbour survives.
+        self.assertCode(r, EXIT_DEGRADED)
         self.assertIn_(target, "\n".join(self.led.entries()))
         self.assertIn_("+1]", self.led.digest(),
                        "the vote must survive: the illegal superseder is "
@@ -104,7 +109,9 @@ class TestCompilerAuthority(ZammTest):
 
         r = self.led.compile()
 
-        self.assertCode(r, EXIT_OK)
+        # quarantine publishes (with a ## Degraded section) but signals it via
+        # exit 2; the point of each case is that the valid neighbour survives.
+        self.assertCode(r, EXIT_DEGRADED)
         self._survives(target)
 
     def test_self_supersede_alongside_a_valid_target_voids_the_record(self):
@@ -120,7 +127,9 @@ class TestCompilerAuthority(ZammTest):
 
         r = self.led.compile()
 
-        self.assertCode(r, EXIT_OK)
+        # quarantine publishes (with a ## Degraded section) but signals it via
+        # exit 2; the point of each case is that the valid neighbour survives.
+        self.assertCode(r, EXIT_DEGRADED)
         self._survives(target)
 
     def test_cycle_member_pointing_at_an_external_target_spares_it(self):
@@ -145,7 +154,9 @@ class TestCompilerAuthority(ZammTest):
 
         r = self.led.compile()
 
-        self.assertCode(r, EXIT_OK)
+        # quarantine publishes (with a ## Degraded section) but signals it via
+        # exit 2; the point of each case is that the valid neighbour survives.
+        self.assertCode(r, EXIT_DEGRADED)
         self._survives(external)
 
     def test_parse_time_quarantine_still_drops_edges(self):
@@ -164,7 +175,9 @@ class TestCompilerAuthority(ZammTest):
 
         r = self.led.compile()
 
-        self.assertCode(r, EXIT_OK)
+        # quarantine publishes (with a ## Degraded section) but signals it via
+        # exit 2; the point of each case is that the valid neighbour survives.
+        self.assertCode(r, EXIT_DEGRADED)
         self._survives(victim)
 
     def test_check_still_reports_the_violation(self):

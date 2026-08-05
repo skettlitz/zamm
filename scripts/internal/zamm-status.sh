@@ -25,9 +25,11 @@ resolve_explicit_root() {
   (cd "$path" && pwd)
 }
 
+# The main plan file comes from the checked manifest (readable, non-symlink,
+# non-subplan candidates only), never from a private find.
 resolve_main_plan_file() {
   local plan_dir="$1"
-  find "$plan_dir" -maxdepth 1 -type f -name "*.plan.md" ! -name "*.subplan-*.plan.md" | sort | head -n1
+  awk -F $'\t' -v d="$plan_dir/" '$1 == "PLANFILE" && index($2, d) == 1 { print $2; exit }' "$MF"
 }
 
 read_plan_status() {
@@ -110,11 +112,23 @@ fi
 
 ROWS_FILE="$(mktemp)"
 MISSING_FILE="$(mktemp)"
-trap 'rm -f "$ROWS_FILE" "$MISSING_FILE"' EXIT
+MF="$(mktemp)"
+trap 'rm -f "$ROWS_FILE" "$MISSING_FILE" "$MF"' EXIT
+
+# Enumerate through the checked manifest: a find/glob over an unreadable tree
+# reports "no plans" for plans nobody actually read; the manifest makes that
+# case loud (exit 4) instead.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+MANIFEST_SH="${ZAMM_PLAN_MANIFEST:-$SCRIPT_DIR/zamm-plan-manifest.sh}"
+if ! sh "$MANIFEST_SH" --project-root "$PROJECT_ROOT" > "$MF"; then
+  echo "ERROR: cannot enumerate the plan tree (unreadable, not empty)."
+  exit 4
+fi
 
 plan_dir_count=0
 
 while IFS= read -r plan_dir; do
+  [ -n "$plan_dir" ] || continue
   plan_dir_count=$((plan_dir_count + 1))
   rel_plan_dir="${plan_dir#"$PROJECT_ROOT"/}"
   main_plan_file="$(resolve_main_plan_file "$plan_dir")"
@@ -134,7 +148,7 @@ while IFS= read -r plan_dir; do
     "$rel_plan_dir" \
     "$rel_plan_file" \
     "$last_updated" >> "$ROWS_FILE"
-done < <(find "$ACTIVE_DIR" -mindepth 1 -maxdepth 1 -type d | sort)
+done < <(awk -F $'\t' '$1 == "PLANDIR" { print $2 }' "$MF")
 
 plan_file_count="$(wc -l < "$ROWS_FILE" | tr -d ' ')"
 missing_count="$(wc -l < "$MISSING_FILE" | tr -d ' ')"
@@ -164,4 +178,14 @@ if [ "$missing_count" -gt 0 ]; then
   while IFS= read -r rel_path; do
     echo "  - $rel_path"
   done < "$MISSING_FILE"
+fi
+
+# structural anomalies the manifest tagged (symlinks, stray files, unreadable
+# plan files, duplicate ids) — informational here, errors in plan check
+anom_count="$(awk -F $'\t' '$1 ~ /^(SYMLINK|NOTDIR|UNREADABLE|DUP)$/' "$MF" | wc -l | tr -d ' ')"
+if [ "$anom_count" -gt 0 ]; then
+  echo "Invalid plan-tree entries ($anom_count; zamm-run.sh plan check reports them as errors):"
+  awk -F $'\t' -v r="$PROJECT_ROOT/" '$1 ~ /^(SYMLINK|NOTDIR|UNREADABLE|DUP)$/ {
+    p = $2; sub(r, "", p); print "  - " $1 ": " p
+  }' "$MF"
 fi

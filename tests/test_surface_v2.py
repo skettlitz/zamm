@@ -143,16 +143,24 @@ class TestMemoryArchive(ZammTest):
 
     def test_the_digest_is_unchanged_by_archiving(self):
         """The defining property: archiving removes only records that
-        influence nothing, so the digest below the header must not move."""
+        influence nothing, so the digest below the header must not move.
+        The generation trailer is pairing metadata over the WHOLE file
+        (header included, whose files= count legitimately drops), so it is
+        excluded like the header itself."""
+
+        def body(text):
+            return [ln for ln in text.splitlines()[1:]
+                    if not ln.startswith("<!-- zamm-generation: ")]
+
         self.led.add("live-rule", "Still true.")
         self.led.add_many(4)
         self._retired_chain("obsolete")
         self.led.compile()
-        before = self.led.digest().splitlines()[1:]
+        before = body(self.led.digest())
 
         self.led.memory_archive()
 
-        self.assertEqual(before, self.led.digest().splitlines()[1:])
+        self.assertEqual(before, body(self.led.digest()))
 
     def test_archived_ids_stay_resolvable_and_greppable(self):
         rec = self._retired_chain("obsolete")

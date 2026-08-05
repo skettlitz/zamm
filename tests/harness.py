@@ -35,6 +35,17 @@ PINNED_TODAY = "2026-07-19"
 
 BASH_SCRIPTS = {"zamm-scaffold.sh", "zamm-archive.sh", "zamm-status.sh"}
 
+# chmod 000 does not deny access to root: with geteuid()==0 the kernel grants
+# read/traverse regardless of permission bits, so permission-based fault
+# injection never fires and the "unreadable" branch under test is unreachable.
+# Decorate such tests with this so a root container (common in CI images)
+# skips them with the mechanism named instead of failing confusingly.
+needs_permission_bits = unittest.skipIf(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    "permission-bit fault injection cannot deny access to root "
+    "(geteuid()==0 bypasses chmod 000)",
+)
+
 # memory digest prints the digest, so tests that assert on stdout use
 # Ledger.digest() (the file) rather than the command output.
 
@@ -42,7 +53,10 @@ BASH_SCRIPTS = {"zamm-scaffold.sh", "zamm-archive.sh", "zamm-status.sh"}
 # difference between "invalid records" and "refused to publish".
 EXIT_OK = 0
 EXIT_CONTRACT = 1
+EXIT_DEGRADED = 2       # digest published, but a Degraded section is present
 EXIT_REFUSED_PUBLISH = 3
+EXIT_UNREADABLE = 4     # ledger enumeration failed; previous digest untouched
+EXIT_VERSION = 5        # dispatcher refused: project protocol version mismatch
 
 
 def suffix(n: int) -> str:
@@ -85,6 +99,11 @@ class Ledger:
             "zamm-memory/archive/plans",
         ):
             (self.root / d).mkdir(parents=True, exist_ok=True)
+        # A scaffolded project always carries a VERSION; the dispatcher's
+        # version gate refuses operational commands without it. Tests that
+        # exercise a missing/mismatched version override this with .version()
+        # or by deleting the file.
+        (self.root / "zamm-memory/VERSION").write_text("3\n")
 
     # ---------------- authoring ----------------
 
@@ -172,7 +191,11 @@ class Ledger:
         Pass valid=False to build a deliberately malformed fixture.
         """
         head = [f"# {title or slug}", "", f"Status: {status}"]
-        if valid and status in ("Implementing", "Review", "Done"):
+        # Abandoned included: a terminal plan the suite archives represents work
+        # that was done and then abandoned, so it carries execution context (and
+        # the retrospective below). The checker's work-happened heuristic then
+        # requires that retrospective, which this fixture supplies.
+        if valid and status in ("Implementing", "Review", "Done", "Abandoned"):
             head += ["Execution-context-before: synthetic fixture",
                      "Complexity-forecast: gecko"]
         head += ["Last updated: 2026-01-05", ""]
@@ -186,8 +209,12 @@ class Ledger:
         head += ["- [x] something" if (valid and status in ("Review", "Done"))
                  else "- [ ] something", ""]
         if valid and status in ("Review", "Done", "Abandoned"):
-            head += ["## Learnings", "", "- Synthetic fixture learning.", "",
-                     "Execution-friction-after: none",
+            head += ["## Learnings", "", "- Synthetic fixture learning.", ""]
+            if status == "Abandoned":
+                # a worked-on abandon needs a Loose-ends rationale/cleanup note
+                head += ["## Loose ends", "",
+                         "- Synthetic abandonment rationale.", ""]
+            head += ["Execution-friction-after: none",
                      "Complexity-felt: gecko",
                      "Complexity-delta: as-expected"]
         if valid and status == "Done":
@@ -255,7 +282,12 @@ class Ledger:
         return self.zamm("scaffold", *args, **kw)
 
     def new_memory(self, *args, **kw) -> Result:
-        return self.zamm("memory", "create", *args, **kw)
+        # Programmatic creation wants the record on disk immediately; the
+        # draft/publish flow is the interactive default and is tested directly.
+        return self.zamm("memory", "create", "--immediate", *args, **kw)
+
+    def memory_publish(self, *args, **kw) -> Result:
+        return self.zamm("memory", "publish", *args, **kw)
 
     def memory_list(self, *args, **kw) -> Result:
         return self.zamm("memory", "list", *args, **kw)

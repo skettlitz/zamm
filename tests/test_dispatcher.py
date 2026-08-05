@@ -147,6 +147,7 @@ class TestRootResolution(ZammTest):
         self.led.add("a-rule", "A statement.")
         other = self.led.root / "other-project"
         (other / "zamm-memory" / "knowledge").mkdir(parents=True)
+        (other / "zamm-memory" / "VERSION").write_text("3\n")
         (other / "zamm-memory" / "knowledge" / "2026").mkdir()
         (other / "zamm-memory" / "knowledge" / "2026" / "2026-01-05-x-22222.md").write_text(
             "---\ntype: memory\nscope: contracts/api\nimportance: useful\n"

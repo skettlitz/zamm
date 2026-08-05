@@ -45,7 +45,7 @@ Record file rules:
 - Filename is the record ID: `YYYY-MM-DD-<topic-slug>-<suffix>.md`.
   - All lowercase; charset `[a-z0-9-]` only; slug at most 40 chars; date is the creation date.
   - `<suffix>` is 5 random chars from the 30-symbol alphabet `23456789abcdefghjkmnpqrstvwxyz` (lowercase Crockford base32 minus the visually ambiguous `0 1 i l o u` — 30 symbols, not 32). The suffix exists so uncoordinated writers on different machines cannot collide: collisions are only possible between records sharing the same date AND the same slug, so the 30^5 space is far larger than the risk it covers.
-- Prefer creating records with `bash <zamm-skill>/scripts/zamm-run.sh memory create --scope '<area[/subpath][, area2]>' <topic-slug>`; hand-written files MUST follow the same naming and schema rules.
+- Prefer creating records with `bash <zamm-skill>/scripts/zamm-run.sh memory create --scope '<area[/subpath][, area2]>' <topic-slug>`; hand-written files MUST follow the same naming and schema rules. `memory create` writes an `<id>.md.draft` that the compiler ignores, so a record being composed never appears half-finished in the ledger; fill in the body, then run `zamm-run.sh memory publish <id>` to validate it and land it (it recompiles the digest on success, and leaves the file as a draft if it does not validate). Scripted/migration callers may pass `--immediate` to skip the draft and write the final `.md` directly.
 - Never rename or move files or directories under `zamm-memory/knowledge/` (the add-only layout is what keeps ledger merges conflict-resistant; renames reintroduce ordinary git conflicts). Two documented exceptions: `## Erasure (exceptional)`, and `zamm-run.sh memory archive`, which moves whole retired chains to `zamm-memory/archive/knowledge/`. A chain qualifies only when nothing in it still affects the digest — no live memory record and no live votes record — because votes aggregate over the whole ancestor chain of a record, so a dead ancestor of a live head is load-bearing. Archived records stay greppable in the working tree and their ids stay resolvable; the command verifies the digest is unchanged and rolls back if it is not.
 - Never store secrets, tokens, or credentials in records; ledger records are effectively permanent.
 - Never quote the human verbatim in a record: paraphrase the substance and, where the register matters, describe the emotion (e.g. "strong frustration with rebuild times") instead of the raw words. Records are permanent and team-visible; profanity and heat-of-the-moment phrasing must not be immortalized.
@@ -90,7 +90,7 @@ Mechanics:
 - Prefer correction over accretion: supersede stale records, merge overlaps, add only genuinely new knowledge.
 - Rate `importance`/`durability` honestly — they are the whole ranking system. Refresh a still-true record near its horizon by superseding with re-rated fields.
 - Suspected-stale but unverified: supersede with a `suspected drift` record plus a verification note.
-- A write is complete only after `bash <zamm-skill>/scripts/zamm-run.sh memory check` passes and the digest is recompiled. Records are drafts until committed, immutable after.
+- A write is complete only after `bash <zamm-skill>/scripts/zamm-run.sh memory publish <id>` accepts the draft — publish validates the record and recompiles the digest in one step. Records are drafts until published, immutable after.
 
 Write a record when (compact cues; full semantics in `<zamm-skill>/references/distillation-triggers.md`):
 - the human says remember this — same turn, no damping
@@ -173,7 +173,7 @@ Transition-time requirements:
   - Ensure scope + `Done-when` are filled.
   - Fill `Execution-context-before` and `Complexity-forecast`.
 - `Draft -> Abandoned`:
-  - Record rationale under `## Loose ends`.
+  - Record rationale under `## Loose ends`. A never-started draft needs nothing more — the checker asks for the full retrospective (telemetry + learnings) only once work has happened (an `Execution-context-before` was filled, or a `Done-when` item was checked).
 - `Implementing -> Review`:
   - Ensure all existing `Done-when` todos are checked. If an item became obsolete, remove it before moving to `Review`.
   - Reconcile stale/conflicting live records touched by this work per `## Distillation (MUST)` before adding new learnings.
@@ -224,7 +224,7 @@ Plans should include:
 
 ## Archive Flow (Optional)
 
-- Run `bash <zamm-skill>/scripts/zamm-run.sh plan archive` to list archive-ready plan directories.
+- Run `bash <zamm-skill>/scripts/zamm-run.sh plan archive --list` to preview archive-ready plan directories without moving anything.
 - Run `bash <zamm-skill>/scripts/zamm-run.sh plan archive` to move ready plan directories into `zamm-memory/archive/plans/`; it recompiles the digest afterwards so the Plans tail reflects the move.
 - Archive flow shall be triggered every time after a plan was marked `Status: Done` after file edits are finished.
 - Ledger records are never archived by this flow; superseded and tombstoned records simply stay in place and drop out of the digest.

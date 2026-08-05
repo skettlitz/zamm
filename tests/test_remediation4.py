@@ -23,7 +23,9 @@ class TestPlanArchiverTransactional(ZammTest):
     def test_a_collision_refuses_the_whole_batch(self):
         """A pre-existing archive destination refuses the batch before any
         move, rather than SKIP-ing it and archiving the rest (a partial
-        archive)."""
+        archive). The refusal now fires at the plan-check gate (the manifest
+        reports the cross-tree duplicate id) before the archiver's own
+        preflight ever runs."""
         self.led.add("a-rule", "A statement.")
         self.led.add_plan("2026-01-05-one", status="Done")
         self.led.add_plan("2026-01-06-two", status="Done")
@@ -33,7 +35,7 @@ class TestPlanArchiverTransactional(ZammTest):
         r = self.led.archive()
 
         self.assertNotEqual(r.code, 0)
-        self.assertIn_("already exists", r.err)
+        self.assertIn_("exists in both active and archive", r.err)
         # NOTHING moved — the first plan must still be active (all-or-nothing)
         self.assertIn_("2026-01-05-one", self._plan_dirs("active"))
         self.assertIn_("2026-01-06-two", self._plan_dirs("active"))

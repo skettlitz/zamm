@@ -22,6 +22,8 @@ PROJECT_ROOT="$PWD"
 CHECK=0
 LIST_INERT=0
 LIST_LIVE=0
+LIST_VOTES=0
+CANDIDATE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --project-root)
@@ -36,6 +38,14 @@ while [ $# -gt 0 ]; do
       CHECK=1
       shift
       ;;
+    --with-candidate)
+      if [ $# -lt 2 ] || [ ! -f "$2" ]; then
+        echo "ERROR: --with-candidate requires an existing draft file" >&2
+        exit 1
+      fi
+      CANDIDATE="$2"
+      shift 2
+      ;;
     --list-inert)
       LIST_INERT=1
       shift
@@ -44,8 +54,14 @@ while [ $# -gt 0 ]; do
       LIST_LIVE=1
       shift
       ;;
+    --list-votes)
+      LIST_VOTES=1
+      shift
+      ;;
     -h|--help)
-      echo "Usage: zamm-compile.sh [--project-root <path>] [--check] [--list-live] [--list-inert]"
+      echo "Usage: zamm-compile.sh [--project-root <path>] [--check [--with-candidate <draft>]] [--list-live] [--list-inert] [--list-votes]"
+      echo "  --with-candidate validates the ledger AS IF the named .md.draft were"
+      echo "  published, without renaming anything into the live namespace."
       exit 0
       ;;
     *)
@@ -58,6 +74,10 @@ done
 KNOWLEDGE_DIR="$PROJECT_ROOT/zamm-memory/knowledge"
 OUT_DIR="$PROJECT_ROOT/zamm-memory/.compiled"
 OUT_FILE="$OUT_DIR/memory.md"
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+# ZAMM_PLAN_MANIFEST overrides the plan-manifest path (test-only DI seam,
+# like ZAMM_TODAY).
+PLAN_MANIFEST="${ZAMM_PLAN_MANIFEST:-$SCRIPT_DIR/zamm-plan-manifest.sh}"
 # ZAMM_TODAY pins the clock (YYYY-MM-DD). Test-only: scoring decays over
 # dates, so golden digests need a fixed today. Unset in normal use.
 TODAY=${ZAMM_TODAY:-$(date +%Y-%m-%d)}
@@ -67,7 +87,40 @@ if [ ! -d "$KNOWLEDGE_DIR" ]; then
   exit 1
 fi
 
+if [ -n "$CANDIDATE" ] && [ "$CHECK" -ne 1 ]; then
+  echo "ERROR: --with-candidate is only meaningful with --check" >&2
+  exit 1
+fi
+
 mkdir -p "$OUT_DIR"
+
+# Candidate overlay: the draft is validated under its FINAL id by staging a
+# private copy named <id>.md and enumerating that copy with the manifest. The
+# live namespace never contains the candidate, so no concurrent reader can
+# observe an unvalidated record, and no rollback of a rejected candidate is
+# ever needed (there is nothing to roll back).
+OVERLAY_DIR=""
+OVERLAY_COPY=""
+if [ -n "$CANDIDATE" ]; then
+  cb=$(basename "$CANDIDATE")
+  case "$cb" in
+    *.md.draft) cid="${cb%.md.draft}" ;;
+    *)
+      echo "ERROR: --with-candidate expects a <id>.md.draft file (got: $cb)" >&2
+      exit 1
+      ;;
+  esac
+  OVERLAY_DIR=$(mktemp -d "$OUT_DIR/.overlay.XXXXXX") || {
+    echo "ERROR: could not create the candidate overlay directory" >&2
+    exit 1
+  }
+  OVERLAY_COPY="$OVERLAY_DIR/$cid.md"
+  cp "$CANDIDATE" "$OVERLAY_COPY" || {
+    echo "ERROR: could not stage the candidate for validation" >&2
+    rm -rf "$OVERLAY_DIR"
+    exit 1
+  }
+fi
 
 # Per-process temp files: concurrent compiles must never share a path, or one
 # process renames another's half-written file (digest truncated to a stub).
@@ -79,25 +132,100 @@ else
   : > "$TMP_FILE"
 fi
 PLANS_TMP="$TMP_FILE.plans"
-trap 'rm -f "$TMP_FILE" "$PLANS_TMP"' EXIT HUP INT TERM
+MF_FILES="$TMP_FILE.mf"
+MF_LINKS="$TMP_FILE.ml"
+MF_ARCH="$TMP_FILE.ma"
+MANIFEST="$TMP_FILE.manifest"
+# Machine-readable compilation state, published beside memory.md. status and
+# `memory list` read THIS rather than reverse-parsing the rendered Markdown —
+# grepping the digest counted a contested guardrail twice (once in the Digest,
+# once under reconciliation) and mistook a record id embedded in a plan title
+# for a selected record.
+STATE_FILE="$OUT_DIR/state.tsv"
+STATE_TMP="$TMP_FILE.state"
+LOCK_DIR="$OUT_DIR/.compile.lock"
+REAPER_DIR="$OUT_DIR/.compile.reaper"
+LOCKED=0
+# Cleanup releases the lock ONLY while its pid file still names this process:
+# should the lock ever be lost to another owner, exiting must not destroy the
+# new owner's mutual exclusion.
+trap 'rm -f "$TMP_FILE" "$PLANS_TMP" "$MF_FILES" "$MF_LINKS" "$MF_ARCH" "$MANIFEST" "$STATE_TMP" "$TMP_FILE.pmf"; [ -n "$OVERLAY_DIR" ] && rm -rf "$OVERLAY_DIR"; [ "$LOCKED" -eq 1 ] && zamm_lock_release; :' EXIT HUP INT TERM
+
+# The mutex primitives (mkdir lock, serialized stale-lock reaping,
+# ownership-checked release) live in the shared lib — the publish transaction
+# holds the same lock across its whole rename+compile window.
+. "$SCRIPT_DIR/zamm-lock.sh"
+
+# Serialize digest publication. Two concurrent publish-mode compiles are a
+# lost-update hazard: each snapshots the ledger into a private manifest, then
+# renames its private result into place — so an older, slower compile can
+# overwrite a newer digest with a stale but internally-coherent digest/sidecar
+# pair (the generation token cannot catch this; it only pairs the two files).
+# The lock is held from BEFORE enumeration until exit, which makes published
+# ledger views monotonically fresh: every published digest was enumerated
+# after the previously published one, so a record whose publish completed can
+# never vanish from a later digest. Read-only modes (--check, --list-*)
+# publish nothing and skip the lock.
+#
+if [ "$CHECK" -eq 0 ] && [ "$LIST_INERT" -eq 0 ] && [ "$LIST_LIVE" -eq 0 ] && [ "$LIST_VOTES" -eq 0 ]; then
+  if [ -n "${ZAMM_LOCK_HELD:-}" ] &&
+     [ "$(cat "$LOCK_DIR/pid" 2>/dev/null)" = "$ZAMM_LOCK_HELD" ] &&
+     zamm_pid_alive "$ZAMM_LOCK_HELD"; then
+    # The publish transaction that spawned this compile already holds the
+    # lock (its pid is in the pid file and it is alive): run under its
+    # exclusion and leave the release to it. LOCKED stays 0, so this process
+    # never removes a lock it does not own.
+    :
+  else
+    zamm_lock_acquire || exit 4
+    LOCKED=1
+  fi
+fi
+
+# Enumerate the ledger into a manifest, checking every step. A find that cannot
+# descend a directory (permissions, a vanished path, an I/O fault) exits
+# non-zero; piping it straight into `sort` masks that, because a pipeline
+# reports the LAST command's status and POSIX sh has no pipefail — so a partial
+# read would publish as if the unread records did not exist, turning "I could
+# not read the ledger" into "these records are gone". Each stage writes a file
+# whose exit status is checked; any failure leaves the previous digest
+# untouched and exits 4 (unreadable, not empty — distinct from the exit-3
+# "readable but nothing survived" case).
+ARCHIVE_KNOWLEDGE="$PROJECT_ROOT/zamm-memory/archive/knowledge"
+enum_ok=1
+find "$KNOWLEDGE_DIR" -type f -name '*.md' > "$MF_FILES" || enum_ok=0
+# Symlinked records are invisible to `-type f`, so a symlink under knowledge/
+# would be silently skipped (unscanned, uncounted). Register them explicitly so
+# the compiler REJECTS them: the ledger holds real files only, no symlinks
+# (they invite loops and path escapes and hide records from --check).
+find "$KNOWLEDGE_DIR" -type l -name '*.md' > "$MF_LINKS" || enum_ok=0
+# Archived ids, filename only. A record moved out by `memory archive` must still
+# resolve as a known-inert reference target rather than reading as a dangling
+# supersedes:, so its NAME is registered without parsing content.
+if [ -d "$ARCHIVE_KNOWLEDGE" ]; then
+  find "$ARCHIVE_KNOWLEDGE" -type f -name '*.md' > "$MF_ARCH" || enum_ok=0
+else
+  : > "$MF_ARCH"
+fi
+if ! {
+  cat "$MF_FILES"
+  # the staged candidate joins the enumeration under its final id, as if it
+  # were already published (see the overlay block above)
+  if [ -n "$OVERLAY_COPY" ]; then printf '%s\n' "$OVERLAY_COPY"; fi
+  sed 's/^/SYMLINK\t/' "$MF_LINKS"
+  sed 's/^/ARCHIVED\t/' "$MF_ARCH"
+} | sort > "$MANIFEST"; then
+  enum_ok=0
+fi
+if [ "$enum_ok" -ne 1 ]; then
+  echo "ERROR: could not enumerate the ledger (a directory or file could not be read)." >&2
+  echo "       The ledger is unreadable, not empty; previous digest left untouched." >&2
+  exit 4
+fi
 
 set +e
-{
-  find "$KNOWLEDGE_DIR" -type f -name '*.md'
-  # Symlinked records are invisible to `-type f`, so a symlink under knowledge/
-  # would be silently skipped (unscanned, uncounted). Register them explicitly
-  # so the compiler REJECTS them instead: the ledger holds real files only, no
-  # symlinks (they invite loops and path escapes and hide records from --check).
-  find "$KNOWLEDGE_DIR" -type l -name '*.md' | sed 's/^/SYMLINK\t/'
-  # Archived ids, filename only. A record moved out by `memory archive` must
-  # still resolve as a known-inert reference target rather than reading as a
-  # dangling supersedes:, so its NAME is registered without parsing content.
-  if [ -d "$PROJECT_ROOT/zamm-memory/archive/knowledge" ]; then
-    find "$PROJECT_ROOT/zamm-memory/archive/knowledge" -type f -name '*.md' \
-      | sed 's/^/ARCHIVED\t/'
-  fi
-} | sort | awk \
-  -v today="$TODAY" -v check="$CHECK" -v listinert="$LIST_INERT" -v listlive="$LIST_LIVE" -v root="$PROJECT_ROOT/" '
+awk \
+  -v today="$TODAY" -v check="$CHECK" -v listinert="$LIST_INERT" -v listlive="$LIST_LIVE" -v listvotes="$LIST_VOTES" -v root="$PROJECT_ROOT/" -v statefile="$STATE_TMP" '
 BEGIN {
   DIGEST_MAX = 75       # full digest blocks (actionable: headline + elaboration)
   HEADLINE_MAX = 150    # headline-only reminders (topic exists; open if relevant)
@@ -119,6 +247,9 @@ BEGIN {
   CHAINDEPTH_MAX = 2    # supersede hops that earn durability credit. Ten
                         # rewrites of a churning statement must not outrank
                         # knowledge that was simply right the first time
+  SEED_MAX = 10000      # ceiling on a migration vote seed: enough to carry
+                        # real pre-migration popularity, low enough that a
+                        # forged seed cannot pin a record atop the ranking
 
   VALID_AREAS = " domain contracts conventions internals quality tooling ops meta "
   # every key the compiler acts on; anything else is a typo until proven
@@ -131,13 +262,25 @@ BEGIN {
 # ---- input: one record file path per line ----
 {
   if (index($0, "SYMLINK\t") == 1) {
-    err(relpath(substr($0, 9)) ": symlinked record files are not allowed in the ledger (no symlinks)")
+    sp = substr($0, 9)
+    ns = split(sp, spp, "/")
+    if (spp[ns] == "shun.md") {
+      # A symlinked shun file is never followed, so compiling on would use an
+      # empty substitute shun set and resurrect erased content. Fatal, like an
+      # unreadable ledger: the previous digest must survive untouched.
+      err(relpath(sp) ": shun.md must be a regular file, not a symlink; refusing to compile")
+      fatalrc = 4
+      exit 4
+    }
+    err(relpath(sp) ": symlinked record files are not allowed in the ledger (no symlinks)")
     next
   }
   if (index($0, "ARCHIVED\t") == 1) {
-    n = split(substr($0, 10), pp, "/")
+    apath = substr($0, 10)
+    n = split(apath, pp, "/")
     aid = pp[n]; sub(/\.md$/, "", aid)
     archived[aid] = 1
+    read_archived_header(apath, aid)
     next
   }
   path = $0
@@ -148,11 +291,59 @@ BEGIN {
 }
 
 function read_shun(path,   line) {
+  # A shun file that exists but cannot be read must abort the whole compile:
+  # an empty substitute shun set would resurrect erased content in the digest
+  # (a failing READ must never widen validity). A missing shun.md never
+  # reaches here -- absence is a legal empty set. The while(>0) form below
+  # cannot tell an open error (getline -1) from a clean empty file (0), so
+  # probe once up front, then reopen for the real read.
+  if ((getline line < path) < 0) {
+    close(path)
+    err(relpath(path) ": cannot read the shun file (permission denied or I/O error); the ledger is unreadable, not shun-free")
+    fatalrc = 4
+    exit 4
+  }
+  close(path)
   while ((getline line < path) > 0) {
     sub(/\r$/, "", line)
     sub(/#.*$/, "", line)
     line = trim(line)
     if (line != "") shun[line] = 1
+  }
+  close(path)
+}
+
+# Frontmatter-only read of an archived record: its id, type and supersedes
+# edges keep their place in the graph as an INERT node (grouping, conflict
+# detection, lineage) while its content, votes and durability stay out of the
+# ranking and the digest. An unreadable archived file degrades to an id-only
+# node with a warning -- losing header data narrows grouping fidelity but
+# never widens validity.
+function read_archived_header(path, aid,   line, state, firstline, pos, key, val) {
+  if ((getline line < path) < 0) {
+    close(path)
+    warn(relpath(path) ": cannot read archived record header; treating it as an id-only inert node")
+    return
+  }
+  close(path)
+  state = 0; firstline = 1
+  while ((getline line < path) > 0) {
+    sub(/\r$/, "", line)
+    if (firstline) {
+      firstline = 0
+      if (line == "---") { state = 1; continue }
+      break
+    }
+    if (state == 1) {
+      if (line == "---") break
+      pos = index(line, ":")
+      if (pos > 1) {
+        key = trim(substr(line, 1, pos - 1))
+        val = trim(substr(line, pos + 1))
+        if      (key == "type")       atype[aid] = val
+        else if (key == "supersedes") asupinert[aid] = val
+      }
+    }
   }
   close(path)
 }
@@ -199,6 +390,17 @@ function read_record(path, base,   id, line, state, firstline, fmclosed, pos, ke
   filepath[id] = path
   order[++nrec] = id
   rtype[id] = "memory"
+
+  # An unreadable file (permission bits, an I/O fault) must quarantine with a
+  # clear reason, not fall through to a misleading "missing frontmatter": the
+  # while(>0) read form below cannot tell an open error (getline -1) from a
+  # clean empty file (0), so probe once up front, then reopen for the real read.
+  if ((getline line < path) < 0) {
+    rerr(id, path ": cannot read record file (permission denied or I/O error)")
+    close(path)
+    return
+  }
+  close(path)
 
   state = 0; firstline = 1; fmclosed = 0
   while ((getline line < path) > 0) {
@@ -312,8 +514,19 @@ function read_record(path, base,   id, line, state, firstline, fmclosed, pos, ke
   }
   if (rtype[id] == "votes") {
     if (rplan[id] == "") rerr(id, path ": votes record missing plan:")
+    # plan: is consumed downstream as a plan DIRECTORY slug (the cross-check
+    # resolves it under active/plans and archive/plans), so it must be a bare
+    # slug — never a path. "plan: .." or "plan: ../../knowledge" would resolve
+    # to a real directory and launder an orphan votes record past the check.
+    else if (rplan[id] !~ /^[a-z0-9][a-z0-9-]*$/)
+      rerr(id, path ": plan: must be a plan directory slug [a-z0-9-] (got \"" rplan[id] "\")")
     if (rup[id] == "" && rdown[id] == "") rerr(id, path ": votes record with neither up: nor down:")
     if (rbody[id] ~ /[^ \t\n]/) rerr(id, path ": votes record must have an empty body (the up:/down: lists are the payload)")
+    # A target repeated within up: (or down:), or listed in BOTH up: and down:,
+    # forges vote weight (three "up: X" once counted as +3). Each list is a
+    # SET of targets; a repeat or an up/down contradiction quarantines the
+    # whole record so no forged weight reaches the ranking.
+    check_vote_lists(id, path)
   }
   if (rimp[id] != "" && rimp[id] !~ /^(guardrail|useful|minor)$/)
     rerr(id, path ": unknown importance \"" rimp[id] "\" (guardrail|useful|minor)")
@@ -325,6 +538,20 @@ function read_record(path, base,   id, line, state, firstline, fmclosed, pos, ke
   # no migration provenance would otherwise inflate its own rank and pass --check).
   if ((rseedup[id] != "" || rseeddn[id] != "") && rmigfrom[id] == "")
     rerr(id, path ": seed-up/seed-dn are migration seeds and require migrated-from:")
+  # A seed feeds the ranking as a raw vote count, so an unbounded or negative
+  # value forges rank: seed-up: 999999999 pins a record at the top forever, and
+  # seed-dn is SUBTRACTED, so a negative seed-dn would ADD score. Constrain both
+  # to plain non-negative integers within a sane ceiling.
+  if (rseedup[id] != "" && !validseed(rseedup[id]))
+    rerr(id, path ": seed-up must be a non-negative integer <= " SEED_MAX " (got \"" rseedup[id] "\")")
+  if (rseeddn[id] != "" && !validseed(rseeddn[id]))
+    rerr(id, path ": seed-dn must be a non-negative integer <= " SEED_MAX " (got \"" rseeddn[id] "\")")
+  # migrated-from names the migration provenance; require an id/path-like token
+  # (no spaces or control chars, non-empty) rather than accepting any free text.
+  # Mixed case is allowed: it points at a FOREIGN system id (a v1/v2 card like
+  # "B3"), which need not follow the v3 lowercase record-id convention.
+  if (rmigfrom[id] != "" && rmigfrom[id] !~ /^[A-Za-z0-9][A-Za-z0-9._\/-]*$/)
+    rerr(id, path ": migrated-from must be a provenance token [A-Za-z0-9._/-] (got \"" rmigfrom[id] "\")")
 
   if (rcreated[id] == "" && id ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-/)
     rcreated[id] = substr(id, 1, 10)
@@ -332,6 +559,130 @@ function read_record(path, base,   id, line, state, firstline, fmclosed, pos, ke
 
 # ---- helpers ----
 function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
+
+# Machine-readable compilation state, written beside memory.md. Downstream
+# commands (status, memory list) read THIS instead of grepping the rendered
+# digest. select rows are the record ids the digest actually surfaced (Digest
+# blocks + Headlines), i.e. what memory list should show by default. Guardrail
+# and contested counts come from the graph, not from counting rendered lines.
+function emit_state(   i, id) {
+  if (statefile == "") return
+  printf "files\t%d\n", nfiles > statefile
+  printf "parsed\t%d\n", nrec - nbad > statefile
+  printf "live\t%d\n", nlive > statefile
+  printf "quarantined\t%d\n", nquar > statefile
+  printf "dangling\t%d\n", ndangling > statefile
+  printf "dupvotes\t%d\n", ndupvote > statefile
+  printf "badvoterefs\t%d\n", nbadvoteref > statefile
+  printf "guardrails\t%d\n", nguard > statefile
+  printf "contested\t%d\n", ngroups > statefile
+  printf "other\t%d\n", nother > statefile
+  printf "dormant\t%d\n", ndorm > statefile
+  printf "unlisted\t%d\n", nunlist > statefile
+  for (i = 1; i <= nrec; i++) {
+    id = order[i]
+    if (id in printed) print "select\t" id > statefile
+  }
+  close(statefile)
+}
+
+# The ## Degraded section: quarantined records, dangling supersedes targets,
+# duplicate active votes records, invalid vote references. Rendered on the
+# normal digest path AND on the zero-live path — a ledger holding only (say) a
+# votes record with a ghost target must still read as degraded, not as a
+# clean uninitialized ledger.
+function emit_degraded(   i, id) {
+  if (nquar == 0 && ndangling == 0 && ndupvote == 0 && nbadvoteref == 0) return
+  print "## Degraded (ledger integrity problems - see below)"
+  print ""
+  if (nquar > 0) {
+    print "Quarantined records - failed the record contract and were excluded from"
+    print "liveness, supersession, votes and ranking. Fix them and recompile; run"
+    print "--check for the full error list."
+    print ""
+    for (i = 1; i <= nrec; i++) {
+      id = order[i]
+      if (!(id in bad)) continue
+      print "- " relpath(badmsg[id])
+    }
+    for (i = 1; i <= ndup; i++)
+      print "- " relpath(dupfile[i]) ": duplicate record id"
+    print ""
+  }
+  if (ndangling > 0) {
+    print "Dangling references - these records are LIVE, but name a supersedes:"
+    print "target that does not exist in the ledger, so that edge was dropped."
+    print "A missing target is usually a typo or a not-yet-committed record."
+    print ""
+    for (i = 1; i <= nrec; i++) {
+      id = order[i]
+      if (!(id in hasdangling)) continue
+      print "- " id ": supersedes target not found: " danglingtgt[id]
+    }
+    print ""
+  }
+  if (ndupvote > 0) {
+    print "Duplicate vote records - more than one active votes record names the"
+    print "same plan. Only the newest is counted; supersede the stale ones."
+    print ""
+    for (i = 1; i <= ndupvote; i++)
+      print "- " dupvoteplan[i] ": " nplanvotes[dupvoteplan[i]] " active votes records (counted: " canonvote[dupvoteplan[i]] ")"
+    print ""
+  }
+  if (nbadvoteref > 0) {
+    print "Invalid vote references - a votes record names a target that does not"
+    print "exist or is not a memory record; that vote was dropped."
+    print ""
+    for (i = 1; i <= nbadvoteref; i++)
+      print "- " badvoteref[i]
+    print ""
+  }
+}
+
+# a comma-separated id list, re-emitted with each element trimmed and empties
+# dropped: "a,<TAB>b , ,c" -> "a,b,c". Used wherever a raw frontmatter list
+# would leak interior whitespace into a machine-readable (TSV) surface.
+function norm_list(s,   n, av, t, tgt, out) {
+  n = split(s, av, ",")
+  out = ""
+  for (t = 1; t <= n; t++) {
+    tgt = trim(av[t])
+    if (tgt == "") continue
+    # an interior tab cannot appear in a valid id, but a malformed element
+    # (already degraded as a bad vote reference) must still not be able to
+    # smuggle a column separator into the TSV
+    gsub(/\t/, " ", tgt)
+    out = out (out == "" ? "" : ",") tgt
+  }
+  return out
+}
+
+# a migration seed is a plain non-negative integer within a ceiling: no sign,
+# no decimal, no exponent (all of which awk would coerce into a usable number)
+function validseed(v) {
+  if (v !~ /^[0-9]+$/) return 0
+  return (v + 0 <= SEED_MAX)
+}
+
+# votes hygiene: up: and down: are each a SET of record ids. A target repeated
+# within a list, or present in both lists, is a contradiction that inflates or
+# cancels vote weight, so it quarantines the record. vu/vd are function-local
+# (fresh per call) so one record cannot leak targets into the next.
+function check_vote_lists(id, path,   m, av, t, tgt, vu, vd) {
+  m = split(rup[id], av, ",")
+  for (t = 1; t <= m; t++) {
+    tgt = trim(av[t]); if (tgt == "") continue
+    if (tgt in vu) rerr(id, path ": duplicate up: vote target " tgt)
+    vu[tgt] = 1
+  }
+  m = split(rdown[id], av, ",")
+  for (t = 1; t <= m; t++) {
+    tgt = trim(av[t]); if (tgt == "") continue
+    if (tgt in vd) rerr(id, path ": duplicate down: vote target " tgt)
+    vd[tgt] = 1
+    if (tgt in vu) rerr(id, path ": vote target " tgt " is in both up: and down:")
+  }
+}
 
 # absolute paths cost context in an always-on surface; show them repo-relative
 function relpath(s) { if (root != "" && index(s, root) == 1) return substr(s, length(root) + 1); return s }
@@ -365,6 +716,12 @@ function rerr(id, msg) {
   if (!(id in bad)) { bad[id] = 1; nbad++; badmsg[id] = msg }
 }
 
+# APPROXIMATE day index: every month is treated as 31 days and every year as
+# 372 (12 x 31). This is deterministic and dependency-free, and only ever feeds
+# a DIFFERENCE of two dates that drives an exponential decay weight — so an
+# error of a few days near month boundaries shifts a score imperceptibly and
+# never changes a ranking tier. It is NOT a real calendar day count; do not use
+# it anywhere exactness matters (validdate() enforces real calendar dates).
 function daynum(d) {
   if (d !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/) return 0
   return substr(d, 1, 4) * 372 + substr(d, 6, 2) * 31 + substr(d, 9, 2) + 0
@@ -402,39 +759,95 @@ function uf_union(a, b,   ra, rb) {
 
 function group(id) { return (id in ufp) ? uf_find(id) : id }
 
-# cycle detection over the supersede DAG (white/grey/black DFS). A cycle
-# makes liveness meaningless — every record in it supersedes the next — and
-# previously only surfaced as "chain too deep" after 200 hops, or not at all
-# when the whole cycle was dead.
-# The grey stack (cyc_stack) is retained on detection: the caller reads it to
-# quarantine EVERY member of the cycle, not just the node where it closed, so
-# no cyclic record survives to apply its edges to a valid neighbour.
-function dfs_cycle(u,   m, tg, t, v) {
-  color[u] = 1
-  cyc_stack[++cyc_sp] = u
-  if (rsup[u] != "") {
-    m = split(rsup[u], tg, ",")
+# cycle detection over the supersede DAG. A cycle makes liveness meaningless —
+# every record in it supersedes the next — so every member must be quarantined,
+# not just the node where the loop happened to close.
+#
+# Tarjan strongly-connected components, iterative. The previous single early
+# -return DFS quarantined only the FIRST cycle it closed and left stale grey
+# state behind, so a second, disjoint cycle reachable through a shared node
+# went undetected — its records were silently applied and could kill a valid
+# neighbour (exit 0, no degradation shown). SCC decomposition finds ALL cycles
+# regardless of overlap or discovery order; a component is cyclic when it has
+# more than one node, or one node with a self-edge. Iterative (explicit stacks)
+# because a recursive walk in awk also risks blowing the interpreter stack on a
+# long valid chain.
+
+# cycle-candidate adjacency: the supersede targets of every non-quarantined
+# record, filtered exactly as liveness will filter them (existing, non-shun,
+# non-bad). Built once so Tarjan and any re-run read the same graph.
+function build_adj(   i, id, m, tg, t, v, c) {
+  for (i = 1; i <= nrec; i++) {
+    id = order[i]
+    if ((id in shun) || (id in bad)) continue
+    adjn[id] = 0
+    if (rsup[id] == "") continue
+    m = split(rsup[id], tg, ",")
+    c = 0
     for (t = 1; t <= m; t++) {
       v = trim(tg[t])
       if (v == "" || !(v in filepath) || (v in shun) || (v in bad)) continue
-      if (color[v] == 1) { cyc_back = v; return 1 }
-      if (color[v] == 0 && dfs_cycle(v)) return 1
+      adj[id, ++c] = v
     }
+    adjn[id] = c
   }
-  color[u] = 2
-  cyc_sp--
-  return 0
 }
 
-# quarantine the actual cycle: the grey stack holds root..u; the members are
-# the suffix from cyc_back (the node the back edge closed onto) to the top.
-# The prefix leading INTO the cycle is a valid successor lineage and is spared.
-function quarantine_cycle(   s, started) {
-  started = 0
-  for (s = 1; s <= cyc_sp; s++) {
-    if (cyc_stack[s] == cyc_back) started = 1
-    if (started)
-      rerr(cyc_stack[s], filepath[cyc_stack[s]] ": supersede cycle member (closes onto " cyc_back ")")
+# quarantine every member of an SCC that represents a cycle (size > 1, or a
+# lone node that supersedes itself). A self-supersession is already caught in
+# pass 1a, but checking here keeps SCC handling self-contained.
+function scc_close(u, sp,   k, w, size, selfloop, t) {
+  size = 0
+  # pop the component stack down to and including u
+  while (1) {
+    w = tstk[tsp--]; ton[w] = 0
+    comp[++size] = w
+    if (w == u) break
+  }
+  selfloop = 0
+  for (t = 1; t <= adjn[u]; t++) if (adj[u, t] == u) selfloop = 1
+  if (size > 1 || selfloop) {
+    for (k = 1; k <= size; k++)
+      rerr(comp[k], filepath[comp[k]] ": supersede cycle member (strongly-connected component of " size ")")
+  }
+}
+
+function tarjan(   i, id, u, ci, v, par) {
+  build_adj()
+  tj_idx = 0    # next DFS index to hand out
+  tsp = 0       # component-stack pointer (tstk / ton)
+  wsp = 0       # work-stack pointer (wnode / wci): the explicit call stack
+  for (i = 1; i <= nrec; i++) {
+    id = order[i]
+    if ((id in shun) || (id in bad)) continue
+    if (id in tindex) continue
+    wsp = 1; wnode[1] = id; wci[1] = 0
+    while (wsp > 0) {
+      u = wnode[wsp]
+      ci = wci[wsp]
+      if (ci == 0) {
+        tj_idx++
+        tindex[u] = tj_idx
+        tlow[u] = tj_idx
+        tsp++; tstk[tsp] = u; ton[u] = 1
+      }
+      if (ci < adjn[u]) {
+        wci[wsp] = ci + 1
+        v = adj[u, ci + 1]
+        if (!(v in tindex)) {
+          wsp++; wnode[wsp] = v; wci[wsp] = 0        # descend
+        } else if (ton[v] && tindex[v] < tlow[u]) {
+          tlow[u] = tindex[v]                        # back/cross edge on stack
+        }
+      } else {
+        if (tlow[u] == tindex[u]) scc_close(u)       # u roots an SCC
+        wsp--                                        # return from u
+        if (wsp > 0) {
+          par = wnode[wsp]
+          if (tlow[u] < tlow[par]) tlow[par] = tlow[u]
+        }
+      }
+    }
   }
 }
 
@@ -529,6 +942,16 @@ function tagcost(id) { return (tagn[id] > 1) ? TAG_COST * (tagn[id] - 1) : 0 }
 # votes attach to the exact record voted on; totals aggregate over a record
 # and ALL records it (transitively) supersedes, never sideways — so a vote on
 # one fork head cannot bleed to a competing head
+# A bad vote reference (missing or wrong-typed target) drops just that vote —
+# co-listed valid votes still count — but it is a global graph defect, so like a
+# dangling supersedes it is surfaced under ## Degraded and forces a degraded
+# (exit 2) publish rather than a healthy-looking exit 0. --check already fails
+# on it via err(); this makes normal compile agree about ledger health.
+function bad_voteref(msg) {
+  err(msg)
+  badvoteref[++nbadvoteref] = msg
+}
+
 function addvotes(voter, list, sign, w,   m, t, tgt, av) {
   if (list == "") return
   m = split(list, av, ",")
@@ -537,15 +960,14 @@ function addvotes(voter, list, sign, w,   m, t, tgt, av) {
     if (tgt == "") continue
     # shunned or archived target = known inert node: no vote, no error
     if ((tgt in shun) || (tgt in archived)) continue
-    if (!(tgt in filepath)) { err(voter ": vote target not found: " tgt); continue }
+    if (!(tgt in filepath)) { bad_voteref(voter ": vote target not found: " tgt); continue }
     if (tgt in bad) continue
     # votes rate knowledge, so only memory records can be voted on: a vote on
     # a tombstone or on another votes record carries no meaning and would
-    # silently vanish from the ranking. Bad target is skipped rather than
-    # quarantining the whole record, so co-listed valid votes still count
-    # (same handling as a dangling target above).
+    # silently vanish from the ranking. Bad target is a degradation (surfaced,
+    # not silently dropped) but does not quarantine the record.
     if (rtype[tgt] != "memory") {
-      err(voter ": vote target " tgt " is a " rtype[tgt] " record; only memory records can be voted on")
+      bad_voteref(voter ": vote target " tgt " is a " rtype[tgt] " record; only memory records can be voted on")
       continue
     }
     if (sign > 0) { vup_id[tgt]++; vsc_id[tgt] += w }
@@ -553,19 +975,25 @@ function addvotes(voter, list, sign, w,   m, t, tgt, av) {
   }
 }
 
-# DAG walk over the ancestor set: which 1 = up count, 2 = down count, 3 = score
+# DAG walk over the ancestor set: which 1 = up count, 2 = down count, 3 = score.
+# Walks asup[] (the APPLIED edges) only, so votes aggregate across exactly the
+# lineage that liveness recognises — never through a quarantined or dangling
+# ancestor (that would let an invalid record lend its votes to a valid head).
+# The visited set (vseen/epoch) makes each node contribute once, which both
+# handles diamonds and bounds the walk by the ledger size, so there is no
+# arbitrary node cap to silently truncate a long ancestry.
 function chainagg(id, which,   q, qh, qt, cur, m, tg, t, tgt, tot) {
   epoch++
   tot = 0; qh = 1; qt = 1; q[1] = id
-  while (qh <= qt && qt < 500) {
+  while (qh <= qt) {
     cur = q[qh++]
     if (vseen[cur] == epoch) continue
     vseen[cur] = epoch
     if (which == 1)      tot += vup_id[cur]
     else if (which == 2) tot += vdn_id[cur]
     else                 tot += vsc_id[cur]
-    if (rsup[cur] != "") {
-      m = split(rsup[cur], tg, ",")
+    if (asup[cur] != "") {
+      m = split(asup[cur], tg, ",")
       for (t = 1; t <= m; t++) {
         tgt = trim(tg[t])
         if (tgt != "") q[++qt] = tgt
@@ -688,6 +1116,9 @@ function emitfull(id, withscope,   pre, m, bl, t, ln, started, paradone, any) {
 }
 
 END {
+  # awk runs END even on a mid-stream exit, so a fatal enumeration-class
+  # failure re-asserts its code here before any rendering can happen.
+  if (fatalrc) { close("cat 1>&2"); exit fatalrc }
   tdn = daynum(today)
 
   # Supersede edges are resolved in three passes so an invalid record can
@@ -719,7 +1150,30 @@ END {
       # A shunned target is a known redacted node, not a dangling reference:
       # the erasure procedure (shun + delete) must leave successors valid.
       if (tgt in shun) continue
-      if (!(tgt in filepath)) { err(id ": supersedes target not found: " tgt); continue }
+      # An archived target is likewise known-inert, not dangling: `memory
+      # archive` moved a fully-retired record out of the scan path but kept
+      # its id resolvable. Its type (parsed from the archived header) still
+      # participates in compatibility checks; the edge itself is applied as
+      # grouping-only in the apply pass.
+      if (tgt in archived) {
+        if (atype[tgt] != "") {
+          if (rtype[id] == "memory" && atype[tgt] == "votes")
+            rerr(id, filepath[id] ": memory record cannot supersede a votes record (" tgt ", archived)")
+          else if (rtype[id] == "votes" && atype[tgt] != "votes")
+            rerr(id, filepath[id] ": votes record may only supersede another votes record (" tgt " is archived " atype[tgt] ")")
+        }
+        continue
+      }
+      if (!(tgt in filepath)) {
+        err(id ": supersedes target not found: " tgt)
+        # A dangling target does NOT quarantine the record (its other edges may
+        # be valid) — but it is a global graph defect, so it is surfaced under
+        # ## Degraded and forces a non-zero (degraded) publish exit, rather than
+        # a healthy-looking exit 0 that hides the broken reference.
+        danglingtgt[id] = (danglingtgt[id] == "") ? tgt : danglingtgt[id] ", " tgt
+        if (!(id in hasdangling)) { hasdangling[id] = 1; ndangling++ }
+        continue
+      }
       # type compatibility: a memory record cannot retire a vote, and a vote
       # cannot retire knowledge — only tombstones may retire anything
       if (rtype[id] == "memory" && rtype[tgt] == "votes")
@@ -731,16 +1185,9 @@ END {
 
   # 1b. cycles: a supersede loop makes liveness undefined. Runs after 1a so the
   #     type/self/duplicate offenders are already quarantined and cannot appear
-  #     as phantom cycle members. Every member of a detected cycle is
-  #     quarantined, so none of them reaches the apply pass.
-  for (i = 1; i <= nrec; i++) {
-    id = order[i]
-    if ((id in shun) || (id in bad)) continue
-    if (color[id] == 0) {
-      cyc_sp = 0
-      if (dfs_cycle(id)) quarantine_cycle()
-    }
-  }
+  #     as phantom cycle members. Tarjan quarantines every member of every SCC
+  #     that is a cycle, so none of them reaches the apply pass — see tarjan().
+  tarjan()
 
   # 1c. APPLY edges, now that only records with a fully clean, acyclic edge set
   #     remain un-quarantined. Both endpoints must be valid: the edge is
@@ -750,6 +1197,11 @@ END {
   #     letting invalid input change the rank of a valid record (fail closed on
   #     authority, on both ends of the edge). Shunned and dangling targets were
   #     diagnosed in 1a and likewise carry no edge.
+  #
+  #     The edges that survive here are the ONLY ones any later pass may read.
+  #     asup[] records that applied adjacency (comma-joined targets); vote and
+  #     ancestor aggregation walk asup[], never the raw rsup[], so a vote can
+  #     never reach a valid record through a quarantined or dangling ancestor.
   for (i = 1; i <= nrec; i++) {
     id = order[i]
     if (id in shun) continue
@@ -758,11 +1210,65 @@ END {
     m = split(rsup[id], tg, ",")
     for (t = 1; t <= m; t++) {
       tgt = trim(tg[t])
-      if (tgt == "" || (tgt in shun) || (tgt in bad) || !(tgt in filepath)) continue
+      if (tgt == "") continue
+      # An edge into a shunned or archived target applies as GROUPING AND
+      # LINEAGE ONLY: the retired id stays a real graph node (two live
+      # successors of one retired target meet in one union-find group and
+      # surface under Needs reconciliation), but no dead/nsup/asup mutation
+      # happens, so a retired node can never mint ranking credit or route
+      # votes into a live record.
+      if ((tgt in shun) || ((tgt in archived) && !(tgt in filepath))) {
+        uf_union(id, tgt)
+        if (!(id in parent)) parent[id] = tgt
+        continue
+      }
+      if ((tgt in bad) || !(tgt in filepath)) continue
       dead[tgt] = 1
       nsup[id]++
       if (!(id in parent)) parent[id] = tgt
+      asup[id] = (asup[id] == "") ? tgt : asup[id] "," tgt
       uf_union(id, tgt)
+    }
+  }
+
+  # Edges BETWEEN retired nodes, parsed from archived headers, keep whole
+  # retired chains connected: two live successors attached at different
+  # points of one archived chain still meet in one group. Grouping only --
+  # nothing here touches liveness, rank or votes.
+  for (aid in asupinert) {
+    m = split(asupinert[aid], tg, ",")
+    for (t = 1; t <= m; t++) {
+      tgt = trim(tg[t])
+      if (tgt == "" || tgt == aid) continue
+      if ((tgt in archived) || (tgt in shun) || (tgt in filepath)) uf_union(aid, tgt)
+    }
+  }
+
+  # 2a. one active votes record per plan. The votes record for a plan is
+  #     corrected by SUPERSEDING it, so more than one active (non-dead) votes
+  #     record for the same plan is a bookkeeping error that would double-count
+  #     (two "+1 on X" records reading as +2). Only the newest is counted — ids
+  #     lead with the creation date, so the lexical maximum is the newest — and
+  #     the collision is surfaced under ## Degraded (and fails --check). This
+  #     keeps the count deterministic without dropping the signal entirely.
+  for (i = 1; i <= nrec; i++) {
+    id = order[i]
+    if ((id in shun) || (id in bad)) continue
+    if (rtype[id] != "votes" || (id in dead)) continue
+    pl = rplan[id]
+    if (pl == "") continue
+    nplanvotes[pl]++
+    if (!(pl in canonvote) || id > canonvote[pl]) canonvote[pl] = id
+  }
+  for (i = 1; i <= nrec; i++) {
+    id = order[i]
+    if ((id in shun) || (id in bad)) continue
+    if (rtype[id] != "votes" || (id in dead)) continue
+    pl = rplan[id]
+    if (pl != "" && nplanvotes[pl] > 1 && !(pl in dupvoteseen)) {
+      dupvoteseen[pl] = 1
+      dupvoteplan[++ndupvote] = pl
+      err(pl ": " nplanvotes[pl] " active votes records for one plan (supersede the stale ones; only the newest, " canonvote[pl] ", is counted)")
     }
   }
 
@@ -774,6 +1280,9 @@ END {
     # A superseded or tombstoned votes record stops counting — superseding a
     # votes record IS the vote-correction path, so it has to actually work.
     if (rtype[id] == "votes" && (id in dead)) continue
+    # Only the newest active votes record for a plan counts (see pass 2a); the
+    # stale duplicates are surfaced as a degradation instead of double-counting.
+    if (rtype[id] == "votes" && rplan[id] != "" && canonvote[rplan[id]] != id) continue
     w = VOTE_WEIGHT * agew(rcreated[id])
     if (rtype[id] == "votes") {
       addvotes(id, rup[id], 1, w)
@@ -835,6 +1344,28 @@ END {
     exit 0
   }
 
+  # The active (counted) votes records, for the plan<->ledger cross-check. One
+  # line per votes record that actually affects ranking: id <TAB> plan <TAB> up
+  # <TAB> down. This is the compilers own graph verdict — the cross-check reads
+  # it instead of reconstructing "which votes record is superseded" from the
+  # filesystem (a substring-fragile, path-unsafe approximation). Superseded and
+  # non-canonical duplicates are excluded here exactly as they are from counting.
+  if (listvotes == 1) {
+    for (i = 1; i <= nrec; i++) {
+      id = order[i]
+      if ((id in shun) || (id in bad)) continue
+      if (rtype[id] != "votes" || (id in dead)) continue
+      if (rplan[id] != "" && canonvote[rplan[id]] != id) continue
+      # normalized lists, never the raw frontmatter value: a TAB is legal
+      # whitespace inside a vote list ("up: a,<TAB>b" passes the record
+      # contract) but would split into an extra TSV column here, shifting
+      # id-b into the down field for any consumer.
+      printf "%s\t%s\t%s\t%s\n", id, rplan[id], norm_list(rup[id]), norm_list(rdown[id])
+    }
+    close("cat 1>&2")
+    exit 0
+  }
+
   # 3b. inert components: everything `memory archive` is allowed to move.
   #     A component may go only when NOTHING in it still affects the digest.
   #     Votes aggregate over the whole ancestor chain of a record, so a
@@ -879,8 +1410,19 @@ END {
 
   if (nlive == 0) {
     print "(no live memory records - active memory has not been initialized)"
+    # Zero live records does NOT mean zero problems: a ledger holding only a
+    # votes record with a ghost target, or duplicate votes records, reaches
+    # here (such records are not "live memory", and with nquar == 0 the
+    # refuse-to-publish branch above did not fire). Exiting 0 with a clean
+    # "not initialized" digest would hide known graph defects and invite
+    # re-seeding, so render ## Degraded and exit 2 like the normal path.
+    if (ndangling > 0 || ndupvote > 0 || nbadvoteref > 0) {
+      print ""
+      emit_degraded()
+    }
+    emit_state()
     close("cat 1>&2")
-    exit 0
+    exit ((ndangling > 0 || ndupvote > 0 || nbadvoteref > 0) ? 2 : 0)
   }
 
   print "Entry format: - headline [record-id votes +bg]; indented lines = elaboration."
@@ -890,24 +1432,10 @@ END {
   print "open the record (+bg) when the topic matches. Id doubles as creation date."
   print ""
 
-  # Quarantined records: excluded from every calculation above, surfaced here
-  # so a broken file is visible as a broken file rather than as missing memory.
-  if (nquar > 0) {
-    print "## Degraded (quarantined records - excluded from the digest)"
-    print ""
-    print "These files failed the record contract and were ignored for liveness,"
-    print "supersession, votes and ranking. Fix them and recompile; run --check for"
-    print "the full error list."
-    print ""
-    for (i = 1; i <= nrec; i++) {
-      id = order[i]
-      if (!(id in bad)) continue
-      print "- " relpath(badmsg[id])
-    }
-    for (i = 1; i <= ndup; i++)
-      print "- " relpath(dupfile[i]) ": duplicate record id"
-    print ""
-  }
+  # Degraded: ledger integrity problems surfaced in the digest itself, so a
+  # broken ledger reads as broken rather than as missing memory. Any kind
+  # makes the compile exit 2 (degraded), never a healthy-looking 0.
+  emit_degraded()
 
   if (nother > 0) {
     print "Other: " nother " record(s) in the catch-all area - refile each via"
@@ -1035,10 +1563,15 @@ END {
     print "Dormant (decayed below digest floor; ledger stays greppable): " s
   }
 
+  emit_state()
   close("cat 1>&2")
-  exit 0
+  # exit 2 = the digest was published but a ## Degraded section is present
+  # (quarantined records, dangling references, duplicate vote records, or
+  # invalid vote references). A caller can tell a clean digest from a degraded
+  # one by the code alone, without parsing the Markdown.
+  exit ((nquar > 0 || ndangling > 0 || ndupvote > 0 || nbadvoteref > 0) ? 2 : 0)
 }
-' > "$TMP_FILE"
+' "$MANIFEST" > "$TMP_FILE"
 rc=$?
 set -e
 
@@ -1046,22 +1579,54 @@ set -e
 #      title, optional inline scope), derived at compile time (no maintained
 #      index files; zamm-status.sh stays the on-demand verbose view)
 append_plans_section() {
-  plans_dir="$PROJECT_ROOT/zamm-memory/active/plans"
+  # The plan tree enters the digest ONLY through the checked manifest: a glob
+  # here followed symlinked directories into external content and read an
+  # unreadable tree as "no active plans". Enumeration failure aborts before
+  # the digest is published (exit 4, previous digest untouched).
+  pmf="$TMP_FILE.pmf"
+  if ! sh "$PLAN_MANIFEST" --project-root "$PROJECT_ROOT" > "$pmf"; then
+    echo "ERROR: could not enumerate the plan tree; plans are unreadable, not empty." >&2
+    echo "       Previous digest left untouched." >&2
+    exit 4
+  fi
+  tab=$(printf '\t')
+  active_prefix="$PROJECT_ROOT/zamm-memory/active/plans/"
   plans_tmp="$PLANS_TMP"
   : > "$plans_tmp"
-  for pd in "$plans_dir"/*/; do
-    [ -d "$pd" ] || continue
-    pd=${pd%/}
+  # Structural anomalies render as one-liners derived from the entry NAME
+  # alone — tagged content is never opened, so a symlinked directory cannot
+  # inject external text into the digest.
+  while IFS="$tab" read -r tag p1 p2 p3; do
+    base=${p1##*/}
+    case "$tag" in
+      SYMLINK)
+        case "$p1" in "$active_prefix"*)
+          printf '6\t- Invalid: %s (symlinked entry; not rendered)\n' "$base" >> "$plans_tmp" ;;
+        esac ;;
+      NOTDIR)
+        case "$p1" in "$active_prefix"*)
+          printf '6\t- Invalid: %s (not a plan directory)\n' "$base" >> "$plans_tmp" ;;
+        esac ;;
+      UNREADABLE)
+        case "$p1" in "$active_prefix"*)
+          printf '6\t- Unknown: %s (unreadable .plan.md)\n' "$base" >> "$plans_tmp" ;;
+        esac ;;
+      DUP)
+        printf '6\t- Invalid: %s (same plan id active and archived)\n' "$p1" >> "$plans_tmp" ;;
+    esac
+  done < "$pmf"
+  while IFS= read -r pd; do
+    [ -n "$pd" ] || continue
     slug=$(basename "$pd")
-    pf="$pd/$slug.plan.md"
-    if [ ! -f "$pf" ]; then
-      pf=""
-      for cand in "$pd"/*.plan.md; do
-        if [ -f "$cand" ]; then pf="$cand"; break; fi
-      done
-    fi
+    # prefer <slug>.plan.md, else the first main candidate the manifest lists
+    pf=$(awk -F"$tab" -v want="$pd/$slug.plan.md" '$1 == "PLANFILE" && $2 == want { print $2; exit }' "$pmf")
+    [ -n "$pf" ] ||
+      pf=$(awk -F"$tab" -v d="$pd/" '$1 == "PLANFILE" && index($2, d) == 1 { print $2; exit }' "$pmf")
     if [ -z "$pf" ]; then
-      printf '6\t- Unknown: %s (no .plan.md file)\n' "$slug" >> "$plans_tmp"
+      # an unreadable main candidate already rendered above; only a dir with
+      # genuinely no candidate reports "no .plan.md file"
+      nun=$(awk -F"$tab" -v d="$pd/" '$1 == "UNREADABLE" && index($2, d) == 1 { n++ } END { print n + 0 }' "$pmf")
+      [ "$nun" -eq 0 ] && printf '6\t- Unknown: %s (no .plan.md file)\n' "$slug" >> "$plans_tmp"
       continue
     fi
     awk -v slug="$slug" '
@@ -1109,7 +1674,9 @@ append_plans_section() {
         print out
       }
     ' "$pf" >> "$plans_tmp"
-  done
+  done <<EOF
+$(awk -F"$tab" '$1 == "PLANDIR" { print $2 }' "$pmf")
+EOF
   {
     printf '\n## Plans (active; compact entries)\n\n'
     if [ -s "$plans_tmp" ]; then
@@ -1128,11 +1695,7 @@ append_plans_section() {
   # Recently archived plan IDs: after a pull, a referenced plan directory may
   # have moved to archive on another machine — this list keeps the move
   # visible. Directory mtime sorts fresh arrivals (checkout/closure) first.
-  arch_dir="$PROJECT_ROOT/zamm-memory/archive/plans"
-  narch=0
-  for ad in "$arch_dir"/*/; do
-    [ -d "$ad" ] && narch=$((narch + 1))
-  done
+  narch=$(awk -F"$tab" '$1 == "ARCHDIR" { n++ } END { print n + 0 }' "$pmf")
   if [ "$narch" -gt 0 ]; then
     {
       if [ "$narch" -gt 10 ]; then
@@ -1140,13 +1703,15 @@ append_plans_section() {
       else
         echo "Recently archived ($narch; in zamm-memory/archive/plans/):"
       fi
-      # shellcheck disable=SC2012
-      ls -1td "$arch_dir"/*/ 2>/dev/null | head -n 10 | while IFS= read -r ad; do
-        ad=${ad%/}
-        echo "- $(basename "$ad")"
+      awk -F"$tab" '$1 == "ARCHDIR" { print $2 }' "$pmf" | while IFS= read -r ad; do
+        m=$(stat -f %m "$ad" 2>/dev/null || stat -c %Y "$ad" 2>/dev/null || echo 0)
+        printf '%s\t%s\n' "$m" "${ad##*/}"
+      done | sort -t "$tab" -k1,1rn -k2,2 | head -n 10 | while IFS="$tab" read -r _m nm; do
+        echo "- $nm"
       done
     } >> "$TMP_FILE"
   fi
+  rm -f "$pmf"
 }
 
 if [ "$CHECK" -eq 1 ]; then
@@ -1155,10 +1720,11 @@ if [ "$CHECK" -eq 1 ]; then
     exit "$rc"
   fi
   echo "ZAMM check passed."
-elif [ "$LIST_INERT" -eq 1 ] || [ "$LIST_LIVE" -eq 1 ]; then
-  # read-only: the awk wrote the inert paths to the private temp file, so
-  # emit them and publish nothing
-  if [ "$rc" -ne 0 ]; then
+elif [ "$LIST_INERT" -eq 1 ] || [ "$LIST_LIVE" -eq 1 ] || [ "$LIST_VOTES" -eq 1 ]; then
+  # read-only: the awk wrote the list rows to the private temp file, so
+  # emit them and publish nothing. Exit 2 (a degraded but valid ledger) is not
+  # a failure for a read-only listing; only a real failure (>2) refuses.
+  if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
     echo "ERROR: ledger did not compile; refusing to list records." >&2
     exit "$rc"
   fi
@@ -1178,11 +1744,34 @@ else
     fi
     exit 3
   fi
-  if [ "$rc" -ne 0 ]; then
+  # rc 2 = degraded publish: the digest WAS built (with a ## Degraded section)
+  # and must be published; the caller learns of the degradation from the exit
+  # code, not from a missing digest. Any other non-zero code is a real failure
+  # that leaves the previous digest untouched.
+  if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
     echo "ERROR: digest compilation failed; previous digest left untouched." >&2
     exit "$rc"
   fi
   append_plans_section
+  # The digest and the sidecar are two separate renames that cannot be one
+  # atomic step, and rename ORDER alone only chooses which mismatched pairing
+  # survives a crash between them. So the pair carries a shared generation
+  # token (a checksum of the digest content, stamped into both files), and
+  # sidecar CONSUMERS verify it: on a mismatch they refuse with "recompile"
+  # instead of mixing authorities (e.g. memory list serving a selection the
+  # published digest never surfaced). Sidecar absence is tolerated (only
+  # replaced when the awk produced one); the next compile re-derives both.
+  gen=$(cksum < "$TMP_FILE" | tr -s ' \t' '-')
+  printf '<!-- zamm-generation: %s -->\n' "$gen" >> "$TMP_FILE"
+  if [ -f "$STATE_TMP" ]; then
+    printf 'generation\t%s\n' "$gen" >> "$STATE_TMP"
+    mv "$STATE_TMP" "$STATE_FILE"
+  fi
   mv "$TMP_FILE" "$OUT_FILE"
-  echo "ZAMM digest: $OUT_FILE"
+  if [ "$rc" -eq 2 ]; then
+    echo "ZAMM digest: $OUT_FILE (degraded - see ## Degraded)"
+  else
+    echo "ZAMM digest: $OUT_FILE"
+  fi
+  exit "$rc"
 fi

@@ -28,9 +28,11 @@ resolve_explicit_root() {
   (cd "$path" && pwd)
 }
 
+# The main plan file comes from the checked manifest (readable, non-symlink,
+# non-subplan candidates only), never from a private find.
 resolve_main_plan_file() {
   local plan_dir="$1"
-  find "$plan_dir" -maxdepth 1 -type f -name "*.plan.md" ! -name "*.subplan-*.plan.md" | sort | head -n1
+  awk -F $'\t' -v d="$plan_dir/" '$1 == "PLANFILE" && index($2, d) == 1 { print $2; exit }' "$MF"
 }
 
 read_plan_status() {
@@ -84,10 +86,25 @@ if [ ! -d "$ARCHIVE_DIR" ]; then
   mkdir -p "$ARCHIVE_DIR"
 fi
 
-declare -a READY_SLUGS
-declare -a READY_REASONS
+# Initialized empty, not just declared: `declare -a X` leaves X unset, and
+# `${#X[@]}` under `set -u` is an "unbound variable" error on some bash
+# versions (GitHub's ubuntu runner among them) while older bashes tolerate it.
+READY_SLUGS=()
+READY_REASONS=()
+
+# Candidates come from the checked manifest: a find over an unreadable tree
+# would report "nothing archive-ready" for plans nobody actually read.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+MANIFEST_SH="${ZAMM_PLAN_MANIFEST:-$SCRIPT_DIR/zamm-plan-manifest.sh}"
+MF="$(mktemp)"
+trap 'rm -f "$MF"' EXIT
+if ! sh "$MANIFEST_SH" --project-root "$PROJECT_ROOT" > "$MF"; then
+  echo "ERROR: cannot enumerate the plan tree (unreadable, not empty); refusing to archive." >&2
+  exit 4
+fi
 
 while IFS= read -r plan_dir; do
+  [ -n "$plan_dir" ] || continue
   slug=$(basename "$plan_dir")
   main_plan_file=$(resolve_main_plan_file "$plan_dir")
 
@@ -102,7 +119,7 @@ while IFS= read -r plan_dir; do
       READY_REASONS+=("status: $status")
       ;;
   esac
-done < <(find "$ACTIVE_DIR" -mindepth 1 -maxdepth 1 -type d | sort)
+done < <(awk -F $'\t' '$1 == "PLANDIR" { print $2 }' "$MF")
 
 echo "ZAMM: plan archive helper"
 echo "Project root: $PROJECT_ROOT"
@@ -133,11 +150,23 @@ fi
 # history (a Done plan with empty approval fields, say). It keys off the first
 # Status: line to LIST candidates, but a plan that fails validation must never
 # be moved regardless of how archiving was invoked.
-PLAN_CHECK_SCRIPT="$(cd "$(dirname "$0")" && pwd)/zamm-plan-check.sh"
+PLAN_CHECK_SCRIPT="$SCRIPT_DIR/zamm-plan-check.sh"
 if [ -f "$PLAN_CHECK_SCRIPT" ]; then
   if ! sh "$PLAN_CHECK_SCRIPT" --project-root "$PROJECT_ROOT" >/dev/null 2>&1; then
     echo "ERROR: plan check failed; refusing to archive." >&2
     sh "$PLAN_CHECK_SCRIPT" --project-root "$PROJECT_ROOT" 2>&1 >/dev/null | sed 's/^/  /' >&2
+    exit 1
+  fi
+fi
+
+# A plan is archived only when its own state AND its ledger side effects
+# agree: archiving must not launder a plan whose votes record disagrees with
+# its declared Memory-upvotes/downvotes (or whose votes record is missing).
+XCHECK_SCRIPT="$SCRIPT_DIR/zamm-crosscheck.sh"
+if [ -f "$XCHECK_SCRIPT" ]; then
+  if ! sh "$XCHECK_SCRIPT" --project-root "$PROJECT_ROOT" >/dev/null 2>&1; then
+    echo "ERROR: plan/ledger cross-check failed; refusing to archive." >&2
+    sh "$XCHECK_SCRIPT" --project-root "$PROJECT_ROOT" 2>&1 >/dev/null | sed 's/^/  /' >&2
     exit 1
   fi
 fi
@@ -172,6 +201,7 @@ cleanup() {
     [ -f "$COMPILE_SCRIPT" ] && sh "$COMPILE_SCRIPT" --project-root "$PROJECT_ROOT" >/dev/null 2>&1 || true
   fi
   rm -rf "$WORK"
+  rm -f "$MF"
 }
 # Signals must terminate (re-exit into the single EXIT cleanup), not run
 # cleanup and then resume on the now-deleted work dir.
@@ -216,10 +246,15 @@ for slug in "${READY_SLUGS[@]}"; do
   moved=$((moved + 1))
 done
 
-# 3. recompile so the digest Plans tail reflects the moves; a failure rolls back
+# 3. recompile so the digest Plans tail reflects the moves; a failure rolls back.
+#    Exit 2 = the digest was PUBLISHED but is degraded by records unrelated to
+#    this archive; that is a successful recompile, so only a real failure (rc
+#    other than 0 or 2) rolls the archive back.
 if [ -f "$COMPILE_SCRIPT" ]; then
-  if ! sh "$COMPILE_SCRIPT" --project-root "$PROJECT_ROOT" >/dev/null 2>&1; then
-    echo "ERROR: digest recompile failed after archiving; rolling back." >&2
+  crc=0
+  sh "$COMPILE_SCRIPT" --project-root "$PROJECT_ROOT" >/dev/null 2>&1 || crc=$?
+  if [ "$crc" != "0" ] && [ "$crc" != "2" ]; then
+    echo "ERROR: digest recompile failed after archiving (rc=$crc); rolling back." >&2
     exit 1
   fi
   echo "Digest recompiled."

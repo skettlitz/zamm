@@ -16,6 +16,7 @@ set -eu
 LC_ALL=C
 export LC_ALL
 
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 PROJECT_ROOT="$PWD"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -38,7 +39,6 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-PLANS_DIR="$PROJECT_ROOT/zamm-memory/active/plans"
 nerr=0
 nwarn=0
 nplans=0
@@ -76,6 +76,30 @@ in_set() {
     [ "$item" = "$needle" ] && return 0
   done
   return 1
+}
+
+# The retrospective a plan must carry once work has happened: execution
+# telemetry plus non-placeholder learnings. Required unconditionally on Review
+# and Done, and on an Abandoned plan ONLY if work actually happened (see the
+# work-happened heuristic below) — a never-started Draft->Abandoned is exempt,
+# matching the protocol, which asks a bare draft only for a Loose-ends rationale.
+require_retrospective() {
+  _pf="$1"; _rel="$2"; _st="$3"
+  require "$_pf" "$_rel" "$_st" "Execution-friction-after" "Complexity-felt" "Complexity-delta"
+  _cfe=$(field "$_pf" "Complexity-felt")
+  if [ -n "$_cfe" ] && ! in_set "$_cfe" "$COMPLEXITY_ANIMALS"; then
+    err "$_rel: Complexity-felt \"$_cfe\" is not on the animal scale ($COMPLEXITY_ANIMALS)"
+  fi
+  _cd=$(field "$_pf" "Complexity-delta")
+  if [ -n "$_cd" ] && ! in_set "$_cd" "$COMPLEXITY_DELTAS"; then
+    err "$_rel: Complexity-delta \"$_cd\" is not one of: $COMPLEXITY_DELTAS"
+  fi
+  # Learnings must say something, even if that something is "nothing durable"
+  _learn=$(section_body "$_pf" "Learnings" | grep -v '^[[:space:]]*$' || true)
+  case "$_learn" in
+    "") err "$_rel: status is $_st but ## Learnings is empty" ;;
+    *"none yet"*) err "$_rel: status is $_st but ## Learnings still holds the template placeholder" ;;
+  esac
 }
 
 # Real Gregorian date, not just the digit shape (2026-99-99 and 2026-02-30 are
@@ -135,24 +159,49 @@ scope_has_content() {
     grep -q .
 }
 
-[ -d "$PLANS_DIR" ] || { echo "ZAMM plan check passed (no active plans directory)."; exit 0; }
+# The plan tree is enumerated by the shared checked manifest, never by a
+# private glob: a glob over an unreadable directory expands to nothing and
+# reports "0 plans" for a tree nobody actually read. Manifest failure is
+# exit 4 (unreadable, not empty), matching the ledger-side taxonomy.
+MANIFEST_SH="${ZAMM_PLAN_MANIFEST:-$SCRIPT_DIR/zamm-plan-manifest.sh}"
+MF=$(mktemp "${TMPDIR:-/tmp}/zamm-plan-check-mf.XXXXXX")
+trap 'rm -f "$MF"' EXIT HUP INT TERM
+if ! sh "$MANIFEST_SH" --project-root "$PROJECT_ROOT" > "$MF"; then
+  echo "zamm-plan: ERROR: cannot enumerate the plan tree; refusing to report plans as valid." >&2
+  exit 4
+fi
+TAB=$(printf '\t')
 
-for pd in "$PLANS_DIR"/*/; do
-  [ -d "$pd" ] || continue
-  pd=${pd%/}
+# structural anomalies the manifest tagged: each is a validation error here
+# (the manifest only refuses outright when enumeration itself failed)
+while IFS="$TAB" read -r tag p1 p2 p3; do
+  case "$tag" in
+    SYMLINK)    err "${p1#"$PROJECT_ROOT/"}: symlinked entries are not allowed in the plan tree (no symlinks)" ;;
+    NOTDIR)     err "${p1#"$PROJECT_ROOT/"}: not a plan directory" ;;
+    UNREADABLE) err "${p1#"$PROJECT_ROOT/"}: cannot read plan file (permission denied or I/O error)" ;;
+    DUP)        err "plan id \"$p1\" exists in both active and archive (${p2#"$PROJECT_ROOT/"}, ${p3#"$PROJECT_ROOT/"})" ;;
+  esac
+done < "$MF"
+
+plandirs=$(awk -F"$TAB" '$1 == "PLANDIR" { print $2 }' "$MF")
+while IFS= read -r pd; do
+  [ -n "$pd" ] || continue
   slug=$(basename "$pd")
   nplans=$((nplans + 1))
 
-  # exactly one main plan file
-  nmain=$(find "$pd" -maxdepth 1 -type f -name '*.plan.md' ! -name '*.subplan-*' 2>/dev/null | wc -l | tr -d ' ')
+  # exactly one main plan file (manifest rows: PLANFILE = readable main
+  # candidate, UNREADABLE = a main candidate that exists but cannot be opened
+  # — already reported above, so it must not double-report as "no main")
+  nmain=$(awk -F"$TAB" -v d="$pd/" '$1 == "PLANFILE" && index($2, d) == 1 { n++ } END { print n + 0 }' "$MF")
+  nunread=$(awk -F"$TAB" -v d="$pd/" '$1 == "UNREADABLE" && index($2, d) == 1 { n++ } END { print n + 0 }' "$MF")
   if [ "$nmain" -eq 0 ]; then
-    err "$slug: plan directory has no main .plan.md"
+    [ "$nunread" -eq 0 ] && err "$slug: plan directory has no main .plan.md"
     continue
   elif [ "$nmain" -gt 1 ]; then
     err "$slug: plan directory has $nmain main .plan.md files (expected 1)"
     continue
   fi
-  pf=$(find "$pd" -maxdepth 1 -type f -name '*.plan.md' ! -name '*.subplan-*' | head -1)
+  pf=$(awk -F"$TAB" -v d="$pd/" '$1 == "PLANFILE" && index($2, d) == 1 { print $2; exit }' "$MF")
   rel="${pf#"$PROJECT_ROOT/"}"
 
   status=$(field "$pf" "Status")
@@ -199,22 +248,51 @@ for pd in "$PLANS_DIR"/*/; do
       ;;
   esac
   case "$status" in
-    Review|Done|Abandoned)
-      require "$pf" "$rel" "$status" "Execution-friction-after" "Complexity-felt" "Complexity-delta"
-      cfe=$(field "$pf" "Complexity-felt")
-      if [ -n "$cfe" ] && ! in_set "$cfe" "$COMPLEXITY_ANIMALS"; then
-        err "$rel: Complexity-felt \"$cfe\" is not on the animal scale ($COMPLEXITY_ANIMALS)"
+    Review|Done)
+      require_retrospective "$pf" "$rel" "$status"
+      ;;
+    Abandoned)
+      # Work-happened heuristic: snapshot validation cannot see the transition,
+      # so it infers whether work was done. A plan that reached Implementing
+      # carries Execution-context-before; a plan that did any work checked off a
+      # Done-when item. Either means this is an Implementing->Abandoned, which the
+      # protocol says carries the SAME distillation/telemetry as
+      # Implementing->Review PLUS a rationale and cleanup notes. A never-started
+      # Draft->Abandoned has neither and is asked only for a Loose-ends rationale.
+      work_happened=0
+      [ -n "$(field "$pf" "Execution-context-before")" ] && work_happened=1
+      [ "${dw_valid:-0}" -gt "${dw_open:-0}" ] && work_happened=1
+      # a Loose-ends rationale is required either way (the abandonment reason).
+      # The template places the trailing telemetry fields (Execution-friction-
+      # after:, Complexity-*, Done-approved-*) physically under ## Loose ends
+      # with no heading between, so filter those out — otherwise their mere
+      # presence would satisfy the rationale check even when it is empty.
+      loose=$(section_body "$pf" "Loose ends" \
+        | grep -v '^[[:space:]]*$' | grep -v '(none yet)' \
+        | grep -vE '^(Execution-friction-after|Complexity-felt|Complexity-delta|Done-approved-by|Done-approved-at|Done-approval-evidence):' \
+        || true)
+      [ -z "$loose" ] &&
+        err "$rel: status is Abandoned but ## Loose ends has no rationale/cleanup notes"
+      if [ "$work_happened" -eq 1 ]; then
+        # the forward-direction fields a plan that did work must have had
+        require "$pf" "$rel" "$status" "Execution-context-before" "Complexity-forecast"
+        # ... including a real Scope and well-formed Done-when items: an
+        # Implementing->Abandoned passed through Implementing, where these
+        # are required, so their absence (or a malformed checkbox that
+        # quietly counts as neither open nor done) must not become valid by
+        # abandoning the plan.
+        scope_has_content "$pf" ||
+          err "$rel: status is Abandoned after work but Scope: has no In/Out content"
+        [ "${dw_valid:-0}" -eq 0 ] &&
+          err "$rel: status is Abandoned after work but there are no Done-when items"
+        [ "${dw_any:-0}" -gt "${dw_valid:-0}" ] &&
+          err "$rel: Done-when has a malformed checkbox (use '- [ ]', '- [x]', or '- [X]')"
+        cf=$(field "$pf" "Complexity-forecast")
+        if [ -n "$cf" ] && ! in_set "$cf" "$COMPLEXITY_ANIMALS"; then
+          err "$rel: Complexity-forecast \"$cf\" is not on the animal scale ($COMPLEXITY_ANIMALS)"
+        fi
+        require_retrospective "$pf" "$rel" "$status"
       fi
-      cd=$(field "$pf" "Complexity-delta")
-      if [ -n "$cd" ] && ! in_set "$cd" "$COMPLEXITY_DELTAS"; then
-        err "$rel: Complexity-delta \"$cd\" is not one of: $COMPLEXITY_DELTAS"
-      fi
-      # Learnings must say something, even if that something is "nothing durable"
-      learn=$(section_body "$pf" "Learnings" | grep -v '^[[:space:]]*$' || true)
-      case "$learn" in
-        "") err "$rel: status is $status but ## Learnings is empty" ;;
-        *"none yet"*) err "$rel: status is $status but ## Learnings still holds the template placeholder" ;;
-      esac
       ;;
   esac
   if [ "$status" = "Done" ]; then
@@ -235,7 +313,9 @@ for pd in "$PLANS_DIR"/*/; do
         err "$rel: status is $status but $dw_open Done-when item(s) are unchecked"
       ;;
   esac
-done
+done <<EOF
+$plandirs
+EOF
 
 # advisory, not failures
 [ "$nterm" -gt 0 ] &&

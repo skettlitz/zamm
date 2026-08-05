@@ -32,13 +32,21 @@ else
   exit 0
 fi
 
+# Hash EVERY normative input, not just the scaffold sources: the rendered
+# protocol and the operative behaviour are governed by SKILL.md, everything
+# under references/ (distillation triggers, complexity animals, initialization,
+# migration and eternal-memory doctrine, scaffold fragments, templates), and
+# all of scripts/. A change to any of them should read STALE until re-scaffold;
+# hashing only references/scaffold + references/templates + scripts left edits
+# to SKILL.md and references/distillation-triggers.md invisible to drift.
 digest=$({
-  find "$SKILL_DIR/references/scaffold" "$SKILL_DIR/references/templates" \
-    "$SKILL_DIR/scripts" -type f 2>/dev/null \
-    | LC_ALL=C sort | while IFS= read -r f; do
-      printf '%s\n' "${f#"$SKILL_DIR"}"
-      cat "$f" 2>/dev/null
-    done
+  { [ -f "$SKILL_DIR/SKILL.md" ] && printf '%s\n' "$SKILL_DIR/SKILL.md"; }
+  find "$SKILL_DIR/references" "$SKILL_DIR/scripts" -type f 2>/dev/null
+} | LC_ALL=C sort | {
+  while IFS= read -r f; do
+    printf '%s\n' "${f#"$SKILL_DIR"}"
+    cat "$f" 2>/dev/null
+  done
 } | $hasher | tr -d ' -' | cut -c1-12)
 
 [ -n "$digest" ] || { echo "local"; exit 0; }

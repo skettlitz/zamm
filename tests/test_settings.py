@@ -31,9 +31,14 @@ class TestChainDepthCap(ZammTest):
             "stable", "Stable statement, right the first time.",
             date="2026-07-19", scope="conventions/style", durability="permanent",
         )
+        # +2 via two DISTINCT plans that each found the record helpful — a
+        # single record listing the same target twice is now rejected as a
+        # forged vote, and two active votes records for ONE plan is flagged.
         self.led.add(
-            "votes", type="votes", date="2026-07-19", plan="p",
-            up=f"{stable}, {stable}",
+            "votes-a", type="votes", date="2026-07-19", plan="p-a", up=stable,
+        )
+        self.led.add(
+            "votes-b", type="votes", date="2026-07-19", plan="p-b", up=stable,
         )
         return stable
 

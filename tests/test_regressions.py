@@ -15,7 +15,13 @@ against whatever the code happens to do now.
 import concurrent.futures
 import re
 
-from harness import EXIT_CONTRACT, EXIT_OK, EXIT_REFUSED_PUBLISH, ZammTest
+from harness import (
+    EXIT_CONTRACT,
+    EXIT_DEGRADED,
+    EXIT_OK,
+    EXIT_REFUSED_PUBLISH,
+    ZammTest,
+)
 
 
 class TestCompilerIntegrity(ZammTest):
@@ -38,9 +44,11 @@ class TestCompilerIntegrity(ZammTest):
         self.assertIn_("files=40 parsed=40 live=40 quarantined=0", self.header())
         self.assertEqual(len(self.led.entries()), 40)
 
-        # no shared temp file may survive a run
+        # no shared temp file may survive a run; memory.md and the state.tsv
+        # sidecar are the two published artifacts, everything else is a stray.
         compiled = self.led.root / "zamm-memory/.compiled"
-        strays = [p.name for p in compiled.iterdir() if p.name != "memory.md"]
+        published = {"memory.md", "state.tsv"}
+        strays = [p.name for p in compiled.iterdir() if p.name not in published]
         self.assertEqual(strays, [], "temp files left behind")
 
     def test_invalid_record_cannot_suppress_a_valid_guardrail(self):
@@ -64,7 +72,7 @@ class TestCompilerIntegrity(ZammTest):
 
         r = self.led.compile()
 
-        self.assertCode(r, EXIT_OK, "a quarantined record must not fail normal compile")
+        self.assertCode(r, EXIT_DEGRADED, "a quarantined record publishes (degraded), not fails")
         digest = self.led.digest()
         self.assertIn_(
             "Never run migrations against prod without a snapshot.",
@@ -299,6 +307,9 @@ class TestScaffoldSafety(ZammTest):
 
     def test_refuses_a_versionless_tree_that_already_holds_content(self):
         """Unknown state must not be stamped as v3."""
+        # The default fixture ships a VERSION; this case is specifically a
+        # versionless tree that nonetheless holds content, so remove it first.
+        (self.led.root / "zamm-memory/VERSION").unlink()
         self.led.add("orphan", "A record with no VERSION file.")
 
         r = self.led.scaffold()

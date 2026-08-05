@@ -290,7 +290,12 @@ upsert_managed_block_at_end() {
     had_existing_block=1
   fi
 
-  filtered_file="$(mktemp)"
+  # Create the temp file ADJACENT to the target, not under $TMPDIR: the final
+  # `mv` is an atomic rename only within one filesystem, and /tmp is frequently
+  # a different mount than the repo (so mv there becomes copy-then-delete, a
+  # window where a reader sees a truncated file). The sibling temp shares the
+  # target's filesystem.
+  filtered_file="$(mktemp "${path}.zamm.XXXXXX")"
   awk \
     -v begin_regex="$begin_marker_regex" \
     -v end_marker="$end_marker" '
@@ -367,7 +372,12 @@ write_current_zamm_version() {
   fi
 
   mkdir -p "$(dirname "$VERSION_FILE")"
-  printf '%s\n' "$content" > "$VERSION_FILE"
+  # temp + atomic rename: every other command gates on this file, so a crash
+  # mid-write must never leave a half-written (unparseable) VERSION behind
+  local tmp
+  tmp="$(mktemp "$(dirname "$VERSION_FILE")/.VERSION.XXXXXX")"
+  printf '%s\n' "$content" > "$tmp"
+  mv "$tmp" "$VERSION_FILE"
   echo "  version: $VERSION_FILE -> $CURRENT_ZAMM_VERSION"
 }
 
@@ -395,13 +405,19 @@ if [ -f "$SCAFFOLD_DIR/cursorignore" ]; then
 fi
 
 # --- AGENTS.md + Cursor rule (composed from canonical fragments) ---
+# The always-on surfaces carry the compact ROUTER, not the full protocol:
+# ~54KB of manual on two alwaysApply surfaces taxed every session for text
+# that is only needed at decision points. The router states what ZAMM is,
+# how to compile context, who owns memory and plans, and when to load the
+# full protocol body (which stays in this skill, read on demand).
 AGENTS_HEADER="$SCAFFOLD_DIR/agents-header.template.md"
 RULE_HEADER="$SCAFFOLD_DIR/rule-header.mdc"
 PROTOCOL_BODY="$SCAFFOLD_DIR/protocol-body.template.md"
+PROTOCOL_ROUTER="$SCAFFOLD_DIR/protocol-router.template.md"
 
-if [ -f "$AGENTS_HEADER" ] && [ -f "$RULE_HEADER" ] && [ -f "$PROTOCOL_BODY" ]; then
-  RAW_AGENTS_CONTENT="$(cat "$AGENTS_HEADER"; printf '\n'; cat "$PROTOCOL_BODY")"
-  RAW_RULE_CONTENT="$(cat "$RULE_HEADER"; printf '\n'; cat "$PROTOCOL_BODY")"
+if [ -f "$AGENTS_HEADER" ] && [ -f "$RULE_HEADER" ] && [ -f "$PROTOCOL_ROUTER" ] && [ -f "$PROTOCOL_BODY" ]; then
+  RAW_AGENTS_CONTENT="$(cat "$AGENTS_HEADER"; printf '\n'; cat "$PROTOCOL_ROUTER")"
+  RAW_RULE_CONTENT="$(cat "$RULE_HEADER"; printf '\n'; cat "$PROTOCOL_ROUTER")"
   AGENTS_CONTENT="$(render_runtime_surface_content "$RAW_AGENTS_CONTENT")"
   RULE_CONTENT="$(render_runtime_surface_content "$RAW_RULE_CONTENT")"
   upsert_managed_block_at_end \
@@ -415,8 +431,11 @@ else
   # VERSION must not be stamped by an install that could not render the
   # protocol: a project marked v3 whose runtime surfaces are missing looks
   # migrated to every later tool while carrying no operating instructions.
+  # PROTOCOL_BODY is required too, although not rendered: the router points
+  # agents at it, so an install without it routes to nothing.
   [ -f "$AGENTS_HEADER" ] || echo "ERROR: missing template fragment: $AGENTS_HEADER"
   [ -f "$RULE_HEADER" ] || echo "ERROR: missing template fragment: $RULE_HEADER"
+  [ -f "$PROTOCOL_ROUTER" ] || echo "ERROR: missing template fragment: $PROTOCOL_ROUTER"
   [ -f "$PROTOCOL_BODY" ] || echo "ERROR: missing template fragment: $PROTOCOL_BODY"
   echo "       The skill install is incomplete; VERSION was not written."
   exit 1
@@ -432,17 +451,12 @@ echo "  2. Compile the (empty) digest and confirm the toolchain works:"
 echo "     bash \"$SKILL_DIR/scripts/zamm-run.sh\" --project-root \"$PROJECT_ROOT\" memory digest"
 echo "  3. If the digest reports no live records, ask whether to run"
 echo "     \"$SKILL_DIR/references/initialization/existing-project.md\""
-echo "  4. Create memory records with:"
+echo "  4. Create memory records (writes a draft; fill the body, then publish):"
 echo "     bash \"$SKILL_DIR/scripts/zamm-run.sh\" --project-root \"$PROJECT_ROOT\" memory create --scope '<area[/subpath][, area2]>' <topic-slug>"
-echo "  5. Create your first plan directory and plan file:"
-echo "     PLAN_SLUG=\"${TODAY}-YOUR-PLAN-SLUG\""
-echo "     mkdir -p \"$PROJECT_ROOT/zamm-memory/active/plans/\$PLAN_SLUG/workdir\""
-if [ -f "$PLAN_TEMPLATE" ]; then
-  echo "     cp \"$PLAN_TEMPLATE\" \"$PROJECT_ROOT/zamm-memory/active/plans/\$PLAN_SLUG/\$PLAN_SLUG.plan.md\""
-else
-  echo "     (plan template missing at $PLAN_TEMPLATE; create the .plan.md file manually)"
-fi
+echo "     bash \"$SKILL_DIR/scripts/zamm-run.sh\" --project-root \"$PROJECT_ROOT\" memory publish <id>"
+echo "  5. Create your first plan with the official command (no manual mkdir/cp):"
+echo "     bash \"$SKILL_DIR/scripts/zamm-run.sh\" --project-root \"$PROJECT_ROOT\" plan create '<plan title>'"
 echo "  6. Check current plan status buckets anytime:"
 echo "     bash \"$SKILL_DIR/scripts/zamm-run.sh\" --project-root \"$PROJECT_ROOT\" plan list"
-echo "  7. Archive finished plan directories when ready:"
+echo "  7. Archive finished plan directories when ready (--list to preview):"
 echo "     bash \"$SKILL_DIR/scripts/zamm-run.sh\" --project-root \"$PROJECT_ROOT\" plan archive"
