@@ -452,10 +452,13 @@ resolve_one_draft() {
 }
 
 # Age of a draft in whole days, from mtime. stat is the one non-POSIX call:
-# BSD spells it -f %m, GNU -c %Y.
+# GNU spells it -c %Y, BSD -f %m. GNU must be probed first: it accepts -f as
+# "filesystem status", dumps a multi-line report to stdout, and exits nonzero
+# only afterwards — polluting a captured chain. BSD rejects -c with stdout
+# untouched, so this order is clean on both.
 draft_age_days() {
-  m=$(stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo '')
-  [ -n "$m" ] || { echo 0; return 0; }
+  m=$(stat -c %Y "$1" 2>/dev/null) || m=$(stat -f %m "$1" 2>/dev/null) || m=''
+  case "$m" in ''|*[!0-9]*) echo 0; return 0 ;; esac
   echo $(( ($(date +%s) - m) / 86400 ))
 }
 
