@@ -96,6 +96,11 @@ if ! sh "$MANIFEST_SH" --project-root "$PROJECT_ROOT" > "$PMF"; then
   echo "zamm-xcheck: ERROR: cannot enumerate the plan tree; cross-check cannot run." >&2
   exit 4
 fi
+TAB0=$(printf '\t')
+if grep -q "^MISSING${TAB0}" "$PMF"; then
+  echo "zamm-xcheck: ERROR: a plan root is missing (structural damage, not an empty project); cross-check cannot run." >&2
+  exit 4
+fi
 crc=0
 sh "$COMPILE" --project-root "$PROJECT_ROOT" --list-votes > "$VOTES_TMP" 2>"$CERR_TMP" || crc=$?
 if [ "$crc" -ne 0 ] && [ "$crc" -ne 2 ]; then

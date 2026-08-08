@@ -115,21 +115,36 @@ class TestSupersessionHappy(ZammTest):
 
 
 class TestToolchainHappy(ZammTest):
-    def test_generated_record_passes_check_once_filled(self):
-        r = self.led.new_memory("--scope", "contracts/api", "generated-rule")
+    def test_generated_record_is_complete_and_valid_at_once(self):
+        """A record is either absent or complete: create takes the body and
+        writes the finished record, so there is no interval in which the
+        ledger holds a half-written one."""
+        r = self.led.new_memory(
+            "--scope", "contracts/api", "generated-rule",
+            body="A statement written by the caller at creation time.\n",
+            validate=True,
+        )
         self.assertCode(r, 0)
         path = r.out.strip()
         self.assertTrue(path.endswith(".md"), r)
 
-        # a skeleton has no body yet: quarantined by design until filled
-        self.assertCode(self.led.check(), 1, "empty skeleton should not pass")
-
-        with open(path, "a") as fh:
-            fh.write("A statement written by the caller after generation.\n")
-
         self.assertCode(self.led.check(), EXIT_OK)
         self.led.compile()
         self.assertIn_("A statement written by the caller", self.led.digest())
+
+    def test_create_refuses_a_record_that_would_not_validate(self):
+        """The bytes that are validated are the bytes that land, so a record
+        that fails the contract leaves nothing behind at all."""
+        before = sorted(p.name for p in (self.led.root / "zamm-memory/knowledge").rglob("*.md"))
+        r = self.led.new_memory(
+            "--scope", "contracts/api",
+            "--supersedes", "2020-01-01-nonexistent-aaaaa",
+            "doomed", validate=True,
+        )
+        self.assertCode(r, 1)
+        self.assertIn_("did not validate", r.output)
+        after = sorted(p.name for p in (self.led.root / "zamm-memory/knowledge").rglob("*.md"))
+        self.assertEqual(before, after, "a refused create must write nothing")
 
     def test_fresh_scaffold_produces_a_tree_that_compiles(self):
         import tempfile

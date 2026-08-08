@@ -82,6 +82,13 @@ PLAN_MANIFEST="${ZAMM_PLAN_MANIFEST:-$SCRIPT_DIR/zamm-plan-manifest.sh}"
 # dates, so golden digests need a fixed today. Unset in normal use.
 TODAY=${ZAMM_TODAY:-$(date +%Y-%m-%d)}
 
+# Defense in depth: this script is directly invocable, so it re-proves the
+# canonical roots are real directories inside the project (the dispatcher
+# already did for its own callers). A symlinked knowledge/ otherwise reads as
+# "the ledger is empty" and a symlinked .compiled/ redirects the digest write.
+. "$SCRIPT_DIR/zamm-paths.sh"
+zamm_verify_roots "$PROJECT_ROOT" || exit 4
+
 if [ ! -d "$KNOWLEDGE_DIR" ]; then
   echo "ERROR: missing $KNOWLEDGE_DIR (run zamm-scaffold.sh first)" >&2
   exit 1
@@ -105,8 +112,13 @@ if [ -n "$CANDIDATE" ]; then
   cb=$(basename "$CANDIDATE")
   case "$cb" in
     *.md.draft) cid="${cb%.md.draft}" ;;
+    # A record being written by zamm-new-memory.sh lives at
+    # .<id>.md.pending.XXXXXX until it validates. That name matches neither
+    # *.md (ledger enumeration) nor *.md.draft, so an in-flight record is
+    # invisible to every other reader.
+    .*.md.pending.*) cid="${cb%.md.pending.*}"; cid="${cid#.}" ;;
     *)
-      echo "ERROR: --with-candidate expects a <id>.md.draft file (got: $cb)" >&2
+      echo "ERROR: --with-candidate expects a <id>.md.draft or .<id>.md.pending.* file (got: $cb)" >&2
       exit 1
       ;;
   esac
@@ -143,44 +155,22 @@ MANIFEST="$TMP_FILE.manifest"
 # for a selected record.
 STATE_FILE="$OUT_DIR/state.tsv"
 STATE_TMP="$TMP_FILE.state"
-LOCK_DIR="$OUT_DIR/.compile.lock"
-REAPER_DIR="$OUT_DIR/.compile.reaper"
-LOCKED=0
 # Cleanup releases the lock ONLY while its pid file still names this process:
 # should the lock ever be lost to another owner, exiting must not destroy the
 # new owner's mutual exclusion.
-trap 'rm -f "$TMP_FILE" "$PLANS_TMP" "$MF_FILES" "$MF_LINKS" "$MF_ARCH" "$MANIFEST" "$STATE_TMP" "$TMP_FILE.pmf"; [ -n "$OVERLAY_DIR" ] && rm -rf "$OVERLAY_DIR"; [ "$LOCKED" -eq 1 ] && zamm_lock_release; :' EXIT HUP INT TERM
+# set +e first: a failing rm (an unwritable directory, say) must never abort
+# the trap before the lock is released — a leaked lock stalls every later
+# compile and publish for a 60s timeout apiece.
+trap 'set +e; rm -f "$TMP_FILE" "$PLANS_TMP" "$MF_FILES" "$MF_LINKS" "$MF_ARCH" "$MANIFEST" "$STATE_TMP" "$TMP_FILE.pmf"; [ -n "$OVERLAY_DIR" ] && rm -rf "$OVERLAY_DIR"; :' EXIT HUP INT TERM
 
-# The mutex primitives (mkdir lock, serialized stale-lock reaping,
-# ownership-checked release) live in the shared lib — the publish transaction
-# holds the same lock across its whole rename+compile window.
-. "$SCRIPT_DIR/zamm-lock.sh"
-
-# Serialize digest publication. Two concurrent publish-mode compiles are a
-# lost-update hazard: each snapshots the ledger into a private manifest, then
-# renames its private result into place — so an older, slower compile can
-# overwrite a newer digest with a stale but internally-coherent digest/sidecar
-# pair (the generation token cannot catch this; it only pairs the two files).
-# The lock is held from BEFORE enumeration until exit, which makes published
-# ledger views monotonically fresh: every published digest was enumerated
-# after the previously published one, so a record whose publish completed can
-# never vanish from a later digest. Read-only modes (--check, --list-*)
-# publish nothing and skip the lock.
-#
-if [ "$CHECK" -eq 0 ] && [ "$LIST_INERT" -eq 0 ] && [ "$LIST_LIVE" -eq 0 ] && [ "$LIST_VOTES" -eq 0 ]; then
-  if [ -n "${ZAMM_LOCK_HELD:-}" ] &&
-     [ "$(cat "$LOCK_DIR/pid" 2>/dev/null)" = "$ZAMM_LOCK_HELD" ] &&
-     zamm_pid_alive "$ZAMM_LOCK_HELD"; then
-    # The publish transaction that spawned this compile already holds the
-    # lock (its pid is in the pid file and it is alive): run under its
-    # exclusion and leave the release to it. LOCKED stays 0, so this process
-    # never removes a lock it does not own.
-    :
-  else
-    zamm_lock_acquire || exit 4
-    LOCKED=1
-  fi
-fi
+# No lock. The digest is derived, gitignored and regenerable, so it is never
+# protected — only recomputed (references/invariants.md, G2). Each compile
+# enumerates the ledger into a private manifest and renames its private result
+# into place; the rename is atomic, so a reader sees one coherent digest or
+# the other, never a torn one. Two concurrent compiles both publish a truthful
+# reading of some real ledger state and the last one wins, which may leave the
+# digest one record behind until the next compile. That is ordinary staleness
+# under eventual consistency, not damage: `memory digest` fixes it.
 
 # Enumerate the ledger into a manifest, checking every step. A find that cannot
 # descend a directory (permissions, a vanished path, an I/O fault) exits
@@ -194,11 +184,40 @@ fi
 ARCHIVE_KNOWLEDGE="$PROJECT_ROOT/zamm-memory/archive/knowledge"
 enum_ok=1
 find "$KNOWLEDGE_DIR" -type f -name '*.md' > "$MF_FILES" || enum_ok=0
-# Symlinked records are invisible to `-type f`, so a symlink under knowledge/
-# would be silently skipped (unscanned, uncounted). Register them explicitly so
-# the compiler REJECTS them: the ledger holds real files only, no symlinks
-# (they invite loops and path escapes and hide records from --check).
-find "$KNOWLEDGE_DIR" -type l -name '*.md' > "$MF_LINKS" || enum_ok=0
+# Symlinks are invisible to `-type f`, so a symlink under either tree would
+# be silently skipped (unscanned, uncounted). Register them ALL explicitly —
+# files and directories, no name filter — so the compiler REJECTS them: the
+# ledger holds real files only, no symlinks (they invite loops and path
+# escapes and hide records from --check).
+find "$KNOWLEDGE_DIR" -type l > "$MF_LINKS" || enum_ok=0
+if [ -d "$PROJECT_ROOT/zamm-memory/archive/knowledge" ]; then
+  find "$PROJECT_ROOT/zamm-memory/archive/knowledge" -type l >> "$MF_LINKS" || enum_ok=0
+fi
+# shun.md was the pre-erasure-record redaction list. Silently ignoring one
+# left behind would resurrect exactly the content it was written to suppress,
+# so its presence — as a file, a directory, a symlink, anything — refuses the
+# compile until it is migrated. Testing the PATH (not a find over the tree)
+# is what makes every file type equal here: the old parser only ever saw
+# regular files, so a directory named shun.md silently emptied the set.
+#
+# This runs BEFORE the general symlink refusal below: a shun.md symlink is a
+# symlink, but the migration instructions are the more useful diagnostic.
+if [ -e "$KNOWLEDGE_DIR/shun.md" ] || [ -L "$KNOWLEDGE_DIR/shun.md" ]; then
+  echo "ERROR: zamm-memory/knowledge/shun.md exists; this toolchain redacts through erasure RECORDS." >&2
+  echo "       Refusing to compile: ignoring it would resurrect the content it suppresses." >&2
+  echo "       Migrate: for each id listed there, create a record with" >&2
+  echo "         type: erasure, erases: <id>, and the reason in the body" >&2
+  echo "       (zamm-run.sh memory create --type erasure --erases <id> <slug>), then delete shun.md." >&2
+  echo "       See references/migrations/ for the full procedure." >&2
+  exit 4
+fi
+# No symlink may sit anywhere under either knowledge tree: one behind a
+# directory position hides every record under it from the enumeration above
+# (find never follows it), and one at a record position points at content a
+# clone will not have. Fatal, like an unreadable tree: previous digest left
+# untouched.
+zamm_verify_no_symlinks "$PROJECT_ROOT" || exit 4
+
 # Archived ids, filename only. A record moved out by `memory archive` must still
 # resolve as a known-inert reference target rather than reading as a dangling
 # supersedes:, so its NAME is registered without parsing content.
@@ -254,7 +273,7 @@ BEGIN {
   VALID_AREAS = " domain contracts conventions internals quality tooling ops meta "
   # every key the compiler acts on; anything else is a typo until proven
   # otherwise (x- prefix reserved for deliberate extensions)
-  KNOWN_KEYS = " type scope supersedes created schema plan up down importance durability seed-up seed-dn migrated-from "
+  KNOWN_KEYS = " type scope supersedes erases created schema plan up down importance durability seed-up seed-dn migrated-from "
   nrec = 0; nerr = 0; nsort = 0; nother = 0
   nfiles = 0; nbad = 0; ndup = 0; nwarn = 0
 }
@@ -264,16 +283,14 @@ BEGIN {
   if (index($0, "SYMLINK\t") == 1) {
     sp = substr($0, 9)
     ns = split(sp, spp, "/")
-    if (spp[ns] == "shun.md") {
-      # A symlinked shun file is never followed, so compiling on would use an
-      # empty substitute shun set and resurrect erased content. Fatal, like an
-      # unreadable ledger: the previous digest must survive untouched.
-      err(relpath(sp) ": shun.md must be a regular file, not a symlink; refusing to compile")
-      fatalrc = 4
-      exit 4
-    }
-    err(relpath(sp) ": symlinked record files are not allowed in the ledger (no symlinks)")
-    next
+    # Fatal, not a skip: a symlinked record is a record we did NOT read, and
+    # nothing distinguishes a symlinked erasure record from any other. Once
+    # erasure lives in records, skipping one can silently un-redact, so the
+    # ledger is treated as unreadable rather than smaller — the same rule as
+    # an unreadable record file or archived header.
+    err(relpath(sp) ": symlinked record files are not allowed in the ledger (no symlinks); the ledger is unreadable, not empty")
+    fatalrc = 4
+    exit 4
   }
   if (index($0, "ARCHIVED\t") == 1) {
     apath = substr($0, 10)
@@ -286,44 +303,23 @@ BEGIN {
   path = $0
   n = split(path, pp, "/")
   base = pp[n]
-  if (base == "shun.md") { read_shun(path); next }
   read_record(path, base)
-}
-
-function read_shun(path,   line) {
-  # A shun file that exists but cannot be read must abort the whole compile:
-  # an empty substitute shun set would resurrect erased content in the digest
-  # (a failing READ must never widen validity). A missing shun.md never
-  # reaches here -- absence is a legal empty set. The while(>0) form below
-  # cannot tell an open error (getline -1) from a clean empty file (0), so
-  # probe once up front, then reopen for the real read.
-  if ((getline line < path) < 0) {
-    close(path)
-    err(relpath(path) ": cannot read the shun file (permission denied or I/O error); the ledger is unreadable, not shun-free")
-    fatalrc = 4
-    exit 4
-  }
-  close(path)
-  while ((getline line < path) > 0) {
-    sub(/\r$/, "", line)
-    sub(/#.*$/, "", line)
-    line = trim(line)
-    if (line != "") shun[line] = 1
-  }
-  close(path)
 }
 
 # Frontmatter-only read of an archived record: its id, type and supersedes
 # edges keep their place in the graph as an INERT node (grouping, conflict
 # detection, lineage) while its content, votes and durability stay out of the
-# ranking and the digest. An unreadable archived file degrades to an id-only
-# node with a warning -- losing header data narrows grouping fidelity but
-# never widens validity.
+# ranking and the digest. An UNREADABLE archived file is fatal, like an
+# unreadable archived record: its type and supersedes edges are validation
+# authority (an unread type silently waives the type-transition checks, and
+# lost edges split reconciliation groups), so a failing read WOULD widen
+# validity if compilation continued.
 function read_archived_header(path, aid,   line, state, firstline, pos, key, val) {
   if ((getline line < path) < 0) {
     close(path)
-    warn(relpath(path) ": cannot read archived record header; treating it as an id-only inert node")
-    return
+    err(relpath(path) ": cannot read archived record header (permission denied or I/O error); the ledger is unreadable, not empty")
+    fatalrc = 4
+    exit 4
   }
   close(path)
   state = 0; firstline = 1
@@ -377,10 +373,16 @@ function read_record(path, base,   id, line, state, firstline, fmclosed, pos, ke
     else if (fslug ~ /^-/ || fslug ~ /-$/ || fslug ~ /--/)
       rerr(id, path ": slug \"" fslug "\" has a leading, trailing or doubled hyphen")
   }
+  # Case-fold collision means two DIFFERENT names that a case-insensitive
+  # filesystem cannot keep apart. Two identical basenames in different year
+  # directories are not that — they are a duplicate id, reported just below,
+  # and calling them a case-fold collision only adds a misleading second
+  # diagnostic to the one the user has to act on.
   lc = tolower(base)
-  if ((lc in casemap) && casemap[lc] != path)
+  if ((lc in casemap) && casemap[lc] != path && casebase[lc] != base)
     rerr(id, path ": case-fold collision with " casemap[lc])
   casemap[lc] = path
+  casebase[lc] = base
   if (id in filepath) {
     err(path ": duplicate record id " id)
     dupfile[++ndup] = path
@@ -391,14 +393,20 @@ function read_record(path, base,   id, line, state, firstline, fmclosed, pos, ke
   order[++nrec] = id
   rtype[id] = "memory"
 
-  # An unreadable file (permission bits, an I/O fault) must quarantine with a
-  # clear reason, not fall through to a misleading "missing frontmatter": the
-  # while(>0) read form below cannot tell an open error (getline -1) from a
-  # clean empty file (0), so probe once up front, then reopen for the real read.
+  # An unreadable file is FATAL, not a quarantine. A quarantine assumes we
+  # know what the record was: we do not. An unreadable ERASURE record would
+  # silently stop redacting, which is precisely the resurrection the old
+  # unreadable-shun.md guard existed to prevent — and nothing can tell an
+  # unreadable erasure record from any other unreadable file. Same rule as
+  # the archived headers and the ledger enumeration: a failing READ must
+  # never widen validity. (The while(>0) form below cannot tell an open
+  # error (getline -1) from a clean empty file (0), so probe once up front,
+  # then reopen for the real read.)
   if ((getline line < path) < 0) {
-    rerr(id, path ": cannot read record file (permission denied or I/O error)")
     close(path)
-    return
+    err(relpath(path) ": cannot read record file (permission denied or I/O error); the ledger is unreadable, not empty")
+    fatalrc = 4
+    exit 4
   }
   close(path)
 
@@ -425,6 +433,7 @@ function read_record(path, base,   id, line, state, firstline, fmclosed, pos, ke
         if      (key == "type")       rtype[id] = val
         else if (key == "scope")      rscope[id] = val
         else if (key == "supersedes") rsup[id] = val
+        else if (key == "erases")     rerases[id] = val
         else if (key == "created")    rcreated[id] = val
         else if (key == "schema")     rschema[id] = val
         else if (key == "plan")       rplan[id] = val
@@ -464,7 +473,8 @@ function read_record(path, base,   id, line, state, firstline, fmclosed, pos, ke
     rerr(id, path ": missing schema:")
   else if (rschema[id] != "3")
     rerr(id, path ": unsupported schema: " rschema[id])
-  if (rtype[id] != "memory" && rtype[id] != "tombstone" && rtype[id] != "votes")
+  if (rtype[id] != "memory" && rtype[id] != "tombstone" && rtype[id] != "votes" &&
+      rtype[id] != "erasure")
     rerr(id, path ": unknown type \"" rtype[id] "\"")
   if (rtype[id] == "memory") {
     parsetags(id)
@@ -511,6 +521,26 @@ function read_record(path, base,   id, line, state, firstline, fmclosed, pos, ke
     # a tombstone retires knowledge; without a reason nobody can tell later
     # whether it was wrong, obsolete, or removed by mistake
     if (rbody[id] !~ /[^ \t\n]/) rerr(id, path ": tombstone has no body (the retirement reason is required)")
+  }
+  if (rtype[id] == "erasure") {
+    # An erasure record is the ledger recording its own redaction: it names
+    # the ids whose content must never be compiled again, and it carries the
+    # reason. Unlike the old shun.md list it is an ordinary record, so it
+    # rides the same enumeration, symlink refusal and unreadable handling as
+    # everything else — and it is auditable (who erased what, when, why).
+    if (rerases[id] == "") rerr(id, path ": erasure record missing erases: (the ids it redacts)")
+    if (rbody[id] !~ /[^ \t\n]/) rerr(id, path ": erasure record has no body (the erasure reason is required)")
+    # it acts through erases:, never through the supersede graph
+    if (rsup[id] != "") rerr(id, path ": erasure record must not carry supersedes: (use erases:)")
+    en = split(rerases[id], eg, ",")
+    delete seenerase
+    for (e = 1; e <= en; e++) {
+      etgt = trim(eg[e])
+      if (etgt == "") continue
+      if (etgt == id) rerr(id, path ": erasure record erases itself")
+      else if (etgt in seenerase) rerr(id, path ": duplicate erases target " etgt)
+      seenerase[etgt] = 1
+    }
   }
   if (rtype[id] == "votes") {
     if (rplan[id] == "") rerr(id, path ": votes record missing plan:")
@@ -774,19 +804,19 @@ function group(id) { return (id in ufp) ? uf_find(id) : id }
 # long valid chain.
 
 # cycle-candidate adjacency: the supersede targets of every non-quarantined
-# record, filtered exactly as liveness will filter them (existing, non-shun,
+# record, filtered exactly as liveness will filter them (existing, non-erased,
 # non-bad). Built once so Tarjan and any re-run read the same graph.
 function build_adj(   i, id, m, tg, t, v, c) {
   for (i = 1; i <= nrec; i++) {
     id = order[i]
-    if ((id in shun) || (id in bad)) continue
+    if ((id in erased) || (id in bad)) continue
     adjn[id] = 0
     if (rsup[id] == "") continue
     m = split(rsup[id], tg, ",")
     c = 0
     for (t = 1; t <= m; t++) {
       v = trim(tg[t])
-      if (v == "" || !(v in filepath) || (v in shun) || (v in bad)) continue
+      if (v == "" || !(v in filepath) || (v in erased) || (v in bad)) continue
       adj[id, ++c] = v
     }
     adjn[id] = c
@@ -819,7 +849,7 @@ function tarjan(   i, id, u, ci, v, par) {
   wsp = 0       # work-stack pointer (wnode / wci): the explicit call stack
   for (i = 1; i <= nrec; i++) {
     id = order[i]
-    if ((id in shun) || (id in bad)) continue
+    if ((id in erased) || (id in bad)) continue
     if (id in tindex) continue
     wsp = 1; wnode[1] = id; wci[1] = 0
     while (wsp > 0) {
@@ -958,8 +988,8 @@ function addvotes(voter, list, sign, w,   m, t, tgt, av) {
   for (t = 1; t <= m; t++) {
     tgt = trim(av[t])
     if (tgt == "") continue
-    # shunned or archived target = known inert node: no vote, no error
-    if ((tgt in shun) || (tgt in archived)) continue
+    # erased or archived target = known inert node: no vote, no error
+    if ((tgt in erased) || (tgt in archived)) continue
     if (!(tgt in filepath)) { bad_voteref(voter ": vote target not found: " tgt); continue }
     if (tgt in bad) continue
     # votes rate knowledge, so only memory records can be voted on: a vote on
@@ -1121,6 +1151,37 @@ END {
   if (fatalrc) { close("cat 1>&2"); exit fatalrc }
   tdn = daynum(today)
 
+  # ---- the same id live AND archived ----
+  # An archive interrupted between copy and unlink (a cross-device move, a
+  # sync client putting the file back) leaves both. That is not damage: the
+  # live copy is authoritative, the archived one is ignored for ranking, and
+  # rerunning the archiver finishes the job — so it warns rather than fails.
+  # Saying nothing was the wrong end of that trade: a silently duplicated
+  # record is exactly the state nobody goes looking for.
+  for (i = 1; i <= nrec; i++) {
+    id = order[i]
+    if (id in archived)
+      warn(id " exists both live and archived; the live copy is used. Rerun memory archive to finish the move, or delete one copy.")
+  }
+
+  # ---- erasure set: built BEFORE any graph pass reads it ----
+  # Every erasure record has its erases: list applied, quarantined or not.
+  # erasure can only REMOVE content, so honouring a dubious one is safe while
+  # ignoring a valid one resurrects redacted material — the asymmetry that
+  # decides which way this fails. A malformed erasure record still quarantines
+  # loudly (failing --check and degrading the digest), so the operator hears
+  # about it instead of discovering the lapse in a digest.
+  for (i = 1; i <= nrec; i++) {
+    id = order[i]
+    if (rtype[id] != "erasure") continue
+    if (rerases[id] == "") continue
+    en = split(rerases[id], eg, ",")
+    for (e = 1; e <= en; e++) {
+      etgt = trim(eg[e])
+      if (etgt != "" && etgt != id) erased[etgt] = 1
+    }
+  }
+
   # Supersede edges are resolved in three passes so an invalid record can
   # never retire a valid neighbour. The old single pass mutated dead/parent/
   # union-find WHILE walking the edge list, then quarantined the record after
@@ -1136,7 +1197,7 @@ END {
   #     the record, so its other valid edges still stand.
   for (i = 1; i <= nrec; i++) {
     id = order[i]
-    if (id in shun) continue
+    if (id in erased) continue
     if (id in bad) continue
     if (rsup[id] == "") continue
     m = split(rsup[id], tg, ",")
@@ -1147,9 +1208,9 @@ END {
       if (tgt == id) { rerr(id, filepath[id] ": supersedes itself"); continue }
       if (tgt in seentgt) { rerr(id, filepath[id] ": duplicate supersedes target " tgt); continue }
       seentgt[tgt] = 1
-      # A shunned target is a known redacted node, not a dangling reference:
-      # the erasure procedure (shun + delete) must leave successors valid.
-      if (tgt in shun) continue
+      # An erased target is a known redacted node, not a dangling reference:
+      # the erasure procedure (erasure record + delete) leaves successors valid.
+      if (tgt in erased) continue
       # An archived target is likewise known-inert, not dangling: `memory
       # archive` moved a fully-retired record out of the scan path but kept
       # its id resolvable. Its type (parsed from the archived header) still
@@ -1204,20 +1265,20 @@ END {
   #     never reach a valid record through a quarantined or dangling ancestor.
   for (i = 1; i <= nrec; i++) {
     id = order[i]
-    if (id in shun) continue
+    if (id in erased) continue
     if (id in bad) continue
     if (rsup[id] == "") continue
     m = split(rsup[id], tg, ",")
     for (t = 1; t <= m; t++) {
       tgt = trim(tg[t])
       if (tgt == "") continue
-      # An edge into a shunned or archived target applies as GROUPING AND
+      # An edge into an erased or archived target applies as GROUPING AND
       # LINEAGE ONLY: the retired id stays a real graph node (two live
       # successors of one retired target meet in one union-find group and
       # surface under Needs reconciliation), but no dead/nsup/asup mutation
       # happens, so a retired node can never mint ranking credit or route
       # votes into a live record.
-      if ((tgt in shun) || ((tgt in archived) && !(tgt in filepath))) {
+      if ((tgt in erased) || ((tgt in archived) && !(tgt in filepath))) {
         uf_union(id, tgt)
         if (!(id in parent)) parent[id] = tgt
         continue
@@ -1240,7 +1301,7 @@ END {
     for (t = 1; t <= m; t++) {
       tgt = trim(tg[t])
       if (tgt == "" || tgt == aid) continue
-      if ((tgt in archived) || (tgt in shun) || (tgt in filepath)) uf_union(aid, tgt)
+      if ((tgt in archived) || (tgt in erased) || (tgt in filepath)) uf_union(aid, tgt)
     }
   }
 
@@ -1253,7 +1314,7 @@ END {
   #     keeps the count deterministic without dropping the signal entirely.
   for (i = 1; i <= nrec; i++) {
     id = order[i]
-    if ((id in shun) || (id in bad)) continue
+    if ((id in erased) || (id in bad)) continue
     if (rtype[id] != "votes" || (id in dead)) continue
     pl = rplan[id]
     if (pl == "") continue
@@ -1262,7 +1323,7 @@ END {
   }
   for (i = 1; i <= nrec; i++) {
     id = order[i]
-    if ((id in shun) || (id in bad)) continue
+    if ((id in erased) || (id in bad)) continue
     if (rtype[id] != "votes" || (id in dead)) continue
     pl = rplan[id]
     if (pl != "" && nplanvotes[pl] > 1 && !(pl in dupvoteseen)) {
@@ -1275,7 +1336,7 @@ END {
   # 2. votes: vote records + migration seed votes, all attached to chain roots
   for (i = 1; i <= nrec; i++) {
     id = order[i]
-    if (id in shun) continue
+    if (id in erased) continue
     if (id in bad) continue
     # A superseded or tombstoned votes record stops counting — superseding a
     # votes record IS the vote-correction path, so it has to actually work.
@@ -1303,7 +1364,7 @@ END {
   nlive = 0
   for (i = 1; i <= nrec; i++) {
     id = order[i]
-    if (id in shun) continue
+    if (id in erased) continue
     if (id in bad) continue
     if (rtype[id] != "memory" || (id in dead)) continue
     live[id] = 1; nlive++
@@ -1353,7 +1414,7 @@ END {
   if (listvotes == 1) {
     for (i = 1; i <= nrec; i++) {
       id = order[i]
-      if ((id in shun) || (id in bad)) continue
+      if ((id in erased) || (id in bad)) continue
       if (rtype[id] != "votes" || (id in dead)) continue
       if (rplan[id] != "" && canonvote[rplan[id]] != id) continue
       # normalized lists, never the raw frontmatter value: a TAB is legal
@@ -1376,14 +1437,14 @@ END {
   if (listinert == 1) {
     for (i = 1; i <= nrec; i++) {
       id = order[i]
-      if ((id in shun) || (id in bad)) continue
+      if ((id in erased) || (id in bad)) continue
       g = group(id)
       if (rtype[id] == "memory" && (id in live)) keepgrp[g] = 1
       else if (rtype[id] == "votes" && !(id in dead)) keepgrp[g] = 1
     }
     for (i = 1; i <= nrec; i++) {
       id = order[i]
-      if ((id in shun) || (id in bad)) continue
+      if ((id in erased) || (id in bad)) continue
       if (group(id) in keepgrp) continue
       print filepath[id]
     }
@@ -1590,6 +1651,17 @@ append_plans_section() {
     exit 4
   fi
   tab=$(printf '\t')
+  # A missing plan root is structural damage, never a healthy zero-plan
+  # project: scaffold always creates both roots. Abort before the digest is
+  # renamed into place — same taxonomy as an unreadable tree.
+  if grep -q "^MISSING${tab}" "$pmf"; then
+    grep "^MISSING${tab}" "$pmf" | while IFS="$tab" read -r _ mroot; do
+      echo "ERROR: plan root missing: ${mroot#"$PROJECT_ROOT/"} -- structural damage, not an empty project." >&2
+    done
+    echo "       Restore it ('zamm-run.sh scaffold' recreates the directory), then investigate." >&2
+    echo "       Previous digest left untouched." >&2
+    exit 4
+  fi
   active_prefix="$PROJECT_ROOT/zamm-memory/active/plans/"
   plans_tmp="$PLANS_TMP"
   : > "$plans_tmp"
@@ -1599,6 +1671,10 @@ append_plans_section() {
   while IFS="$tab" read -r tag p1 p2 p3; do
     base=${p1##*/}
     case "$tag" in
+      DEBRIS)
+        case "$p1" in "$active_prefix"*)
+          printf '6\t- Invalid: %s (stray temporary directory inside a plan; raced or interrupted plan create)\n' "$base" >> "$plans_tmp" ;;
+        esac ;;
       SYMLINK)
         case "$p1" in "$active_prefix"*)
           printf '6\t- Invalid: %s (symlinked entry; not rendered)\n' "$base" >> "$plans_tmp" ;;

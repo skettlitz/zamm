@@ -26,7 +26,6 @@ suite exercises the documented surface. `Ledger.run()` addresses one script
 directly and exists for the few cases that need it.
 
 | `test_happy.py` | normal operation: compile, supersede, tombstone, merge, votes, scaffold, archive |
-| `test_regressions.py` | one lock per defect reproduced on 2026-07-19 |
 | `test_contract.py` | record-contract validation, one case per family |
 | `test_semantics.py` | exit codes, warnings, clock determinism |
 | `test_golden.py` | whole-digest byte comparison over an authored ledger |
@@ -35,8 +34,38 @@ directly and exists for the few cases that need it.
 | `test_settings.py` | chain-depth cap, `other` area + OTHER_MAX, generator flags, ledger edge paths |
 | `test_dispatcher.py` | `zamm-run.sh` routing, root resolution, `status` view |
 | `test_surface_v2.py` | memory list/show/archive, plan show/check/create, top-level check |
+| `test_regressions.py` | one lock per defect reproduced on 2026-07-19 |
 | `test_slow.py` | performance ceilings, source hygiene (opt-in) |
+
+Then one file per invariant from `references/invariants.md`, plus the domain
+rules that are not gates:
+
+| File | Protects |
+| --- | --- |
+| `test_writes.py` | **G1** — records and plans are written in one atomic claim; what is validated is what lands, and a refusal writes nothing |
+| `test_digest.py` | **G2** — the digest is derived and disposable: recomputed, never protected; concurrent compiles may lag it but the ledger loses nothing |
+| `test_failclosed.py` | **G3** — absent is data, unreadable is an error, on every surface |
+| `test_archival.py` | **G4** — archival is a rerunnable sequence, never clobbers history, and undoes only what no rerun would repair |
+| `test_ledger_shape.py` | **G5** — real files and real directories only; plus the duplicate-id realities the invariants promise to tolerate |
+| `test_graph.py` | supersession, votes and erasure semantics |
+| `test_plan_validation.py` | `plan check` and plan/ledger cross-check rules |
+| `test_cli_safety.py` | help, argument handling, version and migration gates |
+
 | `fixtures/golden_digest.md` | committed expected output |
+
+## What the suite is allowed to assert
+
+`references/invariants.md` is the rubric. A test may lock one of the three
+guarantees (truthful output, rerun-repairable failure, bytes never destroyed)
+or one of the five gates. A test that locks a defence against a same-privilege
+hostile process — an unpredictable temporary name, a narrowed check-to-use
+window, an identity check placed last — is asserting a non-goal, and the
+2026-08-08 round deleted about two dozen of them.
+
+That deletion is the point rather than a regret: a test for an abandoned gate
+is what makes over-engineering permanent, because the next person reads it as
+a requirement. When a gate goes, its tests go with it, and any invariant worth
+keeping is re-expressed against whatever replaced the gate.
 
 ## Rules for fixtures
 
@@ -67,6 +96,13 @@ cd tests && ZAMM_UPDATE_GOLDEN=1 python3 -m unittest test_golden
 Then read the diff carefully. An unexplained change means the selector
 moved — diversity penalty, parsimony cost, guardrail admission, and the
 headline budget all interact, and per-mechanic tests cannot catch that.
+
+The suite used to be filed as `test_remediation.py` … `test_remediation8.py`,
+one file per external review round. That is archaeology: it answers "what did
+round 6 complain about", never "where is the test for erasure". The
+2026-08-08 pass re-filed every one of those 239 tests under the behaviour it
+protects, without deleting any of them. Round numbers survive only where a
+class docstring explains what a defect actually was.
 
 ## Proving a regression lock is real
 
@@ -106,9 +142,6 @@ defects already proven real, and common edge cases:
 - **`durability: weeks`.** Identical code path to its four covered siblings.
 - **Plan state transitions.** Deferred with the `zamm-plan` state machine
   they would test — asserting around prose-only rules is theater.
-- **Windows / Git Bash.** Claimed in the root README, exercised by neither
-  the suite nor CI.
-- **Concurrent record creation** (only concurrent compiles are covered).
 - **Case-fold collisions on a case-insensitive filesystem.** The test skips
   on macOS, because staging the collision requires a case-sensitive volume:
   the second file just overwrites the first. It runs on the Linux CI leg,
@@ -118,7 +151,7 @@ defects already proven real, and common edge cases:
 Closed by the 2026-07-20 coverage round: the digest budget constants,
 `zamm-status.sh`, `--overwrite-templates`, `--help`, CHAINDEPTH_MAX,
 OTHER_MAX and the `other` area, the generator flags, and four ledger edge
-paths (shun comments, case-fold, year-directory mismatch, duplicate id).
+paths (erases-list spacing, case-fold, year-directory mismatch, duplicate id).
 
 ## Running on a case-sensitive filesystem
 

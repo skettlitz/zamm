@@ -154,8 +154,8 @@ zamm-run.sh help [<topic>]
 
 zamm-run.sh memory digest       rebuild the digest from the ledger
 zamm-run.sh memory check         validate the ledger, write nothing
-zamm-run.sh memory create <slug> create a new record as a draft
-zamm-run.sh memory publish <slug> validate a filled draft, land it, recompile
+zamm-run.sh memory create <slug> write a record; body on stdin, or --edit
+zamm-run.sh memory publish <slug> land a hand-written <id>.md.draft
 
 zamm-run.sh plan list          plan directories grouped by status
 zamm-run.sh plan archive         move terminal plan directories to the archive
@@ -171,15 +171,21 @@ commands by prefix, so a single entry covers every ZAMM operation:
 { "permissions": { "allow": ["Bash(bash /path/to/zamm/scripts/zamm-run.sh:*)"] } }
 ```
 
+## What ZAMM guarantees
+
+`references/invariants.md` is the contract: every output is a truthful reading of some state
+the ledger actually had, every failure is repairable by rerunning, and bytes are never
+destroyed. It also records the non-goals — notably that a hostile process running as the same
+user is out of scope, since it can rewrite these scripts between runs. Anything reported
+against ZAMM should be measured against that file first; it is what keeps hardening bounded.
+
 ## Requirements and supported runtimes
 
 - Bash plus POSIX awk and standard tools (find, sort, sed); no third-party runtime
   dependencies. Everything is reached through one entrypoint, `zamm-run.sh`, which
   picks the right interpreter per command: the compiler and record creator are POSIX
   sh, while scaffold, archive and status use bash features.
-  Verified on stock macOS and Linux (both in CI). Windows via Git Bash is
-  intended to work but is not yet covered by CI — treat it as unverified until
-  a Git Bash job exists.
+  Verified on stock macOS and Linux, both in CI. Windows is not supported.
 - git is recommended (merging, history, erasure) but the ledger itself works without it.
 - Runtime surfaces: `SKILL.md` for skill-based harnesses, the `AGENTS.md` managed block for
   AGENTS.md-reading runtimes, `.cursor/rules/zamm.mdc` for Cursor.

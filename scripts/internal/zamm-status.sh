@@ -106,13 +106,16 @@ fi
 ACTIVE_DIR="$PROJECT_ROOT/zamm-memory/active/plans"
 if [ ! -d "$ACTIVE_DIR" ]; then
   echo "ERROR: active plans directory not found: $ACTIVE_DIR"
+  echo "       Structural damage, not an empty project: scaffold always creates it."
   echo "       Run zamm-scaffold.sh in repo root or pass --project-root <repo-root>."
-  exit 1
+  exit 4
 fi
 
-ROWS_FILE="$(mktemp)"
-MISSING_FILE="$(mktemp)"
-MF="$(mktemp)"
+# explicit templates, like every other temp in the toolchain: BSD mktemp
+# with no template ignores TMPDIR and writes to the system temp directory
+ROWS_FILE="$(mktemp "${TMPDIR:-/tmp}/zamm-status-rows.XXXXXX")"
+MISSING_FILE="$(mktemp "${TMPDIR:-/tmp}/zamm-status-missing.XXXXXX")"
+MF="$(mktemp "${TMPDIR:-/tmp}/zamm-status-mf.XXXXXX")"
 trap 'rm -f "$ROWS_FILE" "$MISSING_FILE" "$MF"' EXIT
 
 # Enumerate through the checked manifest: a find/glob over an unreadable tree
@@ -122,6 +125,17 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MANIFEST_SH="${ZAMM_PLAN_MANIFEST:-$SCRIPT_DIR/zamm-plan-manifest.sh}"
 if ! sh "$MANIFEST_SH" --project-root "$PROJECT_ROOT" > "$MF"; then
   echo "ERROR: cannot enumerate the plan tree (unreadable, not empty)."
+  exit 4
+fi
+
+# a missing plan root (archive/plans here; active/plans was guarded above) is
+# structural damage — scaffold always creates both roots
+if awk -F $'\t' '$1 == "MISSING" { found = 1 } END { exit found ? 0 : 1 }' "$MF"; then
+  awk -F $'\t' -v r="$PROJECT_ROOT/" '$1 == "MISSING" {
+    p = $2; sub(r, "", p)
+    print "ERROR: plan root missing: " p " -- structural damage, not an empty project."
+  }' "$MF"
+  echo "       Restore it (zamm-scaffold.sh recreates the directory), then investigate."
   exit 4
 fi
 
@@ -182,10 +196,10 @@ fi
 
 # structural anomalies the manifest tagged (symlinks, stray files, unreadable
 # plan files, duplicate ids) — informational here, errors in plan check
-anom_count="$(awk -F $'\t' '$1 ~ /^(SYMLINK|NOTDIR|UNREADABLE|DUP)$/' "$MF" | wc -l | tr -d ' ')"
+anom_count="$(awk -F $'\t' '$1 ~ /^(SYMLINK|NOTDIR|UNREADABLE|DUP|DEBRIS)$/' "$MF" | wc -l | tr -d ' ')"
 if [ "$anom_count" -gt 0 ]; then
   echo "Invalid plan-tree entries ($anom_count; zamm-run.sh plan check reports them as errors):"
-  awk -F $'\t' -v r="$PROJECT_ROOT/" '$1 ~ /^(SYMLINK|NOTDIR|UNREADABLE|DUP)$/ {
+  awk -F $'\t' -v r="$PROJECT_ROOT/" '$1 ~ /^(SYMLINK|NOTDIR|UNREADABLE|DUP|DEBRIS)$/ {
     p = $2; sub(r, "", p); print "  - " $1 ": " p
   }' "$MF"
 fi

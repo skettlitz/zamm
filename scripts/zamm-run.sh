@@ -22,6 +22,10 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 # live in scripts/internal/; only zamm-run.sh sits at the top of scripts/.
 INTERNAL="$SCRIPT_DIR/internal"
 
+# Canonical-root verification (real directories, no symlinks, physically
+# inside the project) — shared with every directly-invocable internal script.
+. "$INTERNAL/zamm-paths.sh"
+
 die() { echo "zamm: $*" >&2; exit 1; }
 
 # 0 if $1 is a real Gregorian YYYY-MM-DD date (leap years respected). A single
@@ -60,9 +64,9 @@ Memory
   memory list          index of live records, slug first
   memory show <slug>   one record in full
   memory check         validate the ledger
-  memory create <slug> new record as a draft (fill it, then publish)
+  memory create <slug> write a record; body on stdin (or --edit)
   memory publish <slug>
-                       validate a filled draft and land it in the ledger
+                       validate a hand-written <id>.md.draft and land it
   memory archive       move fully-retired chains out of the scan path
 
 Plans
@@ -166,6 +170,10 @@ require_root() {
     echo "  install ZAMM here." >&2
     exit 1
   fi
+  # Every operational command funnels through here, so this is the one place
+  # the canonical roots are proven to be real directories inside the project
+  # before anything reads or writes through them.
+  zamm_verify_roots "$ROOT" || exit 4
 }
 
 # scaffold installs INTO a project that may not have zamm-memory/ yet, so a
@@ -280,7 +288,13 @@ print_status() {
       # that VANISHED since the compile (hand-moved back to a draft, say)
       # leaves nothing newer than the digest, so the mtime staleness check
       # below cannot see it — the count comparison can.
-      ondisk=$(find "$ROOT/zamm-memory/knowledge" -type f -name '*.md' ! -name 'shun.md' 2>/dev/null | wc -l | tr -d ' ')
+      # Checked, not `| wc -l` over a silenced find: a find that cannot
+      # descend the tree must fail loudly, never read as a lower count.
+      if ! _odl=$(find "$ROOT/zamm-memory/knowledge" -type f -name '*.md'); then
+        echo 'zamm: cannot enumerate the ledger (unreadable, not empty).' >&2
+        exit 4
+      fi
+      ondisk=$(printf '%s\n' "$_odl" | grep -c . || true)
       sfiles=$(state_field files)
       if [ -n "$sfiles" ] && [ "${ondisk:-0}" -ne "$sfiles" ]; then
         printf '          STALE: %s record file(s) on disk but the last compile saw %s\n' "$ondisk" "$sfiles"
@@ -291,33 +305,57 @@ print_status() {
     fi
     # The digest embeds active plans as well as knowledge records, so a plan
     # edited after the last compile makes it stale too — watch both trees.
-    newer=$(find "$ROOT/zamm-memory/knowledge" "$ROOT/zamm-memory/active/plans" \
-      -type f -name '*.md' -newer "$DIGEST" 2>/dev/null | wc -l | tr -d ' ')
+    # archive/knowledge is IN the scan: the compiler parses archived headers
+    # for type and supersedes edges, so an edited archived record makes the
+    # digest just as stale as an edited live one. (Optional tree — a missing
+    # operand would make find fail and read as unreadable.)
+    _nwtrees="$ROOT/zamm-memory/knowledge $ROOT/zamm-memory/active/plans"
+    [ -d "$ROOT/zamm-memory/archive/knowledge" ] &&
+      _nwtrees="$_nwtrees $ROOT/zamm-memory/archive/knowledge"
+    # shellcheck disable=SC2086 -- deliberate word splitting over fixed paths
+    if ! _nwl=$(find $_nwtrees -type f -name '*.md' -newer "$DIGEST"); then
+      echo 'zamm: cannot enumerate the ledger or plan tree (unreadable, not empty).' >&2
+      exit 4
+    fi
+    newer=$(printf '%s\n' "$_nwl" | grep -c . || true)
     if [ "${newer:-0}" -gt 0 ]; then
       printf '          STALE: %s file(s) newer than the digest\n' "$newer"
       echo '          run: zamm-run.sh memory digest'
     fi
-    ninert=$(sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" --list-inert 2>/dev/null | grep -c . || true)
-    [ "${ninert:-0}" -gt 0 ] &&
-      printf '          %s in fully-retired chains (zamm-run.sh memory archive)\n' "$ninert"
+    # The inert probe is a compiler run over the whole graph, archived
+    # headers included: silencing it turned "the ledger could not be read"
+    # into "nothing to archive", which is exactly the state that must NOT
+    # look healthy. rc 4 (unreadable) refuses like every other enumeration
+    # failure here; any other failure is reported instead of swallowed.
+    _irc=0
+    _il=$(sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" --list-inert 2>/dev/null) || _irc=$?
+    if [ "$_irc" -ge 4 ]; then
+      echo '          ERROR: the ledger could not be read (unreadable, not empty)' >&2
+      echo '          run: zamm-run.sh memory check' >&2
+      exit 4
+    fi
+    if [ "$_irc" -ne 0 ]; then
+      printf '          inert-chain scan unavailable (compiler rc=%s); run: zamm-run.sh memory check\n' "$_irc"
+    else
+      ninert=$(printf '%s\n' "$_il" | grep -c . || true)
+      [ "${ninert:-0}" -gt 0 ] &&
+        printf '          %s in fully-retired chains (zamm-run.sh memory archive)\n' "$ninert"
+    fi
   fi
-  # Drafts are invisible to check and the digest, so status is where an
-  # unpublished record surfaces before it silently rots.
-  ndrafts=0; nstale=0; threshold=${ZAMM_DRAFT_STALE_DAYS:-7}
-  dlist=$(find "$ROOT/zamm-memory/knowledge" -type f -name '*.md.draft' 2>/dev/null)
+  # A hand-composed draft is invisible to check and the digest, so status is
+  # where it surfaces. It is counted, not rated: `memory create` writes
+  # complete records, so a draft is a deliberate two-step composition rather
+  # than a record left to rot, and an age threshold only invented a policy
+  # nobody asked for (at the cost of the toolchain's only non-POSIX stat).
+  ndrafts=0
+  dlist=$(list_drafts_checked) || exit 4
   if [ -n "$dlist" ]; then
-    while IFS= read -r f; do
-      [ -n "$f" ] || continue
-      ndrafts=$((ndrafts + 1))
-      [ "$(draft_age_days "$f")" -ge "$threshold" ] && nstale=$((nstale + 1))
-    done <<EOF
-$dlist
-EOF
+    ndrafts=$(printf '%s\n' "$dlist" | grep -c . || true)
     printf '          drafts: %s unpublished (zamm-run.sh memory drafts)\n' "$ndrafts"
-    [ "$nstale" -gt 0 ] &&
-      printf '          STALE DRAFTS: %s older than %s day(s) -- publish or discard\n' \
-        "$nstale" "$threshold"
   fi
+  nrec=$(count_recovery_files) || exit 4
+  [ "${nrec:-0}" -gt 0 ] &&
+    printf '          RECOVERY FILES: %s left by an interrupted publish (zamm-run.sh memory drafts)\n' "$nrec"
   echo
 
   # Plans enumerate through the checked manifest, never a glob: a status that
@@ -329,6 +367,16 @@ EOF
     exit 4
   fi
   tab=$(printf '\t')
+  # a missing plan root is structural damage (scaffold always creates both),
+  # never a healthy zero-plan project
+  if grep -q "^MISSING${tab}" "$pmf"; then
+    grep "^MISSING${tab}" "$pmf" | while IFS="$tab" read -r _ mroot; do
+      printf 'Plans     ERROR: plan root missing: %s -- structural damage, not an empty project\n' "${mroot#"$ROOT/"}"
+    done
+    echo '          restore it (zamm-run.sh scaffold recreates the directory), then investigate'
+    rm -f "$pmf"
+    exit 4
+  fi
   stlist=""
   while IFS= read -r pd; do
     [ -n "$pd" ] || continue
@@ -354,7 +402,7 @@ EOF
     [ "$terminal" -gt 0 ] &&
       printf '          ARCHIVE-READY: %s (zamm-run.sh plan archive)\n' "$terminal"
   fi
-  nanom=$(awk -F"$tab" '$1 ~ /^(SYMLINK|NOTDIR|UNREADABLE|DUP)$/ { n++ } END { print n + 0 }' "$pmf")
+  nanom=$(awk -F"$tab" '$1 ~ /^(SYMLINK|NOTDIR|UNREADABLE|DUP|DEBRIS)$/ { n++ } END { print n + 0 }' "$pmf")
   [ "$nanom" -gt 0 ] &&
     printf '          INVALID ENTRIES: %s (zamm-run.sh plan check)\n' "$nanom"
   narch=$(awk -F"$tab" '$1 == "ARCHDIR" { n++ } END { print n + 0 }' "$pmf")
@@ -425,12 +473,57 @@ memory_list() {
 }
 
 # <slug|id> -> exactly one draft path on stdout. Zero or multiple matches
-# report on stderr and return 1. Runs inside $(...), so its exits stop only
-# the subshell -- callers MUST `|| exit`.
+# Checked enumeration of *.md.draft files. A find that cannot descend the
+# tree must fail loudly (status 4), never read as "no drafts" — the same
+# unreadable-vs-empty rule the ledger and plan manifests follow. Runs inside
+# $(...); callers MUST check the status.
+list_drafts_checked() {
+  # find SUCCEEDS while silently skipping a symlinked directory, so a
+  # checked exit status alone still reads a hidden year directory as "no
+  # drafts" — the position check has to come first.
+  zamm_verify_no_symlinks "$ROOT" || return 4
+  find "$ROOT/zamm-memory/knowledge" -type f -name '*.md.draft' || {
+    echo "zamm: cannot enumerate drafts under zamm-memory/knowledge (unreadable, not empty)." >&2
+    return 4
+  }
+}
+
+# A record being written lives at .<id>.md.pending.XXXXXX until it validates
+# (see references/invariants.md, G1). A crash leaves one behind. It matches no
+# other enumeration, so without this it would sit in the tree unmentioned.
+list_recovery_files() {
+  _rf=$(find_recovery_files) || return 4
+  [ -n "$_rf" ] || return 0
+  echo
+  echo "Leftover temporary files from an interrupted record write:"
+  printf '%s\n' "$_rf" | sort | while IFS= read -r f; do
+    [ -n "$f" ] && echo "  ${f#"$ROOT/"}"
+  done
+  echo "  They are not part of the ledger; delete them."
+}
+
+count_recovery_files() {
+  _rf=$(find_recovery_files) || return 4
+  printf '%s\n' "$_rf" | grep -c . || true
+}
+
+find_recovery_files() {
+  zamm_verify_no_symlinks "$ROOT" || return 4
+  find "$ROOT/zamm-memory/knowledge" -type f -name '.*.md.pending.*' || {
+    echo "zamm: cannot enumerate zamm-memory/knowledge (unreadable, not empty)." >&2
+    return 4
+  }
+}
+
+# report on stderr and return non-zero (1: no/ambiguous match; 4: the draft
+# tree could not be read). Runs inside $(...), so its exits stop only the
+# subshell -- callers MUST `|| exit $?`.
 resolve_one_draft() {
   needle="$1"
-  drafts=$(find "$ROOT/zamm-memory/knowledge" -type f -name '*.md.draft' 2>/dev/null |
+  all=$(list_drafts_checked) || return 4
+  drafts=$(printf '%s\n' "$all" |
     while IFS= read -r f; do
+      [ -n "$f" ] || continue
       b=$(basename "$f" .md.draft)
       s=$(printf '%s' "$b" | sed 's/^[0-9-]\{11\}//; s/-[a-z0-9]\{5\}$//')
       if [ "$b" = "$needle" ] || [ "$s" = "$needle" ]; then printf '%s\n' "$f"; fi
@@ -451,48 +544,30 @@ resolve_one_draft() {
   printf '%s\n' "$drafts"
 }
 
-# Age of a draft in whole days, from mtime. stat is the one non-POSIX call:
-# GNU spells it -c %Y, BSD -f %m. GNU must be probed first: it accepts -f as
-# "filesystem status", dumps a multi-line report to stdout, and exits nonzero
-# only afterwards — polluting a captured chain. BSD rejects -c with stdout
-# untouched, so this order is clean on both.
-draft_age_days() {
-  m=$(stat -c %Y "$1" 2>/dev/null) || m=$(stat -f %m "$1" 2>/dev/null) || m=''
-  case "$m" in ''|*[!0-9]*) echo 0; return 0 ;; esac
-  echo $(( ($(date +%s) - m) / 86400 ))
-}
-
 # memory drafts: the only view of unpublished <id>.md.draft files, which are
 # deliberately invisible to check and the digest.
 memory_drafts() {
   case "${1-}" in -h|--help)
     echo "Usage: zamm-run.sh memory drafts"
-    echo "  List unpublished drafts (<id>.md.draft) with age."
-    echo "  Drafts older than ZAMM_DRAFT_STALE_DAYS (default 7) are flagged STALE."
+    echo "  List unpublished drafts (<id>.md.draft)."
     exit 0 ;;
   esac
   [ $# -eq 0 ] || die "memory drafts takes no arguments (got: $*)"
-  threshold=${ZAMM_DRAFT_STALE_DAYS:-7}
-  dlist=$(find "$ROOT/zamm-memory/knowledge" -type f -name '*.md.draft' 2>/dev/null | sort)
+  dlist=$(list_drafts_checked) || exit 4
+  dlist=$(printf '%s' "$dlist" | sort)
   if [ -z "$dlist" ]; then
     echo "No drafts."
+    list_recovery_files
     exit 0
   fi
-  nstale=0
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    age=$(draft_age_days "$f")
-    if [ "$age" -ge "$threshold" ]; then
-      printf '%-46s %4sd  STALE\n' "$(basename "$f" .md.draft)" "$age"
-      nstale=$((nstale + 1))
-    else
-      printf '%-46s %4sd\n' "$(basename "$f" .md.draft)" "$age"
-    fi
+    echo "$(basename "$f" .md.draft)"
   done <<EOF
 $dlist
 EOF
-  [ "$nstale" -gt 0 ] &&
-    echo "zamm: $nstale draft(s) older than $threshold day(s) -- publish or discard them."
+  echo "Publish one with 'memory publish <id>', or drop it with 'memory discard <id>'."
+  list_recovery_files
   exit 0
 }
 
@@ -507,7 +582,7 @@ memory_discard() {
   esac
   [ $# -ge 1 ] || die "memory discard: need a draft slug or id"
   [ $# -le 1 ] || die "memory discard: too many arguments (one slug or id)"
-  draft=$(resolve_one_draft "$1") || exit 1
+  draft=$(resolve_one_draft "$1") || exit $?
   echo "Discarding ${draft#"$ROOT/"}:"
   sed 's/^/  /' "$draft"
   rm -f "$draft"
@@ -515,10 +590,13 @@ memory_discard() {
   exit 0
 }
 
-# memory publish <slug|id>: land a draft record (<id>.md.draft) into the
-# ledger. Validate-then-commit: the candidate is renamed into place, the whole
-# ledger is re-checked, and on ANY validation failure the record is rolled back
-# to a draft so a bad candidate never persists as a live .md.
+# memory publish <slug|id>: land a hand-composed draft (<id>.md.draft) in the
+# ledger. `memory create` writes complete records in one step and needs none
+# of this; a draft is simply a record someone chose to compose over several
+# edits, and publishing it is the same atomic claim create uses (G1): copy the
+# draft to a private temp, validate THAT, and hard-link it into place. The
+# bytes that are validated are the bytes that land, so there is nothing to
+# roll back and no lock to take.
 memory_publish() {
   case "${1-}" in -h|--help)
     echo "Usage: zamm-run.sh memory publish <slug|id>"
@@ -527,130 +605,70 @@ memory_publish() {
   esac
   [ $# -ge 1 ] || die "memory publish: need a draft slug or id"
   [ $# -le 1 ] || die "memory publish: too many arguments (one slug or id)"
-  draft=$(resolve_one_draft "$1") || exit 1
+  draft=$(resolve_one_draft "$1") || exit $?
   final="${draft%.draft}"
   [ -e "$final" ] && die "a record already exists at ${final#"$ROOT/"} (draft not published)"
 
-  # Validate-then-commit, under the publication lock. The candidate is
-  # validated by OVERLAY: the compiler checks the ledger plus a staged copy of
-  # the draft under its final id, so the live namespace never holds an
-  # unvalidated record and a rejected candidate has nothing to roll back.
-  # Only a valid candidate is renamed into place, and the recompile follows
-  # inside the SAME held lock — no concurrent compile can publish a view of
-  # the half-done transition, so a rolled-back record can never linger in a
-  # published digest or sidecar.
-  . "$INTERNAL/zamm-lock.sh"
-  mkdir -p "$ROOT/zamm-memory/.compiled"
-  LOCK_DIR="$ROOT/zamm-memory/.compiled/.compile.lock"
-  REAPER_DIR="$ROOT/zamm-memory/.compiled/.compile.reaper"
-  LOCKED=0
-
-  pubstate="pre"                       # pre -> committed -> done
-  basef="$ROOT/.zamm-publish.$$.base"
-  errf="$ROOT/.zamm-publish.$$.err"
-  _publish_rollback() {
-    if [ "$pubstate" = "committed" ] && [ -e "$final" ] && [ ! -e "$draft" ]; then
-      mv "$final" "$draft" 2>/dev/null || true
-      echo "zamm: publish interrupted; record returned to a draft (${draft#"$ROOT/"})." >&2
-      # An interruption can land AFTER our own recompile published a digest
-      # naming the record, so reconcile here, under the still-held lock,
-      # before any other publisher can run. (No third party can have
-      # published one: the lock excluded them for the whole window.)
-      _rrc=0
-      sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" >/dev/null 2>&1 || _rrc=$?
-      if [ "$_rrc" -ne 0 ] && [ "$_rrc" -ne 2 ]; then
-        echo "      digest may be stale; run 'zamm-run.sh memory digest' to reconcile." >&2
-      fi
-    fi
-    rm -f "$basef" "$errf" "$basef.e" "$errf.e" "$basef.w" "$errf.w"
-    [ "$LOCKED" -eq 1 ] && zamm_lock_release
-    :
-  }
-  trap '_publish_rollback' EXIT
+  . "$INTERNAL/zamm-validate.sh"
+  pubdir=${draft%/*}
+  pubbase=$(basename "$final")
+  work=$(mktemp "$pubdir/.$pubbase.pending.XXXXXX") ||
+    die "memory publish: could not create a temporary file beside the draft"
+  trap 'rm -f "$work"' EXIT
   trap 'exit 129' HUP
   trap 'exit 130' INT
   trap 'exit 143' TERM
+  # -p keeps the draft's own mode; this copy becomes the record
+  cp -p "$draft" "$work" || die "memory publish: could not copy the draft"
 
-  # Child compiles run under this process's lock via delegation: they see the
-  # pid file naming this live process and skip both acquire and release.
-  zamm_lock_acquire || die "memory publish: could not acquire the publication lock"
-  LOCKED=1
-  ZAMM_LOCK_HELD="$$"
-  export ZAMM_LOCK_HELD
-
-  # Baseline the ledger error set WITHOUT the candidate, under the same lock.
-  # The candidate is judged by ERROR-line diff: an error line present in the
-  # overlay run but absent from the baseline was introduced by the candidate.
-  # Diffing `zamm-compile: ERROR:` lines only keeps the verdict severity-
-  # aware — a candidate carrying a mere WARNING (an unknown key, say)
-  # publishes cleanly even when unrelated pre-existing errors exist. A
-  # whole-ledger pass/fail gate would refuse a good draft over unrelated
-  # pre-existing errors, and grepping the candidate id in stderr is unsound
-  # in both directions: a diagnostic may name a different record (duplicate
-  # votes blame the canonical id) or none at all ("other holds N live
-  # records"), and an unrelated error may embed the candidate id inside a
-  # longer id.
-  sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" --check >/dev/null 2>"$basef" || true
-  vrc=0
-  sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" --check --with-candidate "$draft" \
-    >/dev/null 2>"$errf" || vrc=$?
-  if [ "$vrc" -ne 0 ] && [ "$vrc" -ne 1 ]; then
-    # rc >1: the check itself could not run (enumeration failure, ...), so
-    # the candidate was never actually validated: fail closed. Nothing was
-    # renamed — the draft simply stays a draft.
-    echo "zamm: could not validate the draft (check rc=$vrc); it stays a draft (${draft#"$ROOT/"})." >&2
-    sed 's/^/  /' "$errf" >&2
+  disp=${pubdir#"$ROOT/zamm-memory/"}
+  zamm_validate_candidate "$ROOT" "$INTERNAL" "$work" "$disp" || {
+    echo "      The draft is untouched; fix it and publish again." >&2
     exit 1
-  fi
-  # diagnostics name the staged overlay copy; show the record where it will
-  # actually live instead
-  dispdir=${draft%/*}
-  dispdir=${dispdir#"$ROOT/zamm-memory/"}
-  grep '^zamm-compile: ERROR:' "$basef" | sort > "$basef.e" || true
-  grep '^zamm-compile: ERROR:' "$errf" | sort > "$errf.e" || true
-  newerrs=$(comm -13 "$basef.e" "$errf.e")
-  if [ -n "$newerrs" ]; then
-    echo "zamm: draft did not validate; it stays a draft (${draft#"$ROOT/"}). New errors:" >&2
-    printf '%s\n' "$newerrs" | sed "s|\.compiled/\.overlay\.[^/]*/|$dispdir/|; s/^/  /" >&2
-    exit 1
-  fi
-  # informational only: new warnings never block a publish
-  grep '^zamm-compile: WARNING:' "$basef" | sort > "$basef.w" || true
-  grep '^zamm-compile: WARNING:' "$errf" | sort > "$errf.w" || true
-  newwarns=$(comm -13 "$basef.w" "$errf.w")
-  if [ -n "$newwarns" ]; then
-    echo "zamm: publishing with new warning(s):" >&2
-    printf '%s\n' "$newwarns" | sed "s|\.compiled/\.overlay\.[^/]*/|$dispdir/|; s/^/  /" >&2
-  fi
+  }
 
-  # Valid. Land it and recompile, still under the lock. A degraded publish
-  # (exit 2, caused by UNRELATED records already in the ledger) is still a
-  # successful publish of THIS record.
-  mv "$draft" "$final"
-  pubstate="committed"
+  # Atomic no-clobber claim of the final name.
+  ln "$work" "$final" 2>/dev/null ||
+    die "a record appeared at ${final#"$ROOT/"} while publishing; nothing was published"
+  rm -f "$work"
+  trap - EXIT HUP INT TERM
+  rm -f "$draft"
+
+  # The digest is derived and disposable (G2): a failed rebuild is reported,
+  # never a reason to unpublish a valid record.
   crc=0
   sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" >/dev/null || crc=$?
-  if [ "$crc" != "0" ] && [ "$crc" != "2" ]; then
-    # The compile did not publish (rc >2 leaves the previous digest in place)
-    # and the held lock kept every other publisher out, so the last published
-    # digest never observed the record. Roll the file back inline — this is a
-    # verdict, not an interruption, so the EXIT trap stays quiet.
-    mv "$final" "$draft"
-    pubstate="pre"
-    echo "zamm: record validated but digest recompile failed (rc=$crc); returned to a draft (${draft#"$ROOT/"})." >&2
-    exit 1
+  if [ "$crc" -eq 2 ]; then
+    # informational: the record is in, but the refreshed digest carries
+    # damage from OTHER records. Silence here left the caller believing the
+    # ledger was clean.
+    echo "zamm: published, but the digest is degraded by unrelated pre-existing problems;" >&2
+    echo "      run 'zamm-run.sh memory check' to see them." >&2
+  elif [ "$crc" -ne 0 ]; then
+    echo "zamm: the record was published, but the digest could not be rebuilt (rc=$crc);" >&2
+    echo "      run 'zamm-run.sh memory digest' to refresh it." >&2
   fi
-  pubstate="done"                      # disarm the rollback
   echo "Published: ${final#"$ROOT/"}"
   exit 0
 }
 
+# <slug|id> -> exactly one path, or list candidates and exit non-zero.
+# The enumeration is CHECKED: a tree that cannot be read is an error, never
+# "no match" (references/invariants.md, G3).
 resolve_record() {
-  # <slug|id> -> exactly one path, or list candidates and exit non-zero
   needle="$1"
-  matches=$(find "$ROOT/zamm-memory/knowledge" "$ROOT/zamm-memory/archive/knowledge" \
-    -type f -name '*.md' ! -name 'shun.md' 2>/dev/null |
+  zamm_verify_no_symlinks "$ROOT" || exit 4
+  rtrees="$ROOT/zamm-memory/knowledge"
+  [ -d "$ROOT/zamm-memory/archive/knowledge" ] &&
+    rtrees="$rtrees $ROOT/zamm-memory/archive/knowledge"
+  # shellcheck disable=SC2086
+  all=$(find $rtrees -type f -name '*.md') || {
+    echo "zamm: cannot enumerate the ledger (unreadable, not empty)." >&2
+    exit 4
+  }
+  matches=$(printf '%s\n' "$all" |
     while IFS= read -r f; do
+      [ -n "$f" ] || continue
       b=$(basename "$f" .md)
       s=$(printf '%s' "$b" | sed 's/^[0-9-]\{11\}//; s/-[a-z0-9]\{5\}$//')
       # if/then, not `[ ] && ...`: a failing test as the last command of an
@@ -698,8 +716,25 @@ plan_show() {
   [ $# -ge 1 ] || die "plan show: need a plan slug"
   [ $# -le 1 ] || die "plan show: too many arguments (one slug)"
   needle="$1"
-  all=$(find "$ROOT/zamm-memory/active/plans" "$ROOT/zamm-memory/archive/plans" \
-    -maxdepth 2 -type f -name '*.plan.md' ! -name '*.subplan-*' 2>/dev/null)
+  # Candidates come from the checked manifest, like every other consumer of
+  # "which plans exist": a silenced find reported "no plan matches" for a
+  # tree nobody could read, and it happily displayed content reached through
+  # a symlinked plan directory — which the manifest refuses to follow.
+  _psmf=$(mktemp "${TMPDIR:-/tmp}/zamm-plan-show-mf.XXXXXX")
+  if ! sh "$INTERNAL/zamm-plan-manifest.sh" --project-root "$ROOT" > "$_psmf"; then
+    rm -f "$_psmf"
+    echo "zamm: cannot enumerate the plan tree (unreadable, not empty)." >&2
+    exit 4
+  fi
+  _pstab=$(printf '\t')
+  if grep -q "^MISSING${_pstab}" "$_psmf"; then
+    rm -f "$_psmf"
+    echo "zamm: a plan root is missing (structural damage, not an empty project)." >&2
+    echo "  restore it ('zamm-run.sh scaffold' recreates the directory), then investigate." >&2
+    exit 4
+  fi
+  all=$(awk -F"$_pstab" '$1 == "PLANFILE" || $1 == "ARCHFILE" { print $2 }' "$_psmf")
+  rm -f "$_psmf"
 
   # Tiered resolution, the same precedence resolve_record uses for records:
   # an exact plan id wins, then an exact slug, and only then a substring match.
@@ -818,9 +853,29 @@ plan_create() {
     die "plan create: title placeholder was not substituted"
   fi
 
-  # re-check for a collision that appeared while rendering, then publish
-  [ -e "$dir" ] && die "plan already exists: ${dir#"$ROOT/"}"
+  # Publish the complete tree with ONE rename. No lock: two agents creating
+  # the same plan slug on the same day is the only race here, and POSIX `mv`
+  # onto a destination that appeared meanwhile moves the source INSIDE it
+  # rather than failing — so instead of excluding the race we detect losing
+  # it. The winner's directory is complete and correct; the loser removes its
+  # own nested tree and says so. rename(2) still makes the finished tree
+  # appear all at once, so a compile never sees an empty plan directory.
+  { [ -e "$dir" ] || [ -L "$dir" ]; } &&
+    die "plan already exists: ${dir#"$ROOT/"}"
   mv "$tmp" "$dir"
+  # Losing the race has an exact signature: our whole tree is now sitting
+  # INSIDE the winner's directory under its own temp name. Testing for the
+  # plan file instead would not work — the winner wrote one with the same
+  # name — so key on the nested temp directory itself.
+  if [ -d "$dir/${tmp##*/}" ]; then
+    rm -rf "$dir/${tmp##*/}"
+    trap - EXIT HUP INT TERM
+    die "plan already exists: ${dir#"$ROOT/"} (created concurrently)"
+  fi
+  if [ ! -f "$dir/$today-$slug.plan.md" ]; then
+    trap - EXIT HUP INT TERM
+    die "plan create: the rendered tree did not land at ${dir#"$ROOT/"}"
+  fi
   trap - EXIT HUP INT TERM
 
   echo "${dir#"$ROOT/"}/$today-$slug.plan.md"

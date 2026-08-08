@@ -144,9 +144,11 @@ class TestVotesAndErasure(ZammTest):
         self.assertNotIn_("+1", self.led.digest())
 
     def test_documented_erasure_leaves_the_ledger_valid(self):
-        """PRE-FIX: the documented procedure (append id to shun.md, delete
-        the file) left every successor pointing at a missing target, so
-        --check failed permanently with 'supersedes target not found'.
+        """PRE-FIX: the documented procedure (redact the id, delete the
+        file) left every successor pointing at a missing target, so --check
+        failed permanently with 'supersedes target not found'. (The
+        mechanism became an erasure RECORD in place of shun.md; the
+        invariant it guards is unchanged.)
         """
         leaky = self.led.add("leaky", "Record containing a secret.")
         self.led.add(
@@ -155,7 +157,7 @@ class TestVotesAndErasure(ZammTest):
         )
         self.assertCode(self.led.check(), EXIT_OK)
 
-        self.led.shun(leaky)
+        self.led.erase(leaky)
         self.led.delete(leaky)
 
         self.assertCode(self.led.check(), EXIT_OK, "erasure must not invalidate the ledger")

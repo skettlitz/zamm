@@ -107,17 +107,25 @@ class TestOtherArea(ZammTest):
 
 
 class TestGeneratorFlags(ZammTest):
-    def test_type_votes_skeleton_shape(self):
-        r = self.led.new_memory("--type", "votes", "--plan", "some-plan", "closure")
+    def test_type_votes_shape(self):
+        r = self.led.new_memory("--type", "votes", "--plan", "some-plan",
+                                "--up", "2026-01-01-a-aaaaa",
+                                "--down", "2026-01-01-b-bbbbb", "closure")
         self.assertCode(r, 0)
         content = _read(r.out.strip())
 
         self.assertIn_("type: votes", content)
         self.assertIn_("plan: some-plan", content)
-        self.assertIn_("up:", content)
-        self.assertIn_("down:", content)
+        self.assertIn_("up: 2026-01-01-a-aaaaa", content)
+        self.assertIn_("down: 2026-01-01-b-bbbbb", content)
         self.assertNotIn_("importance:", content)
-        self.assertIn_("fill up:/down:", r.output)
+
+    def test_votes_without_up_or_down_is_refused(self):
+        """The payload is the whole record, so a votes record with neither
+        list is refused at creation instead of landing unfillable."""
+        r = self.led.new_memory("--type", "votes", "--plan", "some-plan", "closure")
+        self.assertCode(r, 1)
+        self.assertIn_("--up and/or --down", r.output)
 
     def test_type_tombstone_skeleton_shape(self):
         target = self.led.add("doomed", "To be retired.")
@@ -163,25 +171,32 @@ class TestGeneratorFlags(ZammTest):
 
 
 class TestLedgerEdgePaths(ZammTest):
-    def test_shun_file_tolerates_comments_and_blank_lines(self):
-        """shun.md is hand-edited during erasure, so its parser has to cope
-        with the formatting a human would naturally use."""
+    def test_erases_list_tolerates_hand_written_spacing(self):
+        """An erasure record is hand-authored during an incident, so its
+        erases: list has to cope with the spacing a human would naturally
+        type. (Replaces the shun.md comment/blank-line parser test: round 8
+        moved redaction from that side file into erasure records.)"""
         leaky = self.led.add("leaky", "Contains a secret.")
+        other = self.led.add("also-leaky", "Contains another secret.",
+                             date="2026-01-06")
         self.led.add(
             "clean", "Secret removed.", date="2026-01-06", supersedes=leaky
         )
         self.led.write(
-            "zamm-memory/knowledge/shun.md",
-            "# erased 2026-01-06 after a credential leak\n"
-            "\n"
-            f"{leaky}   # the offending record\n"
-            "\n",
+            "zamm-memory/knowledge/2026/2026-01-07-redact-77777.md",
+            "---\ntype: erasure\n"
+            f"erases:   {leaky} ,  {other}  \n"
+            "created: 2026-01-07\nschema: 3\n---\n"
+            "Credential leak; rotated and redacted.\n",
         )
         self.led.delete(leaky)
+        self.led.delete(other, year="2026")
 
         self.assertCode(self.led.check(), EXIT_OK)
         self.led.compile()
         self.assertIn_("Secret removed.", self.led.digest())
+        self.assertNotIn_("Contains a secret", self.led.digest())
+        self.assertNotIn_("Contains another secret", self.led.digest())
 
     def test_case_fold_collision_is_rejected(self):
         """Two names differing only by case collide when the ledger is
@@ -202,18 +217,7 @@ class TestLedgerEdgePaths(ZammTest):
             hdiutil attach /tmp/zammcs.dmg
             TMPDIR=/Volumes/ZammCS python3 -m unittest discover -s . -t .
         """
-        probe = self.led.root / "CaseProbe"
-        probe.write_text("x")
-        case_sensitive = not (self.led.root / "caseprobe").exists()
-        probe.unlink()
-        if not case_sensitive:
-            if os.environ.get("ZAMM_REQUIRE_CASE_SENSITIVE"):
-                self.fail(
-                    "ZAMM_REQUIRE_CASE_SENSITIVE is set but TMPDIR is on a "
-                    "case-insensitive filesystem, so this check cannot run"
-                )
-            self.skipTest("filesystem is case-insensitive; cannot stage the collision")
-
+        self.require_case_sensitive()
         body = (
             "---\ntype: memory\nscope: contracts/api\nimportance: useful\n"
             "durability: years\ncreated: 2026-01-05\nschema: 3\n---\nA record.\n"

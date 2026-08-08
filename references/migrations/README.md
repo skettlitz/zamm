@@ -8,4 +8,5 @@ Migration state is checked through `zamm-memory/VERSION`. Current version is `3`
 
 Available guides:
 
+- `shun-to-erasure-records.md`: replace a v3 project's `zamm-memory/knowledge/shun.md` with erasure records. Required (the compiler refuses to run while the file exists); no VERSION change.
 - `v1-v2-to-v3-memory.md`: migrate tiered card memory (v1 Bedrock era or v2 Boulders era) to the v3 append-only ledger. Transfers **live tier cards only** (ignores archive/consolidations). v1 projects migrate directly to v3; the retired v1-to-v2 guide is preserved in git history only.

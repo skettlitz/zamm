@@ -17,13 +17,22 @@
 #   ARCHFILE\t<abs file>    readable main-candidate plan file in an ARCHDIR
 #   SYMLINK\t<abs path>     symlinked entry (either tree, any depth scanned);
 #                           never followed, never read
-#   NOTDIR\t<abs path>      non-directory entry directly under a tree, or a
-#                           directory posing as a *.plan.md file
+#   NOTDIR\t<abs path>      non-directory entry directly under a tree, a
+#                           directory posing as a *.plan.md file, or a tree
+#                           root that exists but is not a directory
 #   UNREADABLE\t<abs file>  plan file that exists but cannot be opened
+#   MISSING\t<abs dir>      tree root that does not exist. Scaffold always
+#                           creates both roots, so in a v3 project this is
+#                           structural damage, not an empty plan set;
+#                           consumers refuse to operate (exit 4)
+#   DEBRIS\t<abs dir>       stray .tmp-plan-* directory nested INSIDE a plan
+#                           dir — residue of an interrupted or raced plan
+#                           create that must not stay invisible
 #   DUP\t<slug>\t<active dir>\t<archive dir>   same plan id in both trees
 #
-# Hidden entries (leading dot) are ignored. An absent tree is a legal empty
-# tree (no lines, exit 0). An EXISTING tree that cannot be enumerated is
+# Hidden entries directly under a tree root (leading dot) are ignored: an
+# in-flight plan create renders privately in a depth-1 .tmp-plan-* before
+# claiming its final name. An EXISTING tree that cannot be enumerated is
 # exit 4: unreadable, not empty — the failure a glob would silently eat.
 
 set -eu
@@ -53,13 +62,20 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# Defense in depth: directly invocable, so re-prove the canonical roots are
+# real directories inside the project before enumerating through them.
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+. "$SCRIPT_DIR/zamm-paths.sh"
+zamm_verify_roots "$PROJECT_ROOT" || exit 4
+
 ACTIVE="$PROJECT_ROOT/zamm-memory/active/plans"
 ARCHIVE="$PROJECT_ROOT/zamm-memory/archive/plans"
 
 T_ENT=$(mktemp "${TMPDIR:-/tmp}/zamm-plan-mf-ent.XXXXXX")
 T_PF=$(mktemp "${TMPDIR:-/tmp}/zamm-plan-mf-pf.XXXXXX")
+T_DB=$(mktemp "${TMPDIR:-/tmp}/zamm-plan-mf-db.XXXXXX")
 T_OUT=$(mktemp "${TMPDIR:-/tmp}/zamm-plan-mf-out.XXXXXX")
-trap 'rm -f "$T_ENT" "$T_PF" "$T_OUT" "$T_OUT.dup"' EXIT HUP INT TERM
+trap 'rm -f "$T_ENT" "$T_PF" "$T_DB" "$T_OUT" "$T_OUT.dup"' EXIT HUP INT TERM
 
 fail_unreadable() {
   echo "ERROR: could not enumerate the plan tree (a directory could not be read)." >&2
@@ -76,14 +92,33 @@ emit_tree() {
     printf 'SYMLINK\t%s\n' "$tree" >> "$T_OUT"
     return 0
   fi
-  [ -d "$tree" ] || return 0
-  # Two checked stages, mirroring the ledger manifest: find exits non-zero
+  # A missing root is NOT a legal empty tree: scaffold creates both roots, so
+  # absence means the structure was damaged (deleted, renamed) — reporting it
+  # as zero plans would make accidental tree deletion read as healthy.
+  if [ ! -e "$tree" ]; then
+    printf 'MISSING\t%s\n' "$tree" >> "$T_OUT"
+    return 0
+  fi
+  if [ ! -d "$tree" ]; then
+    printf 'NOTDIR\t%s\n' "$tree" >> "$T_OUT"
+    return 0
+  fi
+  # Three checked stages, mirroring the ledger manifest: find exits non-zero
   # when it cannot descend a directory, and each stage writes a file whose
   # exit status is inspected — piping straight to a reader would report only
   # the reader's status. find does not follow symlinks, so a symlinked dir is
   # listed at depth 1 and its contents are never enumerated.
   find "$tree" -mindepth 1 -maxdepth 1 -print > "$T_ENT" || fail_unreadable
   find "$tree" -mindepth 2 -maxdepth 2 -name '*.plan.md' -print > "$T_PF" || fail_unreadable
+  # Race residue: a .tmp-plan-* NESTED inside a plan dir is the losing half
+  # of a concurrent plan create (mv moved it INTO the winner's directory).
+  # Depth-1 hidden entries stay ignored — that is a create's private render
+  # area — but nested ones would otherwise be invisible to every consumer.
+  find "$tree" -mindepth 2 -maxdepth 2 -name '.tmp-plan-*' -print > "$T_DB" || fail_unreadable
+  while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    printf 'DEBRIS\t%s\n' "$d" >> "$T_OUT"
+  done < "$T_DB"
   while IFS= read -r e; do
     [ -n "$e" ] || continue
     base=${e##*/}

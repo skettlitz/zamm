@@ -19,6 +19,11 @@ scaffold renders it into the project runtime surfaces (`AGENTS.md` managed block
 template in full only when no rendered copy is in context. README.md is explanatory, never
 authoritative.
 
+`<zamm-skill>/references/invariants.md` states what the toolchain guarantees and, just as
+importantly, what it deliberately does not. Read it before reporting a defect or hardening
+anything: a finding that violates none of its three guarantees is out of scope by design, not
+an oversight.
+
 Drift rule: the `SKILL-BLOCK:zamm:BEGIN version=...` stamp in `AGENTS.md` records the skill
 version that rendered it. When it differs from the installed skill, tell the human and offer
 `zamm-run.sh scaffold` before proceeding under the old rules.
@@ -42,11 +47,16 @@ Referenced section names live in the rendered runtime files / protocol template 
 
 ## Ledger write transaction
 
-1. `bash <zamm-skill>/scripts/zamm-run.sh memory create --scope '<area[/subpath][, area2]>' <topic-slug>` — prints the path of the created draft (`<id>.md.draft`). Add `--type`, `--importance`, `--durability`, `--supersedes`, `--plan` as applicable. Drafts are invisible to check and the digest until published.
-2. Fill the skeleton: memory → digest block (headline paragraph + optional elaboration, optional `## Background`); tombstone → one-line reason; votes → at least one of `up:`/`down:`. Paraphrase the human — never verbatim quotes; describe the emotion instead of the raw words.
-3. `bash <zamm-skill>/scripts/zamm-run.sh memory publish <topic-slug>` — validates the draft and, on success, lands it in the ledger and rebuilds the digest in one step (no separate digest command needed). On rejection the record returns to a draft with the violations printed; fix and re-run publish.
-4. `bash <zamm-skill>/scripts/zamm-run.sh memory check` — confirm the ledger still passes as a whole; fix every violation until it prints `ZAMM check passed.`
-5. Never edit a published record; correct it with a new record carrying `supersedes:`.
+1. Compose the body first: memory → digest block (headline paragraph + optional elaboration, optional `## Background`); tombstone → one-line reason; erasure → why the content had to go; votes → no body at all. Paraphrase the human — never verbatim quotes; describe the emotion instead of the raw words.
+2. Pass it on stdin to one command, which validates the record and lands it with the digest rebuilt:
+   ```sh
+   bash <zamm-skill>/scripts/zamm-run.sh memory create --scope '<area[/subpath][, area2]>' <topic-slug> <<'EOF'
+   <the record body>
+   EOF
+   ```
+   Add `--type`, `--importance`, `--durability`, `--supersedes`, `--erases`, `--up`/`--down`, `--plan` as applicable. On rejection nothing is written and the violations are printed; fix the body or the flags and re-run.
+3. `bash <zamm-skill>/scripts/zamm-run.sh memory check` — confirm the ledger still passes as a whole; fix every violation until it prints `ZAMM check passed.`
+4. Never edit a written record; correct it with a new record carrying `supersedes:`.
 
 ## Commands
 

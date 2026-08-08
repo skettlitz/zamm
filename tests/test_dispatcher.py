@@ -92,9 +92,10 @@ class TestArgumentHandling(ZammTest):
         """Two layers of shell between the caller and the script — the
         classic place forwarding breaks."""
         r = self.led.zamm(
-            "memory", "create",
+            "memory", "create", "--no-validate",
             "--scope", "contracts/api, conventions",
             "quoted-slug",
+            stdin="A body, so the record is complete.\n",
         )
         self.assertCode(r, EXIT_OK)
         with open(r.out.strip()) as fh:

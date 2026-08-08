@@ -45,6 +45,13 @@ else
   PROJECT_ROOT="$PWD"
 fi
 
+# Refuse to scaffold through a symlinked canonical component: ensure_dir's
+# mkdir -p silently accepts a pre-existing symlink-to-directory, so running
+# scaffold on a poisoned tree would neither detect nor repair it. Genuinely
+# missing components are fine — creating them is scaffold's job.
+. "$(cd "$(dirname "$0")" && pwd)/zamm-paths.sh"
+zamm_verify_roots "$PROJECT_ROOT" || exit 4
+
 # ZAMM_TODAY pins the clock (YYYY-MM-DD). Test-only: this date is stamped
 # into the managed-block markers, so golden comparisons of rendered surfaces
 # need it fixed. Unset in normal use.
@@ -451,9 +458,12 @@ echo "  2. Compile the (empty) digest and confirm the toolchain works:"
 echo "     bash \"$SKILL_DIR/scripts/zamm-run.sh\" --project-root \"$PROJECT_ROOT\" memory digest"
 echo "  3. If the digest reports no live records, ask whether to run"
 echo "     \"$SKILL_DIR/references/initialization/existing-project.md\""
-echo "  4. Create memory records (writes a draft; fill the body, then publish):"
-echo "     bash \"$SKILL_DIR/scripts/zamm-run.sh\" --project-root \"$PROJECT_ROOT\" memory create --scope '<area[/subpath][, area2]>' <topic-slug>"
-echo "     bash \"$SKILL_DIR/scripts/zamm-run.sh\" --project-root \"$PROJECT_ROOT\" memory publish <id>"
+# a lone single quote is easier to name than to escape inside these echoes
+SQ="'"
+echo "  4. Create memory records (one step; the body arrives on stdin):"
+echo "     bash \"$SKILL_DIR/scripts/zamm-run.sh\" --project-root \"$PROJECT_ROOT\" memory create --scope ${SQ}<area[/subpath][, area2]>${SQ} <topic-slug> <<${SQ}EOF${SQ}"
+echo "     <the record body>"
+echo "     EOF"
 echo "  5. Create your first plan with the official command (no manual mkdir/cp):"
 echo "     bash \"$SKILL_DIR/scripts/zamm-run.sh\" --project-root \"$PROJECT_ROOT\" plan create '<plan title>'"
 echo "  6. Check current plan status buckets anytime:"

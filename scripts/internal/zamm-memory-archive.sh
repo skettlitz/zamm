@@ -44,6 +44,12 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# Defense in depth: directly invocable, so re-prove the canonical roots are
+# real directories inside the project before moving records through them (a
+# symlinked archive/knowledge would receive the moves outside the project).
+. "$SCRIPT_DIR/zamm-paths.sh"
+zamm_verify_roots "$PROJECT_ROOT" || exit 4
+
 # ZAMM_COMPILE overrides the compiler path. Test-only dependency-injection
 # seam (like ZAMM_TODAY): it lets a fault-injection test substitute a compiler
 # that fails on recompile or lies in --list-inert, so the rollback path is
@@ -56,6 +62,13 @@ ARCHIVE_ROOT="$PROJECT_ROOT/zamm-memory/archive/knowledge"
 echo "ZAMM: memory archive"
 echo "Project root: $PROJECT_ROOT"
 
+# No lock and no ledger fingerprint. Archival is not a transaction
+# (references/invariants.md, G4): the compiler reads the live and the archived
+# tree both, so a record that has not moved yet is simply a record that has not
+# moved yet, and a rerun completes the job. What IS still checked is our own
+# inert rule — see the digest comparison at the end.
+mkdir -p "$PROJECT_ROOT/zamm-memory/.compiled"
+
 # Never archive out of a ledger that does not validate: the inert rule is a
 # graph conclusion, and a broken graph cannot support one.
 if ! sh "$COMPILE" --project-root "$PROJECT_ROOT" --check >/dev/null 2>&1; then
@@ -67,6 +80,7 @@ fi
 sh "$COMPILE" --project-root "$PROJECT_ROOT" >/dev/null
 
 INERT=$(sh "$COMPILE" --project-root "$PROJECT_ROOT" --list-inert)
+
 if [ -z "$INERT" ]; then
   echo "No inert records: every record still belongs to a live chain."
   exit 0
@@ -84,19 +98,14 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
-# The move is transactional: nothing under knowledge/ moves until every source
-# is confirmed present and every destination confirmed absent, and ANY failure
-# afterwards — a failed move, a failed recompile, a changed digest, or a signal
-# — rolls every completed move back before exiting. The digest below the header
-# line must be byte-identical afterwards: archiving removes records that by
-# definition influence nothing, so any difference means the inert rule admitted
-# something load-bearing.
-#
-# All transaction state lives in one work directory. MOVELOG (dest<TAB>src per
-# completed move) is the recovery map and must OUTLIVE any early exit, so the
-# trap runs a rollback before deleting it — the previous implementation deleted
-# MOVELOG in its trap and rolled back only in the digest-diff branch, so a
-# failure anywhere else left the ledger half-archived with no way back.
+# Nothing moves until every source is confirmed present and every destination
+# confirmed absent, so a move can never overwrite an archived record (bytes are
+# never destroyed). Afterwards the digest below the header must be
+# byte-identical: archiving removes records that by definition influence
+# nothing, so a difference means OUR inert rule admitted something
+# load-bearing. That is the one failure worth undoing here, because no later
+# run would undo it — so completed moves are logged and rolled back. Nothing
+# else is: an interrupted archive is a valid, half-archived ledger.
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/zamm-archive.XXXXXX")
 SRCLIST="$WORK/sources"
 MOVELOG="$WORK/movelog"
@@ -122,6 +131,9 @@ rollback() {
 }
 
 cleanup() {
+  # errexit off for the whole cleanup: one failing rm must never abort the
+  # trap before the rollback completes and the lock is released.
+  set +e
   # Any exit that is not a clean success undoes every completed move and
   # restores the digest, so a failed or interrupted archive leaves the ledger
   # exactly as it was found. Runs ONCE, on EXIT.
@@ -130,6 +142,7 @@ cleanup() {
     sh "$COMPILE" --project-root "$PROJECT_ROOT" >/dev/null 2>&1 || true
   fi
   rm -rf "$WORK"
+  :
 }
 # A signal trap that only runs cleanup would RESUME execution at the
 # interrupted point afterwards (POSIX), using a work dir cleanup just deleted
@@ -158,6 +171,13 @@ while IFS= read -r src; do
   fi
   base=$(basename "$src")
   year=$(echo "$base" | cut -c1-4)
+  # the year directory is a dynamic component the root check cannot list: a
+  # symlinked archive/knowledge/<year> would receive the moves outside the
+  # project
+  if [ -L "$ARCHIVE_ROOT/$year" ]; then
+    echo "ERROR: zamm-memory/archive/knowledge/$year is a symlink; refusing to archive through it." >&2
+    exit 1
+  fi
   dest="$ARCHIVE_ROOT/$year/$base"
   if [ -e "$dest" ]; then
     echo "ERROR: archive destination already exists: ${dest#"$PROJECT_ROOT/"}" >&2
@@ -176,7 +196,13 @@ while IFS= read -r src; do
   base=$(basename "$src")
   year=$(echo "$base" | cut -c1-4)
   dest_dir="$ARCHIVE_ROOT/$year"
-  mkdir -p "$dest_dir"
+  # tolerate mkdir's status (it FAILS on a dangling symlink and silently
+  # accepts an existing one), then judge by what is actually there
+  mkdir -p "$dest_dir" 2>/dev/null || true
+  if [ -L "$dest_dir" ] || [ ! -d "$dest_dir" ]; then
+    echo "ERROR: ${dest_dir#"$PROJECT_ROOT/"} is a symlink or not a real directory; rolling back." >&2
+    exit 1
+  fi
   dest="$dest_dir/$base"
   # Log the intended move BEFORE performing it: a crash between the mv and a
   # later log append would otherwise hide a completed move from rollback,
@@ -211,7 +237,7 @@ if ! diff -q "$BEFORE" "$AFTER" >/dev/null 2>&1; then
   exit 1
 fi
 
-# Success: the on-disk digest is already the post-archive one from step 3, and
+# Success: the on-disk digest is already the post-archive one from step 3 and
 # it matches below the header. Mark done so the trap keeps the moves.
 STATE="done"
 echo ""

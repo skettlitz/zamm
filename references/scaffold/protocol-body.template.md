@@ -36,6 +36,13 @@ Commands are reached through one entrypoint, `zamm-run.sh`, which finds the proj
 
 ## Ledger Memory Model (MUST)
 
+What the toolchain guarantees, and what it deliberately does not, is stated in
+`<zamm-skill>/references/invariants.md`: every output is a truthful reading of some state the
+ledger actually had, every failure is repairable by rerunning, and bytes are never destroyed.
+Staleness, a digest one record behind, and a half-finished archive are all normal operation, not
+damage — rerun the command. A hostile process running as your own user is explicitly out of
+scope. Consult that file before reporting a defect or adding a safeguard.
+
 Active knowledge is an append-only ledger of immutable record files under `zamm-memory/knowledge/<YYYY>/`. There are no tiers, no ID counters, and no consolidation rituals: the compiler (`zamm-compile.sh`) derives liveness, vote totals, ranking, and supersede links from the records at read time. Ranking = author-rated importance decayed over the author-rated durability horizon, corrected by votes; fully decayed records go dormant (counted in the digest, not listed, always greppable in the ledger). Attention is bounded in two layers: up to ~75 full Digest blocks (actionable) and up to ~150 Headlines (reminders); further live records stay greppable but unlisted. Digest seats are balanced across top-level scope areas by a per-area score penalty (a weighted compromise, not a quota) so one hot topic cannot drown the others; a record with several area tags competes through its least-crowded area but pays a small score cost per extra tag, so precise tagging wins over tag-sprawl. Live guardrails never go dormant and are always included in the Digest layer: `!` is a safety contract, so a guardrail leaves the digest only through supersession or a tombstone, never through silent decay or downvotes.
 
 What is and is not bounded: the ~75 Digest blocks and ~150 Headlines are the only capped sections. Live guardrails are admitted BEFORE that cap and can exceed it; competing heads under `Needs reconciliation`, every active plan, and the recently-archived tail are all listed in full. The digest is therefore bounded in its ranked layers, not in total size — an inflated guardrail count or a large conflict backlog grows it without limit. Keep guardrails rare (`memory check` warns past 15 live ones) and resolve conflicts rather than letting them accumulate.
@@ -45,13 +52,14 @@ Record file rules:
 - Filename is the record ID: `YYYY-MM-DD-<topic-slug>-<suffix>.md`.
   - All lowercase; charset `[a-z0-9-]` only; slug at most 40 chars; date is the creation date.
   - `<suffix>` is 5 random chars from the 30-symbol alphabet `23456789abcdefghjkmnpqrstvwxyz` (lowercase Crockford base32 minus the visually ambiguous `0 1 i l o u` — 30 symbols, not 32). The suffix exists so uncoordinated writers on different machines cannot collide: collisions are only possible between records sharing the same date AND the same slug, so the 30^5 space is far larger than the risk it covers.
-- Prefer creating records with `bash <zamm-skill>/scripts/zamm-run.sh memory create --scope '<area[/subpath][, area2]>' <topic-slug>`; hand-written files MUST follow the same naming and schema rules. `memory create` writes an `<id>.md.draft` that the compiler ignores, so a record being composed never appears half-finished in the ledger; fill in the body, then run `zamm-run.sh memory publish <id>` to validate it and land it (it recompiles the digest on success, and leaves the file as a draft if it does not validate). Scripted/migration callers may pass `--immediate` to skip the draft and write the final `.md` directly.
+- Prefer creating records with `bash <zamm-skill>/scripts/zamm-run.sh memory create --scope '<area[/subpath][, area2]>' <topic-slug>`, passing the record body on stdin; hand-written files MUST follow the same naming and schema rules. The record is composed in a private temporary file, validated there, and only then linked into the ledger under its final name — so a record is either absent or complete and valid, never half-written, and a record that fails the contract leaves nothing behind at all. `--edit` opens `$EDITOR` instead of reading stdin. Bulk migration may pass `--no-validate` to skip the per-record check (which costs a full compile each); run `zamm-run.sh check` once at the end instead.
 - Never rename or move files or directories under `zamm-memory/knowledge/` (the add-only layout is what keeps ledger merges conflict-resistant; renames reintroduce ordinary git conflicts). Two documented exceptions: `## Erasure (exceptional)`, and `zamm-run.sh memory archive`, which moves whole retired chains to `zamm-memory/archive/knowledge/`. A chain qualifies only when nothing in it still affects the digest — no live memory record and no live votes record — because votes aggregate over the whole ancestor chain of a record, so a dead ancestor of a live head is load-bearing. Archived records stay greppable in the working tree and their ids stay resolvable; the command verifies the digest is unchanged and rolls back if it is not.
 - Never store secrets, tokens, or credentials in records; ledger records are effectively permanent.
 - Never quote the human verbatim in a record: paraphrase the substance and, where the register matters, describe the emotion (e.g. "strong frustration with rebuild times") instead of the raw words. Records are permanent and team-visible; profanity and heat-of-the-moment phrasing must not be immortalized.
 
-Record schema — frontmatter is flat `key: value` lines between two `---` lines; every value is a plain string; lists are comma-separated; unknown keys are ignored; omit empty keys (one exception: a fresh votes skeleton from `zamm-run.sh memory create --type votes` carries empty `up:`/`down:` lines — fill at least one before committing; `memory check` rejects a votes record with both empty):
-- `type`: `memory` | `tombstone` | `votes`
+Record schema — frontmatter is flat `key: value` lines between two `---` lines; every value is a plain string; lists are comma-separated; unknown keys are ignored; omit empty keys (a votes record carries `up:`/`down:` lines from `--up`/`--down` and must have an empty body; `memory check` rejects a votes record with both lists empty):
+- `type`: `memory` | `tombstone` | `votes` | `erasure`
+- `erases`: erasure records only — comma-separated ids whose content must never be compiled again (see Erasure).
 - `scope`: 1-3 comma-separated area tags, e.g. `contracts/record-schema, conventions`. The first (primary) tag is `<area>[/<subpath>]` and is where the record displays; secondary tags are bare areas that give the record extra selection doors. Areas MUST come from the fixed v3 set:
   - `domain` — what the product is for: purpose, users, requirements, external constraints (e.g. "this tool targets solo maintainers, not enterprise fleets")
   - `contracts` — boundary shapes others depend on: schemas, formats, protocols, CLI/API surfaces, invariants — violation breaks interop or data (e.g. "record IDs are the filename stem; never rename under knowledge/")
@@ -75,7 +83,7 @@ Record body convention (MUST for `memory` records):
 - The FIRST PARAGRAPH is the headline: ONE imperative, actionable or guardrail statement, standalone-readable (condition-first where it fits: "When touching X, do Y because Z"). Aim for roughly one short sentence (~300 characters as a soft guide, not a hard cap) — prefer a complete trigger-worthy statement over truncating mid-thought. It is the entry's first line in the digest — and its only line when the entry renders headline-only.
 - Optional elaboration paragraphs may follow the headline: digest-worthy caveats, key parameters, the load-bearing why. Everything above the first heading is the DIGEST BLOCK (headline + elaboration); keep it 2-10 lines (hard limits: 12 lines, 1200 chars). Entries selected into `## Digest` render the whole block at session start (actionable). Entries selected into `## Headlines` render the headline only (a reminder to open the record if the topic matches).
 - Detail that only matters when actively working the topic goes under a `## Background` heading: full reasoning, evidence paths, history. Optional — omit it when the digest block carries everything. Its presence earns the entry a `+bg` marker.
-- `tombstone` body: a one-line reason. `votes` body: empty.
+- `tombstone` body: a one-line reason. `votes` body: empty. `erasure` body: why the content had to go (required — it is the only account of a redaction that survives it).
 
 Semantics:
 - Update a memory: write a NEW record with `supersedes: <old-id>`. The old file stays untouched; the compiler hides it and links the chain.
@@ -90,7 +98,7 @@ Mechanics:
 - Prefer correction over accretion: supersede stale records, merge overlaps, add only genuinely new knowledge.
 - Rate `importance`/`durability` honestly — they are the whole ranking system. Refresh a still-true record near its horizon by superseding with re-rated fields.
 - Suspected-stale but unverified: supersede with a `suspected drift` record plus a verification note.
-- A write is complete only after `bash <zamm-skill>/scripts/zamm-run.sh memory publish <id>` accepts the draft — publish validates the record and recompiles the digest in one step. Records are drafts until published, immutable after.
+- A write is complete when `memory create` prints the record path: it validated the record and recompiled the digest in the same step. Records are immutable once written — correct one with a new record carrying `supersedes:`, never by editing it. (Composing in two steps still works: write an `<id>.md.draft` by hand and run `bash <zamm-skill>/scripts/zamm-run.sh memory publish <id>`, which validates a private copy and links that copy in.)
 
 Write a record when (compact cues; full semantics in `<zamm-skill>/references/distillation-triggers.md`):
 - the human says remember this — same turn, no damping
@@ -113,11 +121,13 @@ Do not write: free-floating values with nowhere to recheck; external changes tha
 ## Erasure (exceptional)
 
 Only for secrets or personal data committed by mistake:
-1. Append the record ID to `zamm-memory/knowledge/shun.md` (one ID per line, `#` comments allowed) so compilers ignore any stray copy.
+1. Write an erasure record naming the ID: `zamm-run.sh memory create --type erasure --erases <id> <slug>`, with the reason the content had to go on stdin as the body. Compilers ignore the erased ID from then on, including any stray copy that reappears later.
 2. Delete the record file.
 3. Git history rewriting (`git filter-repo` or equivalent) is a separate, explicitly human-approved operation; ask, never assume.
 
-A shunned ID stays a valid graph node, so erasure does not break the ledger: records that supersede it remain valid and keep their place in the chain (`memory check` does not report a missing target), while the erased record contributes no content, no votes, and no durability credit. Votes pointing at it are dropped silently. Successors are NOT rewritten — never edit a committed record to remove a `supersedes:` pointer at an erased ID.
+An erased ID stays a valid graph node, so erasure does not break the ledger: records that supersede it remain valid and keep their place in the chain (`memory check` does not report a missing target), while the erased record contributes no content, no votes, and no durability credit. Votes pointing at it are dropped silently. Successors are NOT rewritten — never edit a committed record to remove a `supersedes:` pointer at an erased ID.
+
+Erasure is a record, not a side list, because step 1 has to outlive step 2: git makes a deleted file coming back routine (a merge, an old branch, a restore), so the redaction must be part of the ledger the compiler already reads and validates. It also means the redaction carries its own date, author and reason. Projects predating this carry `zamm-memory/knowledge/shun.md`; the compiler refuses to run while that file exists (ignoring it would resurrect exactly what it suppressed) — migrate each listed ID to an erasure record, then delete it.
 
 ## Plan Directory Model (MUST)
 

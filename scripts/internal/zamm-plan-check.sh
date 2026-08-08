@@ -172,6 +172,19 @@ if ! sh "$MANIFEST_SH" --project-root "$PROJECT_ROOT" > "$MF"; then
 fi
 TAB=$(printf '\t')
 
+# A missing plan root outranks per-plan validation: scaffold always creates
+# both roots, so absence is structural damage (a deleted or renamed tree),
+# not an empty plan set — refusing (exit 4, like an unreadable tree) keeps
+# "the plans are gone" from reading as "there are no plans".
+missing=$(awk -F"$TAB" '$1 == "MISSING" { print $2 }' "$MF")
+if [ -n "$missing" ]; then
+  printf '%s\n' "$missing" | while IFS= read -r m; do
+    echo "zamm-plan: ERROR: plan root missing: ${m#"$PROJECT_ROOT/"} -- structural damage, not an empty project." >&2
+  done
+  echo "zamm-plan: ERROR: restore the directory ('zamm-run.sh scaffold' recreates it), then investigate what removed it." >&2
+  exit 4
+fi
+
 # structural anomalies the manifest tagged: each is a validation error here
 # (the manifest only refuses outright when enumeration itself failed)
 while IFS="$TAB" read -r tag p1 p2 p3; do
@@ -179,40 +192,84 @@ while IFS="$TAB" read -r tag p1 p2 p3; do
     SYMLINK)    err "${p1#"$PROJECT_ROOT/"}: symlinked entries are not allowed in the plan tree (no symlinks)" ;;
     NOTDIR)     err "${p1#"$PROJECT_ROOT/"}: not a plan directory" ;;
     UNREADABLE) err "${p1#"$PROJECT_ROOT/"}: cannot read plan file (permission denied or I/O error)" ;;
+    DEBRIS)     err "${p1#"$PROJECT_ROOT/"}: stray temporary directory from an interrupted or raced plan create; inspect its contents, then remove it" ;;
     DUP)        err "plan id \"$p1\" exists in both active and archive (${p2#"$PROJECT_ROOT/"}, ${p3#"$PROJECT_ROOT/"})" ;;
   esac
 done < "$MF"
 
-plandirs=$(awk -F"$TAB" '$1 == "PLANDIR" { print $2 }' "$MF")
-while IFS= read -r pd; do
-  [ -n "$pd" ] || continue
+# check_plan_dir <plan dir> <main-file manifest tag> <active|archived>
+# One plan directory's structural validation, shared between the trees.
+# active: full validation plus the activity counters and advisories.
+# archived: newly archived v3 plans — recognizable by the Execution-context-
+# before: key the v3 template always carries — must still satisfy the same
+# structural rules AND be terminal: archival is a move, not an amnesty, so a
+# plan mutated between validation and the move (or after) is caught here.
+# Legacy pre-v3 archives (no marker key) predate the schema and are left
+# alone.
+check_plan_dir() {
+  pd="$1"; ftag="$2"; mode="$3"
   slug=$(basename "$pd")
-  nplans=$((nplans + 1))
+  [ "$mode" = "active" ] && nplans=$((nplans + 1))
 
-  # exactly one main plan file (manifest rows: PLANFILE = readable main
-  # candidate, UNREADABLE = a main candidate that exists but cannot be opened
-  # — already reported above, so it must not double-report as "no main")
-  nmain=$(awk -F"$TAB" -v d="$pd/" '$1 == "PLANFILE" && index($2, d) == 1 { n++ } END { print n + 0 }' "$MF")
+  # exactly one main plan file (manifest rows: PLANFILE/ARCHFILE = readable
+  # main candidate, UNREADABLE = a main candidate that exists but cannot be
+  # opened — already reported above, so it must not double-report as "no
+  # main")
+  nmain=$(awk -F"$TAB" -v t="$ftag" -v d="$pd/" '$1 == t && index($2, d) == 1 { n++ } END { print n + 0 }' "$MF")
   nunread=$(awk -F"$TAB" -v d="$pd/" '$1 == "UNREADABLE" && index($2, d) == 1 { n++ } END { print n + 0 }' "$MF")
-  if [ "$nmain" -eq 0 ]; then
-    [ "$nunread" -eq 0 ] && err "$slug: plan directory has no main .plan.md"
-    continue
-  elif [ "$nmain" -gt 1 ]; then
-    err "$slug: plan directory has $nmain main .plan.md files (expected 1)"
-    continue
+  if [ "$mode" = "archived" ]; then
+    # Malformed archived directories ALWAYS fail — silently skipping them
+    # would let "move the main file away" (or add a second one) disable the
+    # post-archive integrity gate entirely. An unreadable main candidate is
+    # already an error above, so it does not double-report as "no main".
+    if [ "$nmain" -eq 0 ]; then
+      [ "$nunread" -eq 0 ] && err "$slug: archived plan directory has no main .plan.md (damaged archive)"
+      return 0
+    elif [ "$nmain" -gt 1 ]; then
+      err "$slug: archived plan directory has $nmain main .plan.md files (expected 1)"
+      return 0
+    fi
+  else
+    if [ "$nmain" -eq 0 ]; then
+      [ "$nunread" -eq 0 ] && err "$slug: plan directory has no main .plan.md"
+      return 0
+    elif [ "$nmain" -gt 1 ]; then
+      err "$slug: plan directory has $nmain main .plan.md files (expected 1)"
+      return 0
+    fi
   fi
-  pf=$(awk -F"$TAB" -v d="$pd/" '$1 == "PLANFILE" && index($2, d) == 1 { print $2; exit }' "$MF")
+  pf=$(awk -F"$TAB" -v t="$ftag" -v d="$pd/" '$1 == t && index($2, d) == 1 { print $2; exit }' "$MF")
   rel="${pf#"$PROJECT_ROOT/"}"
+
+  if [ "$mode" = "archived" ]; then
+    # v3 provenance comes from OUTSIDE the file being validated first: the
+    # .zamm-archived stamp the archiver writes beside the plan file, so
+    # stripping keys from the file cannot demote a v3 plan to "legacy" and
+    # dodge validation. The template's always-present Execution-context-
+    # before: key stays as a fallback for v3 plans archived before stamping
+    # existed. Neither present -> genuine pre-v3 archive, left alone.
+    if [ ! -e "$pd/.zamm-archived" ] &&
+       ! grep -q '^Execution-context-before:' "$pf" 2>/dev/null; then
+      return 0
+    fi
+  fi
 
   status=$(field "$pf" "Status")
   case "$status" in
     Draft|Implementing|Review|Done|Abandoned) ;;
-    "") err "$rel: no Status: line"; continue ;;
-    *) err "$rel: unknown Status \"$status\" (Draft|Implementing|Review|Done|Abandoned)"; continue ;;
+    "") err "$rel: no Status: line"; return 0 ;;
+    *) err "$rel: unknown Status \"$status\" (Draft|Implementing|Review|Done|Abandoned)"; return 0 ;;
   esac
 
-  [ "$status" = "Implementing" ] && nimpl=$((nimpl + 1))
-  case "$status" in Done|Abandoned) nterm=$((nterm + 1)) ;; esac
+  if [ "$mode" = "archived" ]; then
+    case "$status" in
+      Done|Abandoned) ;;
+      *) err "$rel: archived plan is not terminal (Status: $status)" ;;
+    esac
+  else
+    [ "$status" = "Implementing" ] && nimpl=$((nimpl + 1))
+    case "$status" in Done|Abandoned) nterm=$((nterm + 1)) ;; esac
+  fi
 
   lu=$(field "$pf" "Last updated")
   if [ -z "$lu" ]; then
@@ -313,8 +370,23 @@ while IFS= read -r pd; do
         err "$rel: status is $status but $dw_open Done-when item(s) are unchecked"
       ;;
   esac
+  return 0
+}
+
+plandirs=$(awk -F"$TAB" '$1 == "PLANDIR" { print $2 }' "$MF")
+while IFS= read -r pd; do
+  [ -n "$pd" ] || continue
+  check_plan_dir "$pd" PLANFILE active
 done <<EOF
 $plandirs
+EOF
+
+archdirs=$(awk -F"$TAB" '$1 == "ARCHDIR" { print $2 }' "$MF")
+while IFS= read -r pd; do
+  [ -n "$pd" ] || continue
+  check_plan_dir "$pd" ARCHFILE archived
+done <<EOF
+$archdirs
 EOF
 
 # advisory, not failures

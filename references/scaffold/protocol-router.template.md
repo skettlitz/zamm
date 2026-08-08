@@ -12,11 +12,11 @@ Read `zamm-memory/.compiled/memory.md`. A leading `!` marks a guardrail — do n
 
 **Memory (ZAMM owns it):** when something is worth remembering (a correction, a standing rule, a hard-won result), write a record:
 
-    bash <zamm-skill>/scripts/zamm-run.sh memory create --scope '<area>' <topic-slug>
-    # fill the printed .md.draft, then:
-    bash <zamm-skill>/scripts/zamm-run.sh memory publish <topic-slug>
+    bash <zamm-skill>/scripts/zamm-run.sh memory create --scope '<area>' <topic-slug> <<'EOF'
+    <the record body>
+    EOF
 
-Publish validates the draft and recompiles the digest. Never edit or delete a published record — correct it with a new record carrying `supersedes:`.
+One step: it validates the record and recompiles the digest, and writes nothing at all if the record does not validate. Never edit or delete a written record — correct it with a new record carrying `supersedes:`.
 
 **Plans (ZAMM owns them):** durable work runs in plan directories — `plan create '<title>'`, `plan list`, `plan check`, `plan archive` (same entrypoint). Status flow: Draft -> Implementing -> Review -> Done/Abandoned; close-out needs learnings, telemetry and a votes record (see full protocol).
 

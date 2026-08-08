@@ -118,6 +118,7 @@ class Ledger:
         importance="useful",
         durability="years",
         supersedes=None,
+        erases=None,
         plan=None,
         up=None,
         down=None,
@@ -138,6 +139,10 @@ class Ledger:
             if isinstance(supersedes, (list, tuple)):
                 supersedes = ", ".join(supersedes)
             fm.append(f"supersedes: {supersedes}")
+        if erases:
+            if isinstance(erases, (list, tuple)):
+                erases = ", ".join(erases)
+            fm.append(f"erases: {erases}")
         if type == "memory":
             if importance:
                 fm.append(f"importance: {importance}")
@@ -159,6 +164,17 @@ class Ledger:
         self.write(f"zamm-memory/knowledge/{date[:4]}/{rid}.md", text)
         return rid
 
+    def draft(self, slug, body="A synthetic statement for testing.", **kw) -> str:
+        """Write an <id>.md.draft — a record someone chose to compose over
+        several edits rather than pass to `memory create` in one go. Returns
+        the absolute draft path. `memory create` never produces one."""
+        rid = self.add(slug, body, **kw)
+        date = rid[:10]
+        live = self.root / f"zamm-memory/knowledge/{date[:4]}/{rid}.md"
+        draft = live.with_suffix(".md.draft")
+        live.rename(draft)
+        return str(draft)
+
     def add_many(self, count, *, slug="rec", **kw) -> list:
         return [self.add(slug, f"Record number {i}.", **kw) for i in range(count)]
 
@@ -175,10 +191,17 @@ class Ledger:
     def exists(self, relpath) -> bool:
         return (self.root / relpath).exists()
 
-    def shun(self, *ids):
-        self.write(
-            "zamm-memory/knowledge/shun.md", "".join(f"{i}\n" for i in ids)
-        )
+    def erase(self, *ids, slug="redacted", date="2026-01-07",
+              reason="Synthetic erasure for testing.", sfx=None) -> str:
+        """Redact ids the v3 way: an erasure RECORD naming them.
+
+        Replaces the old shun.md list — erasure now rides the same
+        enumeration, validation and symlink handling as every other record,
+        and carries its reason.
+        """
+        return self.add(slug, reason, date=date, type="erasure",
+                        scope=None, importance=None, durability=None,
+                        erases=list(ids), sfx=sfx)
 
     def delete(self, rid, year="2026"):
         (self.root / f"zamm-memory/knowledge/{year}/{rid}.md").unlink()
@@ -231,7 +254,8 @@ class Ledger:
 
     # ---------------- running ----------------
 
-    def run(self, script, *args, today=PINNED_TODAY, env=None, cwd=None) -> Result:
+    def run(self, script, *args, today=PINNED_TODAY, env=None, cwd=None,
+            stdin=None) -> Result:
         """Invoke one underlying script directly.
 
         The escape hatch: use it to address a script the dispatcher wraps
@@ -244,17 +268,18 @@ class Ledger:
         base = SCRIPTS if script == "zamm-run.sh" else SCRIPTS / "internal"
         return self._exec(
             [interp, str(base / script), "--project-root", str(self.root), *args],
-            today, env, cwd,
+            today, env, cwd, stdin,
         )
 
-    def zamm(self, *args, today=PINNED_TODAY, env=None, cwd=None) -> Result:
+    def zamm(self, *args, today=PINNED_TODAY, env=None, cwd=None,
+             stdin=None) -> Result:
         """Invoke the dispatcher — the documented entrypoint."""
         return self._exec(
             ["sh", str(SCRIPTS / "zamm-run.sh"), "--project-root", str(self.root), *args],
-            today, env, cwd,
+            today, env, cwd, stdin,
         )
 
-    def _exec(self, argv, today, env, cwd) -> Result:
+    def _exec(self, argv, today, env, cwd, stdin=None) -> Result:
         e = dict(os.environ)
         if today is not None:
             e["ZAMM_TODAY"] = today
@@ -264,6 +289,11 @@ class Ledger:
         cp = subprocess.run(
             argv, capture_output=True, text=True, env=e,
             cwd=str(cwd) if cwd else str(self.root),
+            # "" not None: with no stdin the generator sees a pipe at EOF and
+            # reports an empty body, which is the honest behaviour but makes
+            # every caller pass a body explicitly. Callers that want the
+            # no-stdin case pass stdin=None through run()/zamm() directly.
+            input=stdin if stdin is not None else "",
         )
         return Result(cp)
 
@@ -281,10 +311,19 @@ class Ledger:
     def scaffold(self, *args, **kw) -> Result:
         return self.zamm("scaffold", *args, **kw)
 
-    def new_memory(self, *args, **kw) -> Result:
-        # Programmatic creation wants the record on disk immediately; the
-        # draft/publish flow is the interactive default and is tested directly.
-        return self.zamm("memory", "create", "--immediate", *args, **kw)
+    def new_memory(self, *args, body=None, validate=False, **kw) -> Result:
+        """memory create — one atomic step, body on stdin.
+
+        Validation is OFF by default: most fixtures build a deliberately
+        broken ledger, where a validating create would (correctly) refuse.
+        Tests that exercise the validation gate pass validate=True.
+        """
+        a = list(args)
+        if not validate:
+            a.append("--no-validate")
+        if body is None:
+            body = "Synthetic record body for testing.\n"
+        return self.zamm("memory", "create", *a, stdin=body, **kw)
 
     def memory_publish(self, *args, **kw) -> Result:
         return self.zamm("memory", "publish", *args, **kw)
@@ -357,6 +396,32 @@ class Ledger:
 class ZammTest(unittest.TestCase):
     """Base case: a fresh synthetic project tree per test."""
 
+    def require_case_sensitive(self):
+        """Skip unless the fixture filesystem can hold two names differing
+        only by case — and refuse to skip silently.
+
+        A test that skips everywhere guards nothing, so CI sets
+        ZAMM_REQUIRE_CASE_SENSITIVE=1 on the Linux leg, which turns the skip
+        into a failure. Locally on APFS, run against a case-sensitive volume:
+
+            hdiutil create -size 300m -fs "Case-sensitive APFS" \\
+                -volname ZammCS /tmp/zammcs.dmg
+            hdiutil attach /tmp/zammcs.dmg
+            TMPDIR=/Volumes/ZammCS python3 -m unittest discover -s . -t .
+        """
+        probe = self.led.root / "CaseProbe"
+        probe.write_text("x")
+        case_sensitive = not (self.led.root / "caseprobe").exists()
+        probe.unlink()
+        if case_sensitive:
+            return
+        if os.environ.get("ZAMM_REQUIRE_CASE_SENSITIVE"):
+            self.fail(
+                "ZAMM_REQUIRE_CASE_SENSITIVE is set but TMPDIR is on a "
+                "case-insensitive filesystem, so this check cannot run"
+            )
+        self.skipTest("filesystem is case-insensitive; cannot stage the collision")
+
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -381,3 +446,93 @@ class ZammTest(unittest.TestCase):
 
     def header(self) -> str:
         return self.led.digest().splitlines()[0]
+
+
+# ---------------------------------------------------------------------
+# Shared fixtures for the behaviour suites
+#
+# These lived as duplicated module-level helpers across the old
+# test_remediation*.py files. They are inputs, not assertions, so they belong
+# with the rest of the fixture builders.
+# ---------------------------------------------------------------------
+
+RUN = str(SCRIPTS / "zamm-run.sh")
+
+HELP_PATHS = [
+    ["help"], ["--help"], ["-h"],
+    ["help", "scaffold"], ["help", "status"], ["help", "check"],
+    ["help", "memory"],
+    ["help", "memory", "digest"], ["help", "memory", "list"],
+    ["help", "memory", "show"], ["help", "memory", "check"],
+    ["help", "memory", "create"], ["help", "memory", "archive"],
+    ["help", "plan"],
+    ["help", "plan", "list"], ["help", "plan", "show"],
+    ["help", "plan", "check"], ["help", "plan", "create"],
+    ["help", "plan", "archive"],
+    ["scaffold", "--help"], ["status", "--help"], ["check", "--help"],
+    ["memory", "--help"],
+    ["memory", "digest", "--help"], ["memory", "list", "--help"],
+    ["memory", "show", "--help"], ["memory", "check", "--help"],
+    ["memory", "create", "--help"], ["memory", "archive", "--help"],
+    ["plan", "--help"],
+    ["plan", "list", "--help"], ["plan", "show", "--help"],
+    ["plan", "check", "--help"], ["plan", "create", "--help"],
+    ["plan", "archive", "--help"],
+    ["memory", "show", "-h"], ["plan", "create", "-h"],
+]
+
+
+BROKEN_RECORD = (
+    "---\ntype: memory\nscope: contracts/api\nimportance: useful\n"
+    "durability: years\ncreated: 2026-01-06\n---\nNo schema line.\n"
+)
+
+
+def review_plan(upvotes, status="Review", extra_head=""):
+    """A plan file text that passes plan check at the given status."""
+    head = f"# P\nStatus: {status}\n{extra_head}"
+    head += ("Execution-context-before: x\nComplexity-forecast: gecko\n"
+             f"Memory-upvotes: {upvotes}\nLast updated: 2026-07-19\n\n"
+             "Scope:\n* In: x\n* Out: nothing.\n\n"
+             "## Done-when\n- [x] d\n\n## Learnings\n- L.\n\n")
+    if status == "Abandoned":
+        head += "## Loose ends\n\n- Abandoned for a synthetic reason.\n\n"
+    head += ("Execution-friction-after: n\nComplexity-felt: gecko\n"
+             "Complexity-delta: as-expected\n")
+    if status == "Done":
+        head += ("Done-approved-by: fixture\nDone-approved-at: 2026-07-19\n"
+                 "Done-approval-evidence: synthetic\n")
+    return head
+
+
+ARCHIVED_MEMORY = (
+    "---\ntype: memory\nscope: internals\nimportance: useful\n"
+    "durability: months\ncreated: {date}\nschema: 3\n{extra}---\n{body}\n"
+)
+
+
+def archived_record(date, body, supersedes=""):
+    extra = f"supersedes: {supersedes}\n" if supersedes else ""
+    return ARCHIVED_MEMORY.format(date=date, extra=extra, body=body)
+
+
+class ShimTest(ZammTest):
+    def _shim_dir(self):
+        d = self.led.root / ".shims"
+        d.mkdir(exist_ok=True)
+        return d
+
+    def _write_exec(self, path, body):
+        path.write_text(body)
+        path.chmod(0o755)
+        return path
+
+    def _shim_env(self, extra=None):
+        e = {"PATH": f"{self._shim_dir()}:{os.environ['PATH']}"}
+        e.update(extra or {})
+        return e
+
+    def _draft(self, slug="fresh", body="A fresh synthetic statement.\n"):
+        draft = self.led.draft(slug, body)
+        rid = os.path.basename(draft)[: -len(".md.draft")]
+        return draft, rid
