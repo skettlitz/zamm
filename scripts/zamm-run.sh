@@ -67,6 +67,9 @@ Memory
   memory create <slug> write a record; body on stdin (or --edit)
   memory publish <slug>
                        validate a hand-written <id>.md.draft and land it
+  memory drafts        list hand-written drafts not yet published
+  memory discard <slug>
+                       show and delete an unpublished draft
   memory archive       move fully-retired chains out of the scan path
 
 Plans
@@ -92,9 +95,9 @@ Usage: zamm-run.sh memory <command> [args...]
   list [--all] [--scope <area>]
                        index of live records (default: those in the digest)
   show <slug|id>       one record in full
-  create <slug>        new record as a draft (fill it, then publish)
-  publish <slug|id>    validate a filled draft and land it in the ledger
-  drafts               list unpublished drafts with age
+  create <slug>        write a record; body on stdin (or --edit)
+  publish <slug|id>    validate a hand-written <id>.md.draft and land it
+  drafts               list hand-written drafts not yet published
   discard <slug|id>    show and delete an unpublished draft
   check                validate the ledger, write nothing
   archive [--dry-run]  move fully-retired chains out of the scan path
@@ -237,6 +240,20 @@ print_status() {
   # status is the one operational command exempt from the version gate: it
   # REPORTS a mismatch (so an unmigrated project can still be inspected) where
   # every other command refuses. Make the mismatch loud.
+  #
+  # A project with no zamm-memory/ at all is NOT a mismatch: there is nothing
+  # to migrate and scaffold is exactly the fix, so saying "migrate, and
+  # scaffold cannot help" sends a first-time user the wrong way — and
+  # contradicts the version gate every other command prints.
+  if [ ! -d "$ROOT/zamm-memory" ]; then
+    printf '          ZAMM is not installed here (no zamm-memory/ directory)\n'
+    printf '          install it: zamm-run.sh scaffold\n'
+    # Stop here. Every section below reads a tree that does not exist, and
+    # reporting a missing plan root as "structural damage" of an empty
+    # project is the same absent-vs-unreadable confusion (G3) one level up:
+    # nothing is damaged, nothing was ever installed.
+    exit 0
+  fi
   if [ "${version:-}" != "$SUPPORTED_VERSION" ]; then
     printf '          PROTOCOL MISMATCH: project is %s, toolchain speaks %s -- other commands will refuse\n' \
       "${version:-missing}" "$SUPPORTED_VERSION"
@@ -266,8 +283,10 @@ print_status() {
     # files/live/quarantined come from the compiler's own digest header (a
     # structured line it emits, not reverse-parsed prose), so they are reliable
     # with or without the sidecar.
-    printf 'Ledger    %s records, %s live, %s quarantined\n' \
-      "$(digest_field files)" "$(digest_field live)" "$(digest_field quarantined)"
+    nrec=$(digest_field files)
+    [ "$nrec" = "1" ] && recword="record" || recword="records"
+    printf 'Ledger    %s %s, %s live, %s quarantined\n' \
+      "$nrec" "$recword" "$(digest_field live)" "$(digest_field quarantined)"
     dormant=$(sed -n 's/^Dormant (.*): //p' "$DIGEST" | head -1)
     [ -n "$dormant" ] && printf '          dormant: %s\n' "$dormant"
     unlisted=$(sed -n 's/^Unlisted live (.*): //p' "$DIGEST" | head -1)
@@ -478,6 +497,12 @@ memory_list() {
 # unreadable-vs-empty rule the ledger and plan manifests follow. Runs inside
 # $(...); callers MUST check the status.
 list_drafts_checked() {
+  # Absent is data (references/invariants.md, G3): a project that has never
+  # been scaffolded has no zamm-memory/ at all, and that is not an unreadable
+  # tree. Testing the ROOT of the tree rather than knowledge/ is what keeps
+  # the guarantee intact — a zamm-memory/ that exists but cannot be entered
+  # still falls through to the checked find below and fails loudly.
+  [ -e "$ROOT/zamm-memory" ] || return 0
   # find SUCCEEDS while silently skipping a symlinked directory, so a
   # checked exit status alone still reads a hidden year directory as "no
   # drafts" — the position check has to come first.
@@ -508,6 +533,9 @@ count_recovery_files() {
 }
 
 find_recovery_files() {
+  # Absent is data (G3), same rule as list_drafts_checked: no zamm-memory/
+  # means nothing was ever written here, not a tree we failed to read.
+  [ -e "$ROOT/zamm-memory" ] || return 0
   zamm_verify_no_symlinks "$ROOT" || return 4
   find "$ROOT/zamm-memory/knowledge" -type f -name '.*.md.pending.*' || {
     echo "zamm: cannot enumerate zamm-memory/knowledge (unreadable, not empty)." >&2

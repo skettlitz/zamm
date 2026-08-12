@@ -36,9 +36,10 @@ Canonical skill name/folder is `zamm`.
    that moved to the archive on another machine stays findable after a pull.
 5. Finished plans move to the archive.
 
-Here is one record file — skeleton created by `zamm-run.sh memory create`, filled by the agent,
-immutable once committed. Everything above `## Background` is what the digest shows; the rest is
-read on demand:
+Here is one record file — composed by the agent and landed in one step by
+`zamm-run.sh memory create`, which validates it and writes nothing at all if it fails the
+contract. Immutable once written. Everything above `## Background` is what the digest shows; the
+rest is read on demand:
 
 ```markdown
 # zamm-memory/knowledge/2026/2026-07-18-awk-posix-only-7k3fq.md
@@ -58,6 +59,10 @@ Applies to scripts/ and any generated hooks.
 ## Background
 Found when gensub() failed on macOS 14 (awk 20200816). ...
 ```
+
+`importance` and `durability` are the whole ranking system, and the agent sets them when it
+writes the record (`--importance guardrail --durability years`). Rank decays over the durability
+horizon, so an honest `days` note retires itself while a `permanent` guardrail never fades.
 
 The digest entry it becomes (`!` marks a guardrail — do not violate; `+bg` flags a Background
 section worth opening before high-impact action; votes join the bracket as they accumulate):
@@ -107,8 +112,13 @@ ZAMM runs mostly agent-side. The human:
 git clone https://github.com/skettlitz/zamm.git
 ```
 
-Copy into your skills subdirectory (e.g. `.cursor/skills` or `.agents/skills`). Ensure the
+Copy into your skills subdirectory (e.g. `~/.cursor/skills` or `~/.agents/skills`). Ensure the
 subdirectory is named `zamm` and contains `SKILL.md`.
+
+Pick one location and keep it the same across a team. The scaffold records the resolved skill
+path in the rendered `AGENTS.md` (as `~/...` when it lives under your home directory, or
+`<project-root>/...` when it is vendored into the repo), and that file is committed — so
+teammates who install elsewhere will see that one line flip back and forth in git.
 
 ## Set up a project (agent, with your consent)
 
@@ -148,18 +158,31 @@ Everything runs through one entrypoint, which finds the project root itself
 (nearest ancestor holding `zamm-memory/`, else the git top level):
 
 ```
-zamm-run.sh scaffold             install/refresh ZAMM in this project
-zamm-run.sh status               health overview: ledger, plans, drift
-zamm-run.sh help [<topic>]
+scaffold             install ZAMM here, or refresh the rendered surfaces
+status               health overview: ledger, plans, drift
+check                validate everything (memory + plans)
+help [<topic>]       this text, or help for one command
 
-zamm-run.sh memory digest       rebuild the digest from the ledger
-zamm-run.sh memory check         validate the ledger, write nothing
-zamm-run.sh memory create <slug> write a record; body on stdin, or --edit
-zamm-run.sh memory publish <slug> land a hand-written <id>.md.draft
+memory digest        rebuild and print the digest
+memory list          index of live records, slug first
+memory show <slug>   one record in full
+memory check         validate the ledger
+memory create <slug> write a record; body on stdin (or --edit)
+memory publish <slug>
+                     validate a hand-written <id>.md.draft and land it
+memory drafts        list hand-written drafts not yet published
+memory discard <slug>
+                     show and delete an unpublished draft
+memory archive       move fully-retired chains out of the scan path
 
-zamm-run.sh plan list          plan directories grouped by status
-zamm-run.sh plan archive         move terminal plan directories to the archive
+plan list            active plans grouped by status
+plan show <slug>     one plan, with progress
+plan check           validate active plans
+plan create <title>  new plan directory and file
+plan archive         move terminal plans to the archive
 ```
+
+That listing is `zamm-run.sh help` verbatim; run it rather than trusting this page.
 
 Pass `--project-root <path>` to override root detection. The underlying
 scripts remain callable directly, but `zamm-run.sh` is the supported surface.
@@ -203,6 +226,6 @@ In **development and testing**; the structure is still evolving and tested on in
 - Memory record template: `<zamm-skill>/references/templates/memory-record.template.md`
 - Existing project initialization: `<zamm-skill>/references/initialization/existing-project.md`
 - Major-version migrations: `<zamm-skill>/references/migrations/`
-- Design rationale and change map vs. v2: `DELTAS.md`
+- Changelog and change map vs. v2: `DELTAS.md` (decisions as they were taken — some were later reversed; it is history, not current behaviour)
 
 (`<zamm-skill>` means your installed skill directory, for example `~/.agents/skills/zamm`.)

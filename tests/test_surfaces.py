@@ -6,6 +6,7 @@ briefly mistaken for covered because the string appeared in a docstring —
 check for the invocation, not the mention.
 """
 
+import re
 import shutil
 
 from harness import SKILL_DIR, ZammTest
@@ -157,3 +158,89 @@ class TestHelp(ZammTest):
         for script in self.SCRIPTS:
             self.led.run(script, "--help")
         self.assertEqual(before, sorted(p.name for p in self.led.root.iterdir()))
+
+
+class TestHelpCoversEveryRoutedVerb(ZammTest):
+    """Every verb the dispatcher routes must appear in the help output.
+
+    `memory drafts` and `memory discard` shipped routed-but-undocumented:
+    they reached `help memory` and never the top-level `help`, so the README
+    and SKILL.md inherited the omission. Reading the dispatch tables here —
+    the same `case` arms the dispatcher itself branches on — is what makes a
+    new verb impossible to add without documenting it.
+
+    The parse is indentation-anchored rather than brace-matched: a `case`
+    block ends at an `esac` indented exactly like its `case`, so nested
+    dispatches (the flag `case` inside `plan archive`) are skipped whole
+    instead of leaking their flags in as verbs.
+    """
+
+    # Aliases and catch-alls: routed, but not verbs a user looks up.
+    NOT_VERBS = {"*", "help", "--help", "-h"}
+
+    GROUPS = ("memory", "plan")
+
+    def setUp(self):
+        super().setUp()
+        self.lines = (SKILL_DIR / "scripts" / "zamm-run.sh").read_text().splitlines()
+
+    @staticmethod
+    def _indent(line):
+        return len(line) - len(line.lstrip())
+
+    def _arms_after(self, first_line):
+        """Case-arm labels of the block opened at `first_line`."""
+        indent = self._indent(self.lines[first_line])
+        arm = re.compile(r"^ {%d}([a-z*|_-]+)\)" % (indent + 2))
+        arms = set()
+        for line in self.lines[first_line + 1:]:
+            if line.strip() == "esac" and self._indent(line) == indent:
+                break
+            m = arm.match(line)
+            if m:
+                arms.update(m.group(1).split("|"))
+        return {a for a in arms - self.NOT_VERBS if not a.startswith("-")}
+
+    def _find(self, pattern, after=0):
+        for i in range(after, len(self.lines)):
+            if re.match(pattern, self.lines[i]):
+                return i
+        raise AssertionError(f"dispatch shape changed: no line matching {pattern!r}")
+
+    def _top_verbs(self):
+        return self._arms_after(self._find(r'^case "\$cmd" in'))
+
+    def _group_verbs(self, group):
+        at_group = self._find(r"^  %s\)" % group)
+        return self._arms_after(self._find(r'^    case "\$verb" in', after=at_group))
+
+    def test_top_level_help_lists_every_top_level_command(self):
+        top = self._top_verbs()
+        self.assertTrue(top, "parsed no top-level verbs; the dispatch shape changed")
+        help_text = self.led.zamm("help").output
+        for verb in sorted(top):
+            with self.subTest(verb=verb):
+                self.assertIn_(verb, help_text, f"top-level `{verb}` is undocumented")
+
+    def test_top_level_help_lists_every_group_verb(self):
+        """The group help is not enough: `help` is where a user starts."""
+        help_text = self.led.zamm("help").output
+        for group in self.GROUPS:
+            verbs = self._group_verbs(group)
+            self.assertTrue(verbs, f"parsed no {group} verbs; the dispatch shape changed")
+            for verb in sorted(verbs):
+                with self.subTest(group=group, verb=verb):
+                    self.assertIn_(
+                        f"{group} {verb}", help_text,
+                        f"`{group} {verb}` is routed but missing from top-level help",
+                    )
+
+    def test_group_help_lists_every_verb_of_its_group(self):
+        for group in self.GROUPS:
+            group_text = self.led.zamm(group, "--help").output
+            for verb in sorted(self._group_verbs(group)):
+                with self.subTest(group=group, verb=verb):
+                    self.assertIn_(
+                        verb, group_text,
+                        f"`{group} {verb}` is missing from `{group} --help`",
+                    )

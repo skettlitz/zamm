@@ -338,6 +338,8 @@ function read_archived_header(path, aid,   line, state, firstline, pos, key, val
         val = trim(substr(line, pos + 1))
         if      (key == "type")       atype[aid] = val
         else if (key == "supersedes") asupinert[aid] = val
+        # erases: travels with the record, so a redaction survives the move
+        else if (key == "erases")     aerases[aid] = val
       }
     }
   }
@@ -1181,6 +1183,23 @@ END {
       if (etgt != "" && etgt != id) erased[etgt] = 1
     }
   }
+  # An erasure record in the ARCHIVE tree redacts exactly as one in the live
+  # tree does. The inert rule above now refuses to move them, but a file can
+  # reach the archive by other routes: a manual tidy-up, an interrupted run,
+  # a merge landing an archived copy. Honouring it here makes the redaction
+  # independent of where the file sits, which is the same asymmetry that
+  # governs the live pass — ignoring a valid erasure record resurrects
+  # redacted material, and unlike everything else here a rerun cannot undo
+  # that exposure.
+  for (aid in archived) {
+    if (atype[aid] != "erasure") continue
+    if (aerases[aid] == "") continue
+    en = split(aerases[aid], eg, ",")
+    for (e = 1; e <= en; e++) {
+      etgt = trim(eg[e])
+      if (etgt != "" && etgt != aid) erased[etgt] = 1
+    }
+  }
 
   # Supersede edges are resolved in three passes so an invalid record can
   # never retire a valid neighbour. The old single pass mutated dead/parent/
@@ -1441,6 +1460,12 @@ END {
       g = group(id)
       if (rtype[id] == "memory" && (id in live)) keepgrp[g] = 1
       else if (rtype[id] == "votes" && !(id in dead)) keepgrp[g] = 1
+      # An erasure record is load-bearing forever: it is the only thing
+      # keeping redacted content out of the digest, and the archive tree is
+      # read for names and edges, never for erases:. Moving one therefore
+      # un-redacts what it was written to suppress. It is never inert, no
+      # matter what else its component holds.
+      else if (rtype[id] == "erasure") keepgrp[g] = 1
     }
     for (i = 1; i <= nrec; i++) {
       id = order[i]

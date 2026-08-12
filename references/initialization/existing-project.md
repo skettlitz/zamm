@@ -68,8 +68,19 @@ The top-level scope areas are fixed by the protocol — the same 8 knowledge-kin
 
 Every scope is 1-3 comma-separated tags, primary first (`<area>[/<subpath>]`, secondary tags bare). A record straddling a boundary takes both areas instead of forcing a choice (example: a CLI flag that is both an interop surface and a naming rule → `contracts/cli-flags, conventions`). A record that truly fits nowhere takes `other` alone and gets refiled later. Tag only what the record genuinely serves — extra tags cost ranking. Finer separation belongs in subpaths (`internals/archive-script`), never in invented areas.
 
-Create one ledger record per accepted candidate with
-`bash <zamm-skill>/scripts/zamm-run.sh memory create --scope '<area/subpath>[, <area2>]' --importance <i> --durability <d> <slug>`, then fill the body (digest block: headline first paragraph + optional elaboration; optional `## Background`).
+Create one ledger record per accepted candidate. Compose the body first, then pass it on stdin — the record is validated and landed in one step, and nothing is written at all if it fails the contract:
+
+```sh
+bash <zamm-skill>/scripts/zamm-run.sh memory create \
+  --scope '<area/subpath>[, <area2>]' --importance <i> --durability <d> <slug> <<'EOF'
+<headline paragraph, then optional elaboration>
+
+## Background
+<detail read on demand; omit this section when there is none>
+EOF
+```
+
+Everything above `## Background` is the digest block. Seeding is the one bulk case where per-record validation costs more than it returns: each write otherwise recompiles the whole digest. Pass `--no-validate` on the individual writes and run `bash <zamm-skill>/scripts/zamm-run.sh check` once at the end instead.
 
 Rating rubric (these two fields are the whole ranking system):
 

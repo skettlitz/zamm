@@ -416,3 +416,63 @@ class Rev7SelfFoundGaps(ShimTest):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NeverScaffoldedIsAbsentNotUnreadable(ZammTest):
+    """PRE-FIX: `status` on a project that has never seen ZAMM exited 4 with
+    a raw `find:` error, reported the empty state as a PROTOCOL MISMATCH
+    needing migration, and called the absent plan roots "structural damage".
+
+    All three are the same G3 confusion: absent is data, unreadable is an
+    error. Nothing was ever installed, so nothing is damaged and nothing is
+    unreadable — and `scaffold`, which the message said could not help, is
+    exactly the fix. This is the first command a new user runs.
+    """
+
+    def _bare_project(self):
+        """The fixture root with its whole zamm-memory/ tree removed."""
+        shutil.rmtree(self.led.root / "zamm-memory")
+        return self.led
+
+    def test_status_succeeds_and_says_how_to_install(self):
+        led = self._bare_project()
+        st = led.status()
+
+        self.assertCode(st, EXIT_OK, "a project without ZAMM is not an error")
+        self.assertIn_("not installed", st.out)
+        self.assertIn_("scaffold", st.out)
+
+    def test_status_leaks_no_enumeration_error(self):
+        led = self._bare_project()
+        st = led.status()
+
+        for noise in ("unreadable", "structural damage", "No such file", "find:"):
+            self.assertNotIn(
+                noise, st.output,
+                f"absent tree reported as {noise!r}: absent is data (G3)",
+            )
+
+    def test_status_does_not_send_the_user_to_a_migration_guide(self):
+        """The version gate every other command prints says scaffold installs
+        or upgrades; status used to say the opposite on the same state."""
+        led = self._bare_project()
+        st = led.status()
+
+        self.assertNotIn("PROTOCOL MISMATCH", st.out)
+        self.assertNotIn("migrations/", st.out)
+
+    def test_an_unreadable_memory_tree_still_fails_loudly(self):
+        """The guard must not weaken the guarantee it sits in front of: a
+        tree that EXISTS and cannot be read is still an error.
+        """
+        if os.geteuid() == 0:
+            self.skipTest("chmod bits do not deny access to root")
+        target = self.led.root / "zamm-memory/knowledge"
+        target.chmod(0o000)
+        try:
+            st = self.led.status()
+        finally:
+            target.chmod(0o755)
+
+        self.assertCode(st, EXIT_UNREADABLE, "unreadable is still an error")
+        self.assertIn_("unreadable", st.output)

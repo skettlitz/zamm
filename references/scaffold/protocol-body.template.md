@@ -98,7 +98,7 @@ Mechanics:
 - Prefer correction over accretion: supersede stale records, merge overlaps, add only genuinely new knowledge.
 - Rate `importance`/`durability` honestly — they are the whole ranking system. Refresh a still-true record near its horizon by superseding with re-rated fields.
 - Suspected-stale but unverified: supersede with a `suspected drift` record plus a verification note.
-- A write is complete when `memory create` prints the record path: it validated the record and recompiled the digest in the same step. Records are immutable once written — correct one with a new record carrying `supersedes:`, never by editing it. (Composing in two steps still works: write an `<id>.md.draft` by hand and run `bash <zamm-skill>/scripts/zamm-run.sh memory publish <id>`, which validates a private copy and links that copy in.)
+- A write is complete when `memory create` prints the record path: it validated the record and recompiled the digest in the same step. Records are immutable once written — correct one with a new record carrying `supersedes:`, never by editing it. (Composing in two steps still works: write an `<id>.md.draft` by hand and run `bash <zamm-skill>/scripts/zamm-run.sh memory publish <id>`, which validates a private copy and links that copy in. A draft is inert until published: `<id>.md.draft` is not a `*.md` file, so no compile enumerates it. `memory drafts` lists the ones still parked and `memory discard <id>` removes one.)
 
 Write a record when (compact cues; full semantics in `<zamm-skill>/references/distillation-triggers.md`):
 - the human says remember this — same turn, no damping

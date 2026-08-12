@@ -68,6 +68,7 @@ Referenced section names live in the rendered runtime files / protocol template 
 - Validate everything: `bash <zamm-skill>/scripts/zamm-run.sh check` — ledger + plans, one exit code.
 - Health overview: `bash <zamm-skill>/scripts/zamm-run.sh status` — read-only.
 - Browse the ledger: `bash <zamm-skill>/scripts/zamm-run.sh memory list [--all] [--scope <area>]` and `memory show <slug|id>`.
+- Hand-composed drafts (the two-step alternative to stdin): `memory publish <slug|id>` lands one, `memory drafts` lists those not yet published, `memory discard <slug|id>` shows and deletes one. A draft is inert: `<id>.md.draft` is not a `*.md` file, so no compile enumerates it — only `publish` reads one, as a validated overlay, before landing it.
 - Retire storage: `bash <zamm-skill>/scripts/zamm-run.sh memory archive` — moves fully-retired chains out of the scan path; verifies the digest is unchanged.
 - New plan: `bash <zamm-skill>/scripts/zamm-run.sh plan create '<title>'`; inspect one with `plan show <slug>`.
 

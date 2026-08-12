@@ -5,10 +5,14 @@ virtualenv, no install step.
 
 ```sh
 cd tests
-python3 -m unittest discover -s . -t .        # fast suite (~4s)
+python3 -m unittest discover -s . -t .        # fast suite
 ZAMM_SLOW=1 python3 -m unittest discover -s . -t .   # adds perf checks
 python3 -m unittest test_regressions -v       # one file, verbose
 ```
+
+The suite shells out to real scripts for nearly every assertion, so it is
+process-spawn bound: expect a couple of minutes for the ~390 tests on a
+laptop, and one file in a few seconds. Run one file while iterating.
 
 CI runs the full suite on ubuntu-latest and macos-latest — that matrix is
 what actually verifies the README's portability claim, since the tests shell
@@ -16,21 +20,20 @@ out to the real scripts and exercise BSD vs GNU `awk` and `stat`.
 
 ## Layout
 
-| File | Covers |
-| --- | --- |
-| `harness.py` | `Ledger` fixture builder, script runners, assertions |
-
 Tests reach the scripts through `zamm-run.sh` (`Ledger.zamm()` and the
 `compile`/`check`/`scaffold`/`new_memory`/`archive`/`status` helpers), so the
 suite exercises the documented surface. `Ledger.run()` addresses one script
 directly and exists for the few cases that need it.
 
+| File | Covers |
+| --- | --- |
+| `harness.py` | `Ledger` fixture builder, script runners, assertions |
 | `test_happy.py` | normal operation: compile, supersede, tombstone, merge, votes, scaffold, archive |
 | `test_contract.py` | record-contract validation, one case per family |
 | `test_semantics.py` | exit codes, warnings, clock determinism |
 | `test_golden.py` | whole-digest byte comparison over an authored ledger |
 | `test_budgets.py` | digest/headline caps, guardrail admission, dormant vs unlisted |
-| `test_surfaces.py` | `zamm-status.sh`, `--overwrite-templates`, `--help` |
+| `test_surfaces.py` | `zamm-status.sh`, scaffold re-render, `--help`, help-vs-dispatcher parity |
 | `test_settings.py` | chain-depth cap, `other` area + OTHER_MAX, generator flags, ledger edge paths |
 | `test_dispatcher.py` | `zamm-run.sh` routing, root resolution, `status` view |
 | `test_surface_v2.py` | memory list/show/archive, plan show/check/create, top-level check |
@@ -112,9 +115,10 @@ as expected behaviour and pass forever while guarding nothing. Point the
 suite at an older copy of the scripts to check that the locks actually fail:
 
 ```sh
-mkdir -p /tmp/old && for f in scripts/*.sh; do
-  git show <pre-fix-ref>:"$f" > "/tmp/old/$(basename "$f")"
-done
+# ZAMM_SCRIPTS_DIR replaces scripts/ wholesale, so the copy needs the same
+# shape: zamm-run.sh at the top, everything else under internal/.
+rm -rf /tmp/old && mkdir -p /tmp/old/internal
+git archive <pre-fix-ref> scripts | tar -x --strip-components=1 -C /tmp/old
 cd tests && ZAMM_SCRIPTS_DIR=/tmp/old python3 -m unittest test_regressions
 ```
 

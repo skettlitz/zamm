@@ -23,6 +23,7 @@ of it at session start.>
 <Optional deep detail: full reasoning, evidence paths, history. Only read
 on demand (+bg marker). Delete this whole section when the digest block
 carries everything. Delete the supersedes line when not replacing an older
-record. Prefer creating records via `zamm-run.sh memory create`, which
-generates the collision-safe filename and the frontmatter skeleton
-automatically.>
+record. This template is for a hand-composed
+`<id>.md.draft` landed with `zamm-run.sh memory publish`; the one-step path
+is `zamm-run.sh memory create`, which takes this body on stdin and writes
+the frontmatter and the collision-safe filename itself.>

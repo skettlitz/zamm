@@ -682,3 +682,76 @@ class ArchivalIsRerunnable(ShimTest):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestErasureRecordsAreNeverArchived(ZammTest):
+    """An erasure record is load-bearing forever, so it is never inert.
+
+    PRE-FIX the inert rule kept a component only for a live `memory` record
+    or a non-dead `votes` record. An `erasure` record is neither, so
+    `memory archive` classified it as fully retired and moved it — and the
+    compiler reads archived records for their id, type and supersedes only,
+    never their `erases:`. An archived erasure record therefore stopped
+    erasing and the redacted content came back into the digest.
+
+    The digest self-check caught the change and rolled the batch back, so
+    nothing actually resurfaced through the supported command; the damage
+    was that `memory archive` then failed forever in any project that had
+    ever redacted anything, and that a post-hoc digest diff was the only
+    thing standing between an erased secret and the digest.
+
+    invariants.md makes erasure the one carve-out where rerun-fixes-it does
+    not hold: a secret that reappears has already been exposed.
+    """
+
+    SECRET = "hunter2-staging-token"
+
+    def _ledger_with_an_erasure(self):
+        """A live record, plus a leaked record redacted by an erasure."""
+        self.led.add("live-rule", "Still true and still live.")
+        leaky = self.led.add("leaked", f"The token is {self.SECRET}.")
+        eid = self.led.erase(leaky, date="2026-01-06")
+        self.assertCode(self.led.compile(), EXIT_OK)
+        self.assertNotIn_(self.SECRET, self.led.digest())
+        return leaky, eid
+
+    def test_an_erasure_record_is_not_inert(self):
+        _, eid = self._ledger_with_an_erasure()
+
+        inert = self.led.run("zamm-compile.sh", "--list-inert").out
+        self.assertNotIn(
+            eid, inert,
+            "an erasure record must never be offered to memory archive")
+
+    def test_memory_archive_succeeds_when_an_erasure_record_exists(self):
+        """The whole command is all-or-nothing, so one erasure record used to
+        brick archival for every other retired chain in the project."""
+        self._ledger_with_an_erasure()
+        rec = self.led.add("obsolete", "Retired knowledge.", date="2026-01-07")
+        self.led.add("retire-obsolete", "No longer applies.",
+                     date="2026-01-08", type="tombstone", supersedes=rec)
+        self.assertCode(self.led.compile(), EXIT_OK)
+
+        r = self.led.memory_archive()
+
+        self.assertCode(r, EXIT_OK, "archival must not be blocked by erasure")
+        self.assertTrue(
+            self.led.exists(f"zamm-memory/archive/knowledge/2026/{rec}.md"),
+            "the genuinely retired chain must still be archived")
+
+    def test_an_archived_erasure_record_still_erases(self):
+        """Defence in depth: however the file reached the archive — a manual
+        tidy-up, an interrupted run, a merge — the redaction must hold.
+        """
+        leaky, eid = self._ledger_with_an_erasure()
+        src = self.led.root / f"zamm-memory/knowledge/2026/{eid}.md"
+        dst = self.led.root / f"zamm-memory/archive/knowledge/2026/{eid}.md"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        src.rename(dst)
+
+        self.assertCode(self.led.compile(), EXIT_OK)
+
+        self.assertNotIn_(
+            self.SECRET, self.led.digest(),
+            "an archived erasure record must keep redacting")
+        self.assertNotIn_(leaky, self.led.digest())
