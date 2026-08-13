@@ -199,6 +199,40 @@ SUPPORTED_VERSION="3"
 # own fix instead of sharing one generic line.
 SKILL_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 MIGRATION_DIR="$SKILL_ROOT/references/migrations"
+
+# The remedy for a protocol mismatch, written once because two commands
+# report this state. The gate itself points at status ("reports the state
+# without operating"), so status is where a blocked developer looks next —
+# and the two MUST NOT disagree. They did: the gate said "this project is
+# newer, update the skill" while status said "migrate via the matching
+# guide", which is the exact backwards move the newer-than-skill case
+# exists to prevent.
+# Writes to stdout; callers choose the stream and the indent.
+version_advice() {
+  _v="$1"; _pfx="$2"
+  _guide="$MIGRATION_DIR/v1-v2-to-v3-memory.md"
+  if [ -z "$_v" ]; then
+    printf '%szamm-memory/ exists but carries no VERSION file (partial install, or damage).\n' "$_pfx"
+    printf '%sWhat to do:  zamm-run.sh scaffold\n' "$_pfx"
+    printf '%s             It stamps a genuinely empty tree and refuses one holding content,\n' "$_pfx"
+    printf '%s             which tells you which of the two you have.\n' "$_pfx"
+  elif ! printf '%s' "$_v" | grep -q '^[0-9][0-9]*$'; then
+    printf '%sThat value is not a version number, so no upgrade path can be chosen for it.\n' "$_pfx"
+    printf '%sWhat to do:  inspect zamm-memory/VERSION by hand; a v3 project contains exactly %s.\n' "$_pfx" "$SUPPORTED_VERSION"
+  elif [ "$_v" -gt "$SUPPORTED_VERSION" ]; then
+    printf '%sThis project is NEWER than your ZAMM skill. Do not migrate the ledger.\n' "$_pfx"
+    printf '%sWhat to do:  update the skill itself (git pull in %s), then retry.\n' "$_pfx" "$SKILL_ROOT"
+    printf '%s             A teammate migrated and pushed; your install has not caught up.\n' "$_pfx"
+  else
+    printf '%sWhat to do:  follow the migration guide, which updates VERSION when it completes:\n' "$_pfx"
+    if [ -f "$_guide" ]; then
+      printf '%s             %s\n' "$_pfx" "$_guide"
+    else
+      printf '%s             a guide under %s\n' "$_pfx" "$MIGRATION_DIR"
+    fi
+  fi
+}
+
 require_version() {
   _vfile="$ROOT/zamm-memory/VERSION"
   _ver=""
@@ -215,34 +249,7 @@ require_version() {
   echo "zamm: project protocol version is '${_ver:-missing}', this toolchain speaks '$SUPPORTED_VERSION'." >&2
   echo "  Refusing to operate: records written under another protocol may parse under different rules." >&2
 
-  _guide="$MIGRATION_DIR/v1-v2-to-v3-memory.md"
-  if [ -z "$_ver" ]; then
-    # 2. A tree with no VERSION is an unknown state. Scaffold completes a
-    #    genuinely empty install and refuses a tree holding content, which is
-    #    the honest split — so point at it rather than guessing which it is.
-    echo "  zamm-memory/ exists but carries no VERSION file (partial install, or damage)." >&2
-    echo "  What to do:  zamm-run.sh scaffold" >&2
-    echo "               It stamps a genuinely empty tree and refuses one holding content," >&2
-    echo "               which tells you which of the two you have." >&2
-  elif ! printf '%s' "$_ver" | grep -q '^[0-9][0-9]*$'; then
-    # 3. Unparseable: no remedy can be derived from it, so do not invent one.
-    echo "  That value is not a version number, so no upgrade path can be chosen for it." >&2
-    echo "  What to do:  inspect zamm-memory/VERSION by hand; a v3 project contains exactly '3'." >&2
-  elif [ "$_ver" -gt "$SUPPORTED_VERSION" ]; then
-    # 4. The PROJECT is newer than the skill. Migrating the ledger here would
-    #    be exactly backwards, and the generic "run a migration guide" line
-    #    used to say precisely that.
-    echo "  This project is NEWER than your ZAMM skill. Do not migrate the ledger." >&2
-    echo "  What to do:  update the skill itself (git pull in $SKILL_ROOT), then retry." >&2
-  else
-    # 5. Genuinely older data: name the guide instead of the directory.
-    echo "  What to do:  follow the migration guide, which updates VERSION when it completes:" >&2
-    if [ -f "$_guide" ]; then
-      echo "               $_guide" >&2
-    else
-      echo "               a guide under $MIGRATION_DIR" >&2
-    fi
-  fi
+  version_advice "$_ver" "  " >&2
   echo "  ('zamm-run.sh status' reports the state without operating.)" >&2
   exit 5
 }
@@ -331,8 +338,7 @@ print_status() {
   if [ "${version:-}" != "$SUPPORTED_VERSION" ]; then
     printf '          PROTOCOL MISMATCH: project is %s, toolchain speaks %s -- other commands will refuse\n' \
       "${version:-missing}" "$SUPPORTED_VERSION"
-    printf '          migrate via the matching guide in <zamm-skill>/references/migrations/\n'
-    printf '          (scaffold refuses pre-v3 trees; it cannot fix a mismatch)\n'
+    version_advice "${version:-}" "          "
   fi
   # Recompute the SAME content stamp scaffold wrote, so a skill tree edited
   # since the last scaffold (git checkout included) reads STALE.

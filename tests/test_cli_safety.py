@@ -425,3 +425,48 @@ class TestVersionRefusalNamesTheRemedy(ZammTest):
         self.assertIn_("scaffold", r.err)
         self.assertNotIn("migration", r.err,
                          "nothing to migrate when nothing was installed")
+
+
+class TestStatusAndGateGiveTheSameRemedy(ZammTest):
+    """status is where a blocked developer looks next — the refusal itself
+    says so ("'zamm-run.sh status' reports the state without operating").
+    So the two must never disagree about what to do.
+
+    PRE-FIX they disagreed on the case that matters most. The team scenario:
+    developer A updates the skill, migrates the ledger, commits and pushes;
+    developer B pulls and every command refuses because the committed data is
+    now newer than B's install. The gate told B to update the skill; status
+    told B to "migrate via the matching guide" — the exact backwards move
+    that would try to migrate an already-migrated ledger with a toolchain
+    that has no guide for a version it does not know.
+    """
+
+    def _both(self, version):
+        self.led.add("rule", "A statement.")
+        self.led.compile()
+        self.led.version(version)
+        gate = self.led.zamm("memory", "digest").err
+        status = self.led.zamm("status").out
+        return gate, status
+
+    def test_newer_project_tells_both_readers_to_update_the_skill(self):
+        gate, status = self._both("4")
+        for name, text in (("gate", gate), ("status", status)):
+            with self.subTest(surface=name):
+                self.assertIn_("NEWER", text)
+                self.assertIn_("update the skill", text)
+                self.assertNotIn(
+                    "migration guide", text,
+                    f"{name} must not offer migration when the data is ahead")
+
+    def test_older_project_tells_both_readers_to_migrate(self):
+        gate, status = self._both("2")
+        for name, text in (("gate", gate), ("status", status)):
+            with self.subTest(surface=name):
+                self.assertIn_("v1-v2-to-v3-memory.md", text)
+
+    def test_unparseable_version_reads_the_same_either_way(self):
+        gate, status = self._both("beta")
+        for name, text in (("gate", gate), ("status", status)):
+            with self.subTest(surface=name):
+                self.assertIn_("not a version number", text)
