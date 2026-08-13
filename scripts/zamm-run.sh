@@ -191,17 +191,92 @@ root_or_cwd() { ROOT=$(resolve_root) || ROOT=$PWD; }
 # guide. `status` is exempt (it REPORTS the mismatch instead of refusing);
 # `scaffold` and `help` never reach here. Requires ROOT to be resolved first.
 SUPPORTED_VERSION="3"
+# Refusal, never a warning: when the toolchain speaks one protocol version and
+# the ledger was written under another, nothing downstream can be trusted to
+# parse the records under the rules they were written with. What differs per
+# case is the REMEDY, and telling someone to migrate when they should update
+# the skill (or scaffold) sends them the wrong way — so each state names its
+# own fix instead of sharing one generic line.
+SKILL_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+MIGRATION_DIR="$SKILL_ROOT/references/migrations"
 require_version() {
   _vfile="$ROOT/zamm-memory/VERSION"
   _ver=""
   [ -f "$_vfile" ] && _ver=$(sed -n '1p' "$_vfile" | tr -d '[:space:]')
-  if [ "$_ver" != "$SUPPORTED_VERSION" ]; then
-    echo "zamm: project protocol version is '${_ver:-missing}', this toolchain speaks '$SUPPORTED_VERSION'." >&2
-    echo "  Refusing to operate on a mismatched ledger: its records may parse under different rules." >&2
-    echo "  Run the matching migration guide under references/migrations/, then retry." >&2
-    echo "  ('zamm-run.sh status' reports the mismatch without operating; 'scaffold' installs or upgrades.)" >&2
+  [ "$_ver" = "$SUPPORTED_VERSION" ] && return 0
+
+  # 1. Nothing installed. Not a mismatch and not damage: scaffold is the fix.
+  if [ ! -d "$ROOT/zamm-memory" ]; then
+    echo "zamm: ZAMM is not installed here (no zamm-memory/ directory)." >&2
+    echo "  Install it:  zamm-run.sh scaffold" >&2
     exit 5
   fi
+
+  echo "zamm: project protocol version is '${_ver:-missing}', this toolchain speaks '$SUPPORTED_VERSION'." >&2
+  echo "  Refusing to operate: records written under another protocol may parse under different rules." >&2
+
+  _guide="$MIGRATION_DIR/v1-v2-to-v3-memory.md"
+  if [ -z "$_ver" ]; then
+    # 2. A tree with no VERSION is an unknown state. Scaffold completes a
+    #    genuinely empty install and refuses a tree holding content, which is
+    #    the honest split — so point at it rather than guessing which it is.
+    echo "  zamm-memory/ exists but carries no VERSION file (partial install, or damage)." >&2
+    echo "  What to do:  zamm-run.sh scaffold" >&2
+    echo "               It stamps a genuinely empty tree and refuses one holding content," >&2
+    echo "               which tells you which of the two you have." >&2
+  elif ! printf '%s' "$_ver" | grep -q '^[0-9][0-9]*$'; then
+    # 3. Unparseable: no remedy can be derived from it, so do not invent one.
+    echo "  That value is not a version number, so no upgrade path can be chosen for it." >&2
+    echo "  What to do:  inspect zamm-memory/VERSION by hand; a v3 project contains exactly '3'." >&2
+  elif [ "$_ver" -gt "$SUPPORTED_VERSION" ]; then
+    # 4. The PROJECT is newer than the skill. Migrating the ledger here would
+    #    be exactly backwards, and the generic "run a migration guide" line
+    #    used to say precisely that.
+    echo "  This project is NEWER than your ZAMM skill. Do not migrate the ledger." >&2
+    echo "  What to do:  update the skill itself (git pull in $SKILL_ROOT), then retry." >&2
+  else
+    # 5. Genuinely older data: name the guide instead of the directory.
+    echo "  What to do:  follow the migration guide, which updates VERSION when it completes:" >&2
+    if [ -f "$_guide" ]; then
+      echo "               $_guide" >&2
+    else
+      echo "               a guide under $MIGRATION_DIR" >&2
+    fi
+  fi
+  echo "  ('zamm-run.sh status' reports the state without operating.)" >&2
+  exit 5
+}
+
+# The stamp the scaffold wrote into the managed block, and the stamp the
+# installed skill hashes to right now. Both readers (status, and the drift
+# notice on digest) MUST derive these identically, which is why they live
+# here once — the same reason zamm-skill-stamp.sh exists at all.
+rendered_stamp() {
+  sed -n 's/.*SKILL-BLOCK:zamm:BEGIN version=\([^ ]*\).*/\1/p' \
+    "$ROOT/AGENTS.md" 2>/dev/null | head -1
+}
+installed_stamp() {
+  [ -f "$INTERNAL/zamm-skill-stamp.sh" ] || return 0
+  sh "$INTERNAL/zamm-skill-stamp.sh" 2>/dev/null || true
+}
+
+# Session start runs `memory digest` and nothing else, so this is the only
+# place a skill update can be noticed without the agent going looking for it.
+# It is a NOTICE, not a refusal: a moved stamp means the rendered instructions
+# are stale, not that the ledger parses differently — the protocol version is
+# what governs that, and it refuses. The stamp hashes every skill file, so a
+# comment edit moves it; refusing here would break the project on a doc-only
+# update. Goes to stderr so the digest on stdout stays clean and pipeable.
+warn_if_surfaces_stale() {
+  _rs=$(rendered_stamp)
+  [ -n "$_rs" ] || return 0
+  _is=$(installed_stamp)
+  [ -n "$_is" ] || return 0
+  [ "$_rs" != "$_is" ] || return 0
+  echo "zamm: the ZAMM skill has changed since this project was scaffolded" >&2
+  echo "  rendered surfaces: $_rs, installed skill: $_is" >&2
+  echo "  refresh them (and tell the human) before relying on the rendered protocol:" >&2
+  echo "    zamm-run.sh scaffold" >&2
 }
 
 # ---------------- built-in read-only views ----------------
@@ -233,8 +308,7 @@ print_status() {
   DIGEST="$ROOT/zamm-memory/.compiled/memory.md"
   STATE="$ROOT/zamm-memory/.compiled/state.tsv"
   version=$(sed -n '1p' "$ROOT/zamm-memory/VERSION" 2>/dev/null | tr -d '[:space:]')
-  stamp=$(sed -n 's/.*SKILL-BLOCK:zamm:BEGIN version=\([^ ]*\).*/\1/p' \
-    "$ROOT/AGENTS.md" 2>/dev/null | head -1)
+  stamp=$(rendered_stamp)
 
   printf 'ZAMM      version %s   root %s\n' "${version:-unknown}" "$ROOT"
   # status is the one operational command exempt from the version gate: it
@@ -262,10 +336,7 @@ print_status() {
   fi
   # Recompute the SAME content stamp scaffold wrote, so a skill tree edited
   # since the last scaffold (git checkout included) reads STALE.
-  current=""
-  if [ -f "$INTERNAL/zamm-skill-stamp.sh" ]; then
-    current=$(sh "$INTERNAL/zamm-skill-stamp.sh" 2>/dev/null || true)
-  fi
+  current=$(installed_stamp)
   if [ -z "$stamp" ]; then
     printf '          rendered surfaces: none found (run: zamm-run.sh scaffold)\n'
   elif [ -n "$current" ] && [ "$stamp" != "$current" ]; then
@@ -1006,6 +1077,9 @@ case "$cmd" in
         sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" "$@" >/dev/null || rc=$?
         if [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ]; then
           cat "$ROOT/zamm-memory/.compiled/memory.md"
+          # after the digest, so it is the last thing on the way out, and on
+          # stderr so it never lands inside piped digest content
+          warn_if_surfaces_stale
         fi
         exit "$rc"
         ;;

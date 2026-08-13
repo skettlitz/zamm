@@ -4,7 +4,7 @@ This project runs ZAMM v3, an append-only ledger memory for agents. Records live
 
 The `zamm` skill directory is `<zamm-skill>`; every `<zamm-skill>` token below stands for it. Commands go through one entrypoint that finds the project root itself.
 
-**Session start (MUST):** verify `zamm-memory/VERSION` reads `3` — anything else: ask before running a guide from `<zamm-skill>/references/migrations/`; never scaffold over it. Then compile and cold-read the context once per session:
+**Session start (MUST):** compile and cold-read the context once per session — no version check first, the toolchain refuses and tells you the fix if the project needs one:
 
     bash <zamm-skill>/scripts/zamm-run.sh memory digest
 

@@ -9,7 +9,7 @@ check for the invocation, not the mention.
 import re
 import shutil
 
-from harness import SKILL_DIR, ZammTest
+from harness import EXIT_OK, SKILL_DIR, ZammTest
 
 
 class TestStatusScript(ZammTest):
@@ -244,3 +244,61 @@ class TestHelpCoversEveryRoutedVerb(ZammTest):
                         verb, group_text,
                         f"`{group} {verb}` is missing from `{group} --help`",
                     )
+
+
+class TestDigestReportsSkillDrift(ZammTest):
+    """Session start runs `memory digest` and nothing else, so that is the
+    only place a skill update can be noticed without the agent going looking.
+
+    PRE-FIX only `status` reported drift, and `status` is not part of the
+    session-start ritual — so a project kept operating under rendered
+    instructions its skill had moved past, indefinitely.
+
+    A NOTICE, not a refusal: a moved stamp means the rendered protocol text
+    is stale, not that the ledger parses differently. The stamp hashes every
+    skill file, so a comment edit moves it; refusing would break every
+    project on a documentation-only update. The protocol VERSION is what
+    governs parseability, and that one refuses.
+    """
+
+    def _make_stale(self):
+        agents = self.led.root / "AGENTS.md"
+        agents.write_text(re.sub(r"version=sha:[0-9a-f]+",
+                                 "version=sha:deadbeef0000", agents.read_text()))
+
+    def test_digest_is_silent_when_surfaces_are_current(self):
+        self.led.add("rule", "A statement.")
+        self.led.scaffold()
+
+        r = self.led.zamm("memory", "digest")
+
+        self.assertCode(r, EXIT_OK)
+        self.assertNotIn("skill has changed", r.err,
+                         "no nagging when nothing drifted")
+
+    def test_digest_reports_drift_without_failing(self):
+        self.led.add("rule", "A statement.")
+        self.led.scaffold()
+        self._make_stale()
+
+        r = self.led.zamm("memory", "digest")
+
+        self.assertCode(r, EXIT_OK, "drift is a notice, never a refusal")
+        self.assertIn_("skill has changed", r.err)
+        self.assertIn_("scaffold", r.err)
+
+    def test_the_notice_never_contaminates_the_digest(self):
+        """stdout is the digest itself and gets piped and read as content;
+        the file is what the agent reads at session start."""
+        self.led.add("rule", "A statement.")
+        self.led.scaffold()
+        self._make_stale()
+
+        r = self.led.zamm("memory", "digest")
+
+        self.assertNotIn("skill has changed", r.out,
+                         "the notice must not enter piped digest content")
+        self.assertNotIn(
+            "skill has changed",
+            self.led.read("zamm-memory/.compiled/memory.md"),
+            "the notice must not enter the digest file")

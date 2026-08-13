@@ -364,3 +364,64 @@ class TestMigrationSeedConstraints(ZammTest):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestVersionRefusalNamesTheRemedy(ZammTest):
+    """The refusal is not the hard part — the advice is.
+
+    Every mismatch used to print one generic line: "Run the matching
+    migration guide under references/migrations/". For a project NEWER than
+    the toolchain that is exactly backwards (the ledger is fine; the skill
+    is behind), and for a project with no zamm-memory/ at all there is
+    nothing to migrate. An agent or human following the wrong remedy can
+    damage a ledger the refusal was there to protect.
+
+    Refusing is deliberate rather than warning: when the toolchain speaks one
+    protocol and the data was written under another, nothing downstream can
+    be trusted to parse it under the rules it was written with.
+    """
+
+    def _refusal(self, version):
+        self.led.add("rule", "A statement.")
+        if version is None:
+            (self.led.root / "zamm-memory/VERSION").unlink()
+        else:
+            self.led.version(version)
+        r = self.led.zamm("memory", "digest")
+        self.assertCode(r, EXIT_VERSION, "a version mismatch must refuse, never warn")
+        return r.err
+
+    def test_older_project_is_pointed_at_the_actual_guide(self):
+        err = self._refusal("2")
+        self.assertIn_("v1-v2-to-v3-memory.md", err,
+                       "name the guide, not the directory")
+
+    def test_newer_project_says_update_the_skill_not_migrate(self):
+        """The ledger is ahead of the toolchain: migrating it would be the
+        wrong direction, and the generic line used to advise exactly that."""
+        err = self._refusal("4")
+        self.assertIn_("NEWER", err)
+        self.assertIn_("update the skill", err)
+        self.assertNotIn("v1-v2-to-v3-memory.md", err,
+                         "must not offer a downgrade path as the remedy")
+
+    def test_unparseable_version_admits_it_has_no_upgrade_path(self):
+        err = self._refusal("beta")
+        self.assertIn_("not a version number", err)
+        self.assertNotIn("v1-v2-to-v3-memory.md", err)
+
+    def test_missing_version_over_an_existing_tree_points_at_scaffold(self):
+        err = self._refusal(None)
+        self.assertIn_("no VERSION file", err)
+        self.assertIn_("scaffold", err)
+
+    def test_no_zamm_memory_at_all_is_an_install_not_a_migration(self):
+        import shutil
+        shutil.rmtree(self.led.root / "zamm-memory")
+        r = self.led.zamm("memory", "digest")
+
+        self.assertCode(r, EXIT_VERSION)
+        self.assertIn_("not installed", r.err)
+        self.assertIn_("scaffold", r.err)
+        self.assertNotIn("migration", r.err,
+                         "nothing to migrate when nothing was installed")

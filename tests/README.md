@@ -115,11 +115,14 @@ as expected behaviour and pass forever while guarding nothing. Point the
 suite at an older copy of the scripts to check that the locks actually fail:
 
 ```sh
-# ZAMM_SCRIPTS_DIR replaces scripts/ wholesale, so the copy needs the same
-# shape: zamm-run.sh at the top, everything else under internal/.
-rm -rf /tmp/old && mkdir -p /tmp/old/internal
-git archive <pre-fix-ref> scripts | tar -x --strip-components=1 -C /tmp/old
-cd tests && ZAMM_SCRIPTS_DIR=/tmp/old python3 -m unittest test_regressions
+# Extract the WHOLE skill tree at the old ref, not just scripts/. The scripts
+# resolve their own skill directory as ../.. from themselves, so a bare
+# scripts/ copy leaves scaffold unable to find references/ — and every
+# scaffold-dependent test then dies with a FileNotFoundError that looks like
+# a falsified lock but proves nothing.
+rm -rf /tmp/old && mkdir -p /tmp/old
+git archive <pre-fix-ref> | tar -x -C /tmp/old
+cd tests && ZAMM_SCRIPTS_DIR=/tmp/old/scripts python3 -m unittest test_regressions
 ```
 
 Against the pre-hardening scripts, 15 of the 17 locks fail. The two that

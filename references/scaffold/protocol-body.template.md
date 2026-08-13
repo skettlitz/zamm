@@ -6,14 +6,7 @@ Commands are reached through one entrypoint, `zamm-run.sh`, which finds the proj
 
 ## Session Start (MUST - do this before primary task work)
 
-1. Protocol version check:
-   - Read `zamm-memory/VERSION`.
-   - Current protocol version is `3`.
-   - If the file is missing or does not contain `3`, treat the project as needing a ZAMM migration and ask whether to run the matching guide under `<zamm-skill>/references/migrations/`.
-   - Do not infer migration state from legacy filenames or record contents during routine startup; the version file is the required check.
-   - Migration work updates `zamm-memory/VERSION` only after migration is complete.
-
-2. Digest compile and cold-start read:
+1. Digest compile and cold-start read:
    - Run `bash <zamm-skill>/scripts/zamm-run.sh memory digest` (always; it is fast, deterministic, and safe to rerun).
    - On a new chat/session, read `zamm-memory/.compiled/memory.md` once.
    - The digest has two attention layers (same approximate space budget as ~100 full entries, ~2.25× coverage):
@@ -25,14 +18,14 @@ Commands are reached through one entrypoint, `zamm-run.sh`, which finds the proj
    - If the digest contains a `Needs reconciliation` section, perform reconciliation this session (see `## Reconciliation (MUST)`).
    - If the ledger contains no memory records, tell the human active memory has not been initialized and ask whether to run `<zamm-skill>/references/initialization/existing-project.md`. Do not create placeholder records to silence initialization prompts.
 
-3. Identify the active plan from the digest's `## Plans` tail — a compact entry per active plan (status line with progress, then title), ranked Review, Implementing, Draft; terminal plans still in `active/` are flagged archive-ready. A short recently-archived list follows: check it before treating a referenced plan directory as missing after a pull.
-4. If no plan matches the user request AND the request warrants a plan, create a new plan directory and `.plan.md` file using:
+2. Identify the active plan from the digest's `## Plans` tail — a compact entry per active plan (status line with progress, then title), ranked Review, Implementing, Draft; terminal plans still in `active/` are flagged archive-ready. A short recently-archived list follows: check it before treating a referenced plan directory as missing after a pull.
+3. If no plan matches the user request AND the request warrants a plan, create a new plan directory and `.plan.md` file using:
    - `<zamm-skill>/references/templates/plan.template.md`
    Then recompile the digest so its Plans tail lists the new plan.
    - Warrants a plan: multi-step work, changes that persist beyond the session, anything producing research artifacts or a decision worth revisiting, or work you expect to span sessions.
    - Does NOT warrant a plan: answering a question, reading or explaining code, a lookup, a one-line or single-file trivial edit, running a command for the human. Plan-less sessions are normal and expected — `## Session End (MUST)` covers them, and distillation still applies (a durable learning from a plan-less session is still written to the ledger).
    - The human overrides in either direction on request; when genuinely unsure, ask rather than defaulting to a plan directory nobody wanted.
-5. Soft focus rule: prefer one active implementing plan at a time; if unclear, auto-pick by best match and ask the human only when ambiguity remains.
+4. Soft focus rule: prefer one active implementing plan at a time; if unclear, auto-pick by best match and ask the human only when ambiguity remains.
 
 ## Ledger Memory Model (MUST)
 
