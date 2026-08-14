@@ -1516,6 +1516,8 @@ END {
   print "~ = contested head, also listed under Needs reconciliation)."
   print "Headlines section: up to " HEADLINE_MAX " one-line reminders that knowledge exists;"
   print "open the record (+bg) when the topic matches. Id doubles as creation date."
+  print "Session read: `memory digest` recompiles and prints this text - one run"
+  print "per session is the whole read; do not open the compiled file as well."
   print ""
 
   # Degraded: ledger integrity problems surfaced in the digest itself, so a

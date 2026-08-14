@@ -35,7 +35,7 @@ version that rendered it. When it differs from the installed skill, tell the hum
 | no `zamm-memory/`, user asked for ZAMM | run scaffold (Commands below); report the files it touched | — |
 | no `zamm-memory/`, no explicit request | do not scaffold; offer it | — |
 | a command refuses with a protocol-version error (exit 5) | do what its message says — it names the remedy per case (install, migrate, or update the skill); never scaffold over a pre-v3 tree | `references/migrations/` |
-| session start | compile digest, cold-read once; reread only after new records were written or merged. Do not pre-check the protocol version: every operational command refuses on a mismatch and prints the fix, so a check the agent performs adds nothing | `Session Start (MUST)` |
+| session start | one `memory digest` run — its stdout IS the digest, so read that and do not also open the compiled file; reread only after records were written or merged. Do not pre-check the protocol version: every operational command refuses on a mismatch and prints the fix, so a check the agent performs adds nothing | `Session Start (MUST)` |
 | digest shows `Needs reconciliation` | resolve it this session | `Reconciliation (MUST)` |
 | digest shows no live records | ask before initialization; never write placeholder records | `references/initialization/existing-project.md` |
 | a distillation cue fires: remember-this; correction/standing rule; strong emotion with substance; repeated failure or dead end; pointable research result | ledger write transaction (below) | `Distillation (MUST)`; full semantics: `references/distillation-triggers.md` |

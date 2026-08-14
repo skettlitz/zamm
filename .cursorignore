@@ -1,4 +1,4 @@
-# SKILL-BLOCK:zamm:BEGIN version=sha:8bccb657fccc date=2026-08-13
+# SKILL-BLOCK:zamm:BEGIN version=sha:a4fad1820793 date=2026-08-14
 zamm-memory/archive/**
 zamm-memory/active/plans/**/workdir/**
 # SKILL-BLOCK:zamm:END

@@ -6,14 +6,14 @@ Commands are reached through one entrypoint, `zamm-run.sh`, which finds the proj
 
 ## Session Start (MUST - do this before primary task work)
 
-1. Digest compile and cold-start read:
-   - Run `bash <zamm-skill>/scripts/zamm-run.sh memory digest` (always; it is fast, deterministic, and safe to rerun).
-   - On a new chat/session, read `zamm-memory/.compiled/memory.md` once.
+1. Digest compile and cold-start read — ONE command, whose output is the read:
+   - On a new chat/session run `bash <zamm-skill>/scripts/zamm-run.sh memory digest` once and read what it prints. It recompiles and then prints the digest, so opening `zamm-memory/.compiled/memory.md` afterwards ingests the same text a second time for nothing.
+   - The recompile is part of the read, not bookkeeping you could skip: the digest is gitignored (absent in a fresh clone or worktree), its ranking decays against today's date, and `Needs reconciliation` appears only from a compile — a file left behind by an earlier session can be missing, stale, or silent about a merge conflict. It is fast, deterministic, and safe to rerun.
    - The digest has two attention layers (same approximate space budget as ~100 full entries, ~2.25× coverage):
      - `## Digest` — up to ~75 actionable full blocks (headline + elaboration). A leading `!` marks a guardrail — do not violate it.
      - `## Headlines` — up to ~150 one-line reminders that knowledge exists on a topic; not enough to act on alone — open the record when the trigger matches.
      Pointers look like `[record-id votes +bg]`. `+bg` means the file holds a Background section; open it before high-impact action. Trailing counts cover unlisted-live (below Digests+Headlines budget) and dormant (below score floor); grep `zamm-memory/knowledge/` when digging into those.
-   - If the digest has already been read in the current chat/session and no new records were written or merged since, do not reread it.
+   - Once it has been read this chat/session, do not read it again — neither the command nor the file — unless records were written or merged since. `memory create`/`publish` recompile as part of the write, so rereading after your own write buys only the re-ranked view; a merge or pull is the case that genuinely needs it.
    - Never edit the digest; it is generated and gitignored. The ledger record files under `zamm-memory/knowledge/` are the only source of truth.
    - If the digest contains a `Needs reconciliation` section, perform reconciliation this session (see `## Reconciliation (MUST)`).
    - If the ledger contains no memory records, tell the human active memory has not been initialized and ask whether to run `<zamm-skill>/references/initialization/existing-project.md`. Do not create placeholder records to silence initialization prompts.

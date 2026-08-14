@@ -4,11 +4,11 @@ This project runs ZAMM v3, an append-only ledger memory for agents. Records live
 
 The `zamm` skill directory is `<zamm-skill>`; every `<zamm-skill>` token below stands for it. Commands go through one entrypoint that finds the project root itself.
 
-**Session start (MUST):** compile and cold-read the context once per session — no version check first, the toolchain refuses and tells you the fix if the project needs one:
+**Session start (MUST):** one command, once per session — no version check first, the toolchain refuses and tells you the fix if the project needs one:
 
     bash <zamm-skill>/scripts/zamm-run.sh memory digest
 
-Read `zamm-memory/.compiled/memory.md`. A leading `!` marks a guardrail — do not violate it. A `Needs reconciliation` section must be resolved this session (see full protocol).
+What it prints IS the digest: read that output, do not open `zamm-memory/.compiled/memory.md` as well. Rerun it only after records are written or merged. A leading `!` marks a guardrail — do not violate it. A `Needs reconciliation` section must be resolved this session (see full protocol).
 
 **Memory (ZAMM owns it):** when something is worth remembering (a correction, a standing rule, a hard-won result), write a record:
 

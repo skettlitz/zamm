@@ -5,6 +5,8 @@ Digest section: up to 75 actionable full blocks (! = guardrail, do not violate;
 ~ = contested head, also listed under Needs reconciliation).
 Headlines section: up to 150 one-line reminders that knowledge exists;
 open the record (+bg) when the topic matches. Id doubles as creation date.
+Session read: `memory digest` recompiles and prints this text - one run
+per session is the whole read; do not open the compiled file as well.
 
 ## Needs reconciliation (resolve this session)
 
@@ -74,4 +76,4 @@ Dormant (decayed below digest floor; ledger stays greppable): 1 meta
 
 (no active plans)
 
-<!-- zamm-generation: 1122320421-3272 -->
+<!-- zamm-generation: 4145036694-3414 -->
