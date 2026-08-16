@@ -1,0 +1,5 @@
+# SKILL-BLOCK:zamm:BEGIN version=sha:a4fad1820793 date=2026-08-14
+# Retired trees: keep them out of codebase search, but readable to the
+# compiler (sandbox still allows find). Do not copy these into .cursorignore.
+zamm-memory/archive/**
+# SKILL-BLOCK:zamm:END

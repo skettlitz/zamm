@@ -104,7 +104,7 @@ ZAMM runs mostly agent-side. The human:
 | `zamm-memory/.compiled/memory.md` | generated digest | no (gitignored) |
 | `AGENTS.md` managed block | rendered runtime protocol | yes |
 | `.cursor/rules/zamm.mdc` | rendered runtime protocol (Cursor) | when used |
-| `.gitignore`, `.gitattributes`, `.cursorignore` | required lines appended / created | yes |
+| `.gitignore`, `.gitattributes`, `.cursorignore`, `.cursorindexingignore` | required lines appended / created | yes |
 
 ## Install the skill (human)
 
@@ -132,7 +132,7 @@ running the initialization scan — a deliberate, human-approved pass over the e
 
 Update the `zamm` skill directory, then have the agent run
 `zamm-run.sh scaffold`: it re-renders every scaffold-managed runtime file
-(`AGENTS.md` managed block, `.cursor/rules/zamm.mdc`, `.cursorignore`) from the installed skill.
+(`AGENTS.md` managed block, `.cursor/rules/zamm.mdc`, `.cursorignore`, `.cursorindexingignore`) from the installed skill.
 Rendered runtime files carry a skill-version stamp; agents notice the drift and offer this
 refresh on their own.
 

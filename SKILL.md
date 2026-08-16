@@ -60,7 +60,7 @@ Referenced section names live in the rendered runtime files / protocol template 
 
 ## Commands
 
-- Scaffold / refresh: `bash <zamm-skill>/scripts/zamm-run.sh scaffold` — idempotent; creates the `zamm-memory/` tree, edits `.gitignore`/`.gitattributes`, writes `AGENTS.md` (managed block), `.cursor/rules/zamm.mdc`, `.cursorignore`; prints a summary and next steps. Always re-renders the managed surfaces, so it is also how you refresh after a skill update. Refuses to run over a pre-v3 memory tree.
+- Scaffold / refresh: `bash <zamm-skill>/scripts/zamm-run.sh scaffold` — idempotent; creates the `zamm-memory/` tree, edits `.gitignore`/`.gitattributes`, writes `AGENTS.md` (managed block), `.cursor/rules/zamm.mdc`, `.cursorignore`, `.cursorindexingignore`; prints a summary and next steps. Always re-renders the managed surfaces, so it is also how you refresh after a skill update. Refuses to run over a pre-v3 memory tree.
 - Compile / validate: see the transaction above.
 - Plan status buckets: `bash <zamm-skill>/scripts/zamm-run.sh plan list`
 - Archive terminal plans: `bash <zamm-skill>/scripts/zamm-run.sh plan archive` — moves terminal plan directories; refuses any plan that fails `plan check`.

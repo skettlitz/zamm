@@ -353,7 +353,19 @@ class TestScaffoldSafety(ZammTest):
 
         content = self.led.read(".cursorignore")
         self.assertIn_("node_modules/**", content)
-        self.assertIn_("zamm-memory/archive/**", content)
+        self.assertIn_("zamm-memory/active/plans/**/workdir/**", content)
+        ignore_rules = [
+            ln.strip() for ln in content.splitlines()
+            if ln.strip() and not ln.strip().startswith("#")
+        ]
+        self.assertNotIn(
+            "zamm-memory/archive/**",
+            ignore_rules,
+            "archive must not be in .cursorignore: Cursor sandbox maps it to "
+            "EPERM and memory digest fail-closes",
+        )
+        index = self.led.read(".cursorindexingignore")
+        self.assertIn_("zamm-memory/archive/**", index)
 
     def test_scaffold_is_idempotent(self):
         """Re-running must not duplicate managed blocks or ignore rules."""
@@ -366,6 +378,9 @@ class TestScaffoldSafety(ZammTest):
         self.assertEqual(agents.count("SKILL-BLOCK:zamm:END"), 1)
         self.assertEqual(
             self.led.read(".gitignore").count("zamm-memory/.compiled/"), 1
+        )
+        self.assertEqual(
+            self.led.read(".cursorindexingignore").count("zamm-memory/archive/**"), 1
         )
 
     def test_drift_stamp_is_content_derived_without_git(self):

@@ -100,8 +100,26 @@ class TestScaffoldRefresh(ZammTest):
         self.assertCode(r, 0)
         content = self.led.read(".cursorignore")
         self.assertIn_("node_modules/**", content)
-        self.assertIn_("zamm-memory/archive/**", content)
+        self.assertIn_("zamm-memory/active/plans/**/workdir/**", content)
         self.assertEqual(content.count("SKILL-BLOCK:zamm:BEGIN"), 1)
+
+    def test_cursorignore_does_not_hide_archive_from_the_compiler(self):
+        """Cursor Agent Sandbox maps .cursorignore to EPERM for find(1).
+        Archive/knowledge must stay readable so memory digest can enumerate
+        retired ids; hide it from search via .cursorindexingignore instead.
+        """
+        ignore = self.led.read(".cursorignore")
+        ignore_rules = [
+            ln.strip() for ln in ignore.splitlines()
+            if ln.strip() and not ln.strip().startswith("#")
+        ]
+        self.assertNotIn("zamm-memory/archive/**", ignore_rules)
+        self.assertIn("zamm-memory/active/plans/**/workdir/**", ignore_rules)
+        self.assertIn("zamm-memory/archive/plans/**/workdir/**", ignore_rules)
+        self.assertIn_(
+            "zamm-memory/archive/**",
+            self.led.read(".cursorindexingignore"),
+        )
 
     def test_agents_block_is_rerendered_either_way(self):
         """Documented behaviour: the AGENTS.md managed block refreshes on a

@@ -1,0 +1,3 @@
+# Retired trees: keep them out of codebase search, but readable to the
+# compiler (sandbox still allows find). Do not copy these into .cursorignore.
+zamm-memory/archive/**

@@ -402,6 +402,11 @@ ensure_line "$PROJECT_ROOT/.gitattributes" "zamm-memory/**/*.md text eol=lf"
 # Managed block, not whole-file ownership: the previous model left the user
 # choosing between "no ZAMM rules at all" (normal run kept their file
 # untouched) and "your rules deleted" (--overwrite-templates replaced it).
+#
+# Split is load-bearing: Cursor Agent Sandbox maps .cursorignore to EPERM
+# for find(1), and the compiler must enumerate archive/knowledge. Workdirs
+# stay in .cursorignore (scratch the compiler does not read). Retired trees
+# go in .cursorindexingignore (hidden from search, still readable to digest).
 if [ -f "$SCAFFOLD_DIR/cursorignore" ]; then
   upsert_managed_block_at_end \
     "$PROJECT_ROOT/.cursorignore" \
@@ -409,6 +414,14 @@ if [ -f "$SCAFFOLD_DIR/cursorignore" ]; then
     "$ZAMM_IGNORE_BEGIN_MARKER_REGEX" \
     "$ZAMM_IGNORE_END_MARKER" \
     "$(cat "$SCAFFOLD_DIR/cursorignore")"
+fi
+if [ -f "$SCAFFOLD_DIR/cursorindexingignore" ]; then
+  upsert_managed_block_at_end \
+    "$PROJECT_ROOT/.cursorindexingignore" \
+    "$ZAMM_IGNORE_BEGIN_MARKER" \
+    "$ZAMM_IGNORE_BEGIN_MARKER_REGEX" \
+    "$ZAMM_IGNORE_END_MARKER" \
+    "$(cat "$SCAFFOLD_DIR/cursorindexingignore")"
 fi
 
 # --- AGENTS.md + Cursor rule (composed from canonical fragments) ---
@@ -453,7 +466,7 @@ write_current_zamm_version
 echo ""
 echo "ZAMM scaffold complete."
 echo "Next steps (commands are safe from any cwd):"
-echo "  1. Review .cursor/rules/zamm.mdc, AGENTS.md, .cursorignore, .gitignore, .gitattributes"
+echo "  1. Review .cursor/rules/zamm.mdc, AGENTS.md, .cursorignore, .cursorindexingignore, .gitignore, .gitattributes"
 echo "  2. Compile the (empty) digest and confirm the toolchain works:"
 echo "     bash \"$SKILL_DIR/scripts/zamm-run.sh\" --project-root \"$PROJECT_ROOT\" memory digest"
 echo "  3. If the digest reports no live records, ask whether to run"

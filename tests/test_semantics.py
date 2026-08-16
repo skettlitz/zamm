@@ -140,3 +140,4 @@ class TestDeterminism(ZammTest):
         self.led.scaffold(today="2026-01-01")
         self.assertIn_("date=2026-01-01", self.led.read("AGENTS.md"))
         self.assertIn_("date=2026-01-01", self.led.read(".cursorignore"))
+        self.assertIn_("date=2026-01-01", self.led.read(".cursorindexingignore"))
