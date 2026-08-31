@@ -301,7 +301,7 @@ class TestHelpCoversEveryRoutedVerb(ZammTest):
     # Aliases and catch-alls: routed, but not verbs a user looks up.
     NOT_VERBS = {"*", "help", "--help", "-h"}
 
-    GROUPS = ("memory", "plan")
+    GROUPS = ("memory", "plan", "backlog")
 
     def setUp(self):
         super().setUp()

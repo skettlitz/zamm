@@ -8,12 +8,15 @@
 # candidate id is unsound in both directions (a diagnostic may name a
 # different record, or none at all, and an unrelated id may embed this one).
 #
-# zamm_validate_candidate <root> <internal-dir> <candidate-file> <display-dir>
+# zamm_validate_candidate <root> <internal-dir> <candidate-file> <display-dir> [tree]
 #   0  the candidate introduces no new errors (new warnings are printed)
 #   1  it introduces errors, or the check could not run; diagnostics on stderr
+# tree (default knowledge) selects which record tree the candidate is judged
+# against — a backlog candidate must diff against the backlog ledger, or its
+# supersede targets read as dangling and its policy rules never run.
 
 zamm_validate_candidate() {
-  _vroot=$1; _vint=$2; _vcand=$3; _vdisp=$4
+  _vroot=$1; _vint=$2; _vcand=$3; _vdisp=$4; _vtree=${5:-knowledge}
   _vbase=$(mktemp "${TMPDIR:-/tmp}/zamm-base.XXXXXX") || {
     echo "zamm: could not create a scratch file for validation" >&2
     return 1
@@ -24,9 +27,9 @@ zamm_validate_candidate() {
     return 1
   }
 
-  sh "$_vint/zamm-compile.sh" --project-root "$_vroot" --check >/dev/null 2>"$_vbase" || true
+  sh "$_vint/zamm-compile.sh" --project-root "$_vroot" --tree "$_vtree" --check >/dev/null 2>"$_vbase" || true
   _vrc=0
-  sh "$_vint/zamm-compile.sh" --project-root "$_vroot" --check --with-candidate "$_vcand" \
+  sh "$_vint/zamm-compile.sh" --project-root "$_vroot" --tree "$_vtree" --check --with-candidate "$_vcand" \
     >/dev/null 2>"$_vover" || _vrc=$?
 
   # rc > 1 means the check itself could not run (an unreadable tree, say), so

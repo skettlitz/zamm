@@ -102,6 +102,18 @@ Write a record when (compact cues; full semantics in `<zamm-skill>/references/di
 
 Do not write: free-floating values with nowhere to recheck; external changes that broke nothing; churn during primary work. The cues are deliberately coarse — accept near-misses rather than paying for precision every session.
 
+## Backlog (ideas; latent work)
+
+The backlog holds LATENT intentions — what might be done — as ordinary immutable records in `zamm-memory/backlog/`, compiled into a PULLED lens (`.compiled/backlog.md`), never into the session-start attention budget. It exists so an idea is neither lost in conversation nor parked as a Draft plan (a plan is committed work with obligations; an idea has none). Everything about an idea lives in its tree: votes, tombstones, erasures — no cross-tree `supersedes:` or vote edges.
+
+- Capture is one command and one sentence: `backlog add 'One sentence.'` (scope defaults to `other`; the sentence is the headline). An idea is progressive disclosure — pipe any depth on stdin, a paragraph or a whole book: plain prose lands under `## Background` (unbounded), the lens shows only the headline with `+bg`, and `backlog show <id>` opens the record.
+- Read `backlog list` BEFORE adding, and prefer correction over accretion: supersede an existing idea to sharpen or re-up it (superseding refreshes its decay clock), or vote on it (`backlog add --type votes --up <id> <slug>` — triage votes carry no `plan:`), instead of adding a near-duplicate.
+- Decay is the only triage: unmarked ideas sink to dormancy on their own (counted in the lens, listed by `backlog list --all`, always greppable). Never strike through, edit, or delete idea records; fading is the sanctioned no-ceremony "no".
+- The MARKED lane is the selected stage between latent and active: `backlog mark <id>` supersedes the idea with `marked: <date>` — it then renders in the session digest (`## Marked backlog`) and stops decaying until promoted, unmarked (`backlog unmark`, which writes the explicit `marked: no`), or tombstoned. A superseding record that omits the key INHERITS the lane; the mark date is the day first selected and survives re-ups. Keep the lane small — it is pushed into every session, and the compiler nags past its soft cap.
+- Starting the work is `backlog promote <id> ['<plan title>']`: it creates the plan (with `Origin-idea:` provenance), retires the idea with a tombstone naming the plan, and is safe to rerun after an interruption.
+- `guardrail` importance is refused in the backlog: guardrails are safety contracts of the knowledge digest, not a scheduling signal — the marked lane is how an idea earns pushed attention.
+- An idea that turned out to be a FACT is distilled as a new knowledge record plus a backlog tombstone pointing at it — never a cross-tree supersede.
+
 ## Reconciliation (MUST)
 
 - After a `git merge`/`git pull`, two branches may have independently superseded the same record. Both successors stay live (git does not conflict on added files) and the digest lists them under `Needs reconciliation` — an index; each competing head also keeps its FULL block in `## Digest`, marked `~`, so conflicting detail is never hidden.

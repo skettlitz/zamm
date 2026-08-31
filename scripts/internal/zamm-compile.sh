@@ -3,7 +3,12 @@
 # knowledge ledger. Deterministic, read-only over the ledger, safe to rerun.
 # POSIX sh + POSIX awk only: runs on stock macOS, Linux, and git-bash.
 #
-# Usage: zamm-compile.sh [--project-root <path>] [--check]
+# Usage: zamm-compile.sh [--project-root <path>] [--tree knowledge|backlog] [--check]
+#   --tree        which record tree to compile (default: knowledge). The
+#                 backlog tree compiles into the pulled lens
+#                 .compiled/backlog.md instead of the session digest, with
+#                 backlog policy (uncapped headline listing, no guardrails,
+#                 plan-less votes, marked lane) — see the lens switches below.
 #   --check       validate ledger records (naming, schema, references) and exit
 #                 non-zero on violations; writes no digest.
 #   --list-live   print "id<TAB>primary-scope<TAB>all-tags<TAB>headline" for
@@ -24,6 +29,7 @@ LIST_INERT=0
 LIST_LIVE=0
 LIST_VOTES=0
 CANDIDATE=""
+TREE="knowledge"
 while [ $# -gt 0 ]; do
   case "$1" in
     --project-root)
@@ -32,6 +38,16 @@ while [ $# -gt 0 ]; do
         exit 1
       fi
       PROJECT_ROOT=$(cd "$2" && pwd)
+      shift 2
+      ;;
+    --tree)
+      case "${2-}" in
+        knowledge|backlog) TREE="$2" ;;
+        *)
+          echo "ERROR: --tree must be knowledge or backlog" >&2
+          exit 1
+          ;;
+      esac
       shift 2
       ;;
     --check)
@@ -59,7 +75,7 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     -h|--help)
-      echo "Usage: zamm-compile.sh [--project-root <path>] [--check [--with-candidate <draft>]] [--list-live] [--list-inert] [--list-votes]"
+      echo "Usage: zamm-compile.sh [--project-root <path>] [--tree knowledge|backlog] [--check [--with-candidate <draft>]] [--list-live] [--list-inert] [--list-votes]"
       echo "  --with-candidate validates the ledger AS IF the named .md.draft were"
       echo "  published, without renaming anything into the live namespace."
       exit 0
@@ -71,9 +87,18 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-KNOWLEDGE_DIR="$PROJECT_ROOT/zamm-memory/knowledge"
+# One compiler, two trees: the knowledge tree renders the pushed session
+# digest, the backlog tree renders the pulled lens. Everything below the
+# rendering policy — enumeration, the G1-G5 discipline, parsing, validation,
+# the supersede graph, votes, decay — is deliberately shared; the tree only
+# chooses roots, output names, and the lens policy switches inside the awk.
+KNOWLEDGE_DIR="$PROJECT_ROOT/zamm-memory/$TREE"
 OUT_DIR="$PROJECT_ROOT/zamm-memory/.compiled"
-OUT_FILE="$OUT_DIR/memory.md"
+if [ "$TREE" = "backlog" ]; then
+  OUT_FILE="$OUT_DIR/backlog.md"
+else
+  OUT_FILE="$OUT_DIR/memory.md"
+fi
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 # ZAMM_PLAN_MANIFEST overrides the plan-manifest path (test-only DI seam,
 # like ZAMM_TODAY).
@@ -90,7 +115,11 @@ TODAY=${ZAMM_TODAY:-$(date +%Y-%m-%d)}
 zamm_verify_roots "$PROJECT_ROOT" || exit 4
 
 if [ ! -d "$KNOWLEDGE_DIR" ]; then
-  echo "ERROR: missing $KNOWLEDGE_DIR (run zamm-scaffold.sh first)" >&2
+  if [ "$TREE" = "backlog" ]; then
+    echo "ERROR: missing $KNOWLEDGE_DIR (backlog add creates it, or re-run zamm-scaffold.sh)" >&2
+  else
+    echo "ERROR: missing $KNOWLEDGE_DIR (run zamm-scaffold.sh first)" >&2
+  fi
   exit 1
 fi
 
@@ -153,7 +182,11 @@ MANIFEST="$TMP_FILE.manifest"
 # grepping the digest counted a contested guardrail twice (once in the Digest,
 # once under reconciliation) and mistook a record id embedded in a plan title
 # for a selected record.
-STATE_FILE="$OUT_DIR/state.tsv"
+if [ "$TREE" = "backlog" ]; then
+  STATE_FILE="$OUT_DIR/backlog-state.tsv"
+else
+  STATE_FILE="$OUT_DIR/state.tsv"
+fi
 STATE_TMP="$TMP_FILE.state"
 # Cleanup releases the lock ONLY while its pid file still names this process:
 # should the lock ever be lost to another owner, exiting must not destroy the
@@ -181,7 +214,7 @@ trap 'set +e; rm -f "$TMP_FILE" "$PLANS_TMP" "$MF_FILES" "$MF_LINKS" "$MF_ARCH" 
 # whose exit status is checked; any failure leaves the previous digest
 # untouched and exits 4 (unreadable, not empty — distinct from the exit-3
 # "readable but nothing survived" case).
-ARCHIVE_KNOWLEDGE="$PROJECT_ROOT/zamm-memory/archive/knowledge"
+ARCHIVE_KNOWLEDGE="$PROJECT_ROOT/zamm-memory/archive/$TREE"
 enum_ok=1
 find "$KNOWLEDGE_DIR" -type f -name '*.md' > "$MF_FILES" || enum_ok=0
 # Symlinks are invisible to `-type f`, so a symlink under either tree would
@@ -190,8 +223,8 @@ find "$KNOWLEDGE_DIR" -type f -name '*.md' > "$MF_FILES" || enum_ok=0
 # ledger holds real files only, no symlinks (they invite loops and path
 # escapes and hide records from --check).
 find "$KNOWLEDGE_DIR" -type l > "$MF_LINKS" || enum_ok=0
-if [ -d "$PROJECT_ROOT/zamm-memory/archive/knowledge" ]; then
-  find "$PROJECT_ROOT/zamm-memory/archive/knowledge" -type l >> "$MF_LINKS" || enum_ok=0
+if [ -d "$ARCHIVE_KNOWLEDGE" ]; then
+  find "$ARCHIVE_KNOWLEDGE" -type l >> "$MF_LINKS" || enum_ok=0
 fi
 # shun.md was the pre-erasure-record redaction list. Silently ignoring one
 # left behind would resurrect exactly the content it was written to suppress,
@@ -203,7 +236,7 @@ fi
 # This runs BEFORE the general symlink refusal below: a shun.md symlink is a
 # symlink, but the migration instructions are the more useful diagnostic.
 if [ -e "$KNOWLEDGE_DIR/shun.md" ] || [ -L "$KNOWLEDGE_DIR/shun.md" ]; then
-  echo "ERROR: zamm-memory/knowledge/shun.md exists; this toolchain redacts through erasure RECORDS." >&2
+  echo "ERROR: zamm-memory/$TREE/shun.md exists; this toolchain redacts through erasure RECORDS." >&2
   echo "       Refusing to compile: ignoring it would resurrect the content it suppresses." >&2
   echo "       Migrate: for each id listed there, create a record with" >&2
   echo "         type: erasure, erases: <id>, and the reason in the body" >&2
@@ -244,7 +277,7 @@ fi
 
 set +e
 awk \
-  -v today="$TODAY" -v check="$CHECK" -v listinert="$LIST_INERT" -v listlive="$LIST_LIVE" -v listvotes="$LIST_VOTES" -v root="$PROJECT_ROOT/" -v statefile="$STATE_TMP" '
+  -v today="$TODAY" -v check="$CHECK" -v listinert="$LIST_INERT" -v listlive="$LIST_LIVE" -v listvotes="$LIST_VOTES" -v root="$PROJECT_ROOT/" -v statefile="$STATE_TMP" -v lens="$TREE" '
 BEGIN {
   DIGEST_MAX = 75       # full digest blocks (actionable: headline + elaboration)
   HEADLINE_MAX = 150    # headline-only reminders (topic exists; open if relevant)
@@ -269,11 +302,22 @@ BEGIN {
   SEED_MAX = 10000      # ceiling on a migration vote seed: enough to carry
                         # real pre-migration popularity, low enough that a
                         # forged seed cannot pin a record atop the ranking
+  HOT = 0.5             # backlog lens only: score at or above this reads as a
+                        # hot idea (a fresh useful-rated idea within roughly
+                        # one half-life, or anything recently voted up)
+  MARKED_MAX = 7        # backlog lens only: soft cap on the marked lane. A
+                        # marked idea is pushed into every session digest and
+                        # never decays, so inflation must nag — warn, do not
+                        # fail, the guardrail-cap rationale. Deliberately
+                        # tighter than GUARDRAIL_MAX.
 
   VALID_AREAS = " domain contracts conventions internals quality tooling ops meta "
   # every key the compiler acts on; anything else is a typo until proven
-  # otherwise (x- prefix reserved for deliberate extensions)
-  KNOWN_KEYS = " type scope supersedes erases created schema plan up down importance durability seed-up seed-dn migrated-from "
+  # otherwise (x- prefix reserved for deliberate extensions). `marked` is
+  # meaningful only in the backlog tree, but it belongs in this list for BOTH
+  # trees: its knowledge-side rejection below is a policy error naming the
+  # remedy, not an unknown-key typo warning.
+  KNOWN_KEYS = " type scope supersedes erases created schema plan up down importance durability seed-up seed-dn migrated-from marked "
   nrec = 0; nerr = 0; nsort = 0; nother = 0
   nfiles = 0; nbad = 0; ndup = 0; nwarn = 0
 }
@@ -446,6 +490,7 @@ function read_record(path, base,   id, line, state, firstline, fmclosed, pos, ke
         else if (key == "seed-up")    rseedup[id] = val
         else if (key == "seed-dn")    rseeddn[id] = val
         else if (key == "migrated-from") rmigfrom[id] = val
+        else if (key == "marked")     { rmarked[id] = val; hasmark[id] = 1 }
         # unknown keys are ignored on purpose
       }
       continue
@@ -505,6 +550,13 @@ function read_record(path, base,   id, line, state, firstline, fmclosed, pos, ke
     }
     if (rimp[id] == "") rerr(id, path ": memory record missing importance: (the ranking depends on it)")
     if (rdur[id] == "") rerr(id, path ": memory record missing durability: (the ranking depends on it)")
+    # Backlog policy: no guardrails. A guardrail rating has exactly one
+    # power — unbudgeted admission into the pushed digest — and the backlog
+    # is a pulled lens, so the rating would be a lie that old habits might
+    # later honor. The marked lane is the sanctioned way an idea reaches the
+    # session digest.
+    if (lens == "backlog" && rimp[id] == "guardrail")
+      rerr(id, path ": guardrail importance is not allowed in the backlog (mark the idea instead: backlog mark)")
     if (rbody[id] !~ /[^ \t\n]/) rerr(id, path ": memory record has empty body")
     else if (headline(id) == "")
       rerr(id, path ": missing headline (body starts with a heading)")
@@ -545,7 +597,14 @@ function read_record(path, base,   id, line, state, firstline, fmclosed, pos, ke
     }
   }
   if (rtype[id] == "votes") {
-    if (rplan[id] == "") rerr(id, path ": votes record missing plan:")
+    # plan: is a per-tree policy. Knowledge votes come from plan close-outs,
+    # so a plan-less votes record there is an orphan minting rank for nothing.
+    # Backlog votes are TRIAGE — they rate ideas, no plan exists — so the
+    # same key is refused there; the relaxation must not leak either way.
+    if (lens == "backlog") {
+      if (rplan[id] != "") rerr(id, path ": backlog votes are triage votes and carry no plan: (remove the key)")
+    }
+    else if (rplan[id] == "") rerr(id, path ": votes record missing plan:")
     # plan: is consumed downstream as a plan DIRECTORY slug (the cross-check
     # resolves it under active/plans and archive/plans), so it must be a bare
     # slug — never a path. "plan: .." or "plan: ../../knowledge" would resolve
@@ -564,6 +623,19 @@ function read_record(path, base,   id, line, state, firstline, fmclosed, pos, ke
     rerr(id, path ": unknown importance \"" rimp[id] "\" (guardrail|useful|minor)")
   if (rdur[id] != "" && rdur[id] !~ /^(days|weeks|months|years|permanent)$/)
     rerr(id, path ": unknown durability \"" rdur[id] "\" (days|weeks|months|years|permanent)")
+  # marked: is the backlog selection lane — a date (the day first marked) or
+  # the explicit deselection `no`. It has no meaning on knowledge records or
+  # on non-memory types, and an unparseable value must not silently read as
+  # unmarked (that would drop an idea out of the pushed lane, the exact
+  # silent-loss the lane exists to prevent).
+  if (id in hasmark) {
+    if (lens != "backlog")
+      rerr(id, path ": marked: is a backlog key; a knowledge record cannot sit in the marked lane")
+    else if (rtype[id] != "memory")
+      rerr(id, path ": marked: is only meaningful on a memory record (this is a " rtype[id] ")")
+    else if (rmarked[id] != "no" && !validdate(rmarked[id]))
+      rerr(id, path ": marked: must be a real YYYY-MM-DD date or \"no\" (got \"" rmarked[id] "\")")
+  }
   # seed-up/seed-dn carry pre-migration vote counts and feed the ranking
   # directly; they are meaningful ONLY on a migration record. Requiring
   # migrated-from: closes a hand-authored forge (a record with seed-up: 50 but
@@ -611,9 +683,30 @@ function emit_state(   i, id) {
   printf "other\t%d\n", nother > statefile
   printf "dormant\t%d\n", ndorm > statefile
   printf "unlisted\t%d\n", nunlist > statefile
+  if (lens == "backlog") {
+    printf "hot\t%d\n", nhot > statefile
+    printf "marked\t%d\n", nmarked > statefile
+    # single authority for the cap: the digest compile prints its section
+    # nag from this row instead of re-owning the MARKED_MAX constant
+    if (nmarked > MARKED_MAX) printf "marked_over\t%d\n", nmarked > statefile
+  }
   for (i = 1; i <= nrec; i++) {
     id = order[i]
     if (id in printed) print "select\t" id > statefile
+  }
+  # The marked rows feed the digest compile, which renders the ## Marked
+  # backlog section from this sidecar. mark-date first so a plain sort
+  # yields oldest-first; the headline is TAB-sanitized because record
+  # content must never smuggle a column separator into a TSV surface (the
+  # norm_list rule).
+  if (lens == "backlog") {
+    for (i = 1; i <= nrec; i++) {
+      id = order[i]
+      if (!(id in markedof)) continue
+      mh = headline(id)
+      gsub(/\t/, " ", mh)
+      printf "mselect\t%s\t%s\t%s\n", markedof[id], id, mh > statefile
+    }
   }
   close(statefile)
 }
@@ -1035,6 +1128,36 @@ function chainagg(id, which,   q, qh, qt, cur, m, tg, t, tgt, tot) {
   return tot
 }
 
+# Effective marked state of a backlog head: the NEWEST marking decision in
+# the applied ancestor chain wins. The marked: key on the head itself
+# outranks everything; otherwise the marked:-bearing ancestor with the
+# greatest id decides (ids lead with the creation date, and lexical order is
+# the same tiebreak the ranking uses). Returns the marked date, or "" when the decision
+# is "no" or no decision exists — so a superseding record that OMITS the key
+# inherits the lane, and only an explicit `marked: no` (unmark) or a
+# tombstone (which kills the head entirely) leaves it. Walks asup[] only,
+# like the vote aggregation, so a quarantined ancestor cannot decide the lane.
+function effmark(id,   q, qh, qt, cur, m, tg, t, tgt, best) {
+  if (id in hasmark) return (rmarked[id] == "no") ? "" : rmarked[id]
+  mkepoch++
+  best = ""; qh = 1; qt = 1; q[1] = id
+  while (qh <= qt) {
+    cur = q[qh++]
+    if (mkseen[cur] == mkepoch) continue
+    mkseen[cur] = mkepoch
+    if (cur != id && (cur in hasmark) && cur > best) best = cur
+    if (asup[cur] != "") {
+      m = split(asup[cur], tg, ",")
+      for (t = 1; t <= m; t++) {
+        tgt = trim(tg[t])
+        if (tgt != "") q[++qt] = tgt
+      }
+    }
+  }
+  if (best == "") return ""
+  return (rmarked[best] == "no") ? "" : rmarked[best]
+}
+
 # ranking: score desc, then id desc (newer/later name wins ties) — deterministic
 # total order: score desc, then id desc (newer/later name wins ties).
 # <0 = a ranks before b, >0 = after, 0 = same record.
@@ -1392,12 +1515,26 @@ END {
     r = group(id)
     livecnt[r]++
     sc[id] = ibase(rimp[id]) * decayw(id) + chainagg(id, 3) + 0.4 * chaindepth(id)
-    if (sc[id] < FLOOR && rimp[id] != "guardrail") dormant[id] = 1
+    if (lens == "backlog") {
+      # Marked ideas are the selected lane: exempt from dormancy the way
+      # guardrails are in the knowledge tree — a selected item never fades
+      # silently; it leaves by promote, unmark, or tombstone.
+      em = effmark(id)
+      if (em != "") { markedof[id] = em; nmarked++ }
+      if (sc[id] >= HOT) nhot++
+      if (sc[id] < FLOOR && !(id in markedof)) dormant[id] = 1
+    } else if (sc[id] < FLOOR && rimp[id] != "guardrail") dormant[id] = 1
     add_sorted(id)
   }
   heapsort(nsort)
-  if (nother > OTHER_MAX)
+  # OTHER_MAX is knowledge policy: the cap exists to force refiling of
+  # knowledge into real areas. Backlog capture legitimately defaults to
+  # other, and because candidate validation is an error-line diff, keeping
+  # the cap here would make the sixth context-free backlog add refuse.
+  if (lens != "backlog" && nother > OTHER_MAX)
     err("other holds " nother " live records (max " OTHER_MAX "); refile each via supersession into a real area")
+  if (lens == "backlog" && nmarked > MARKED_MAX)
+    warn(nmarked " marked ideas (soft max " MARKED_MAX "). The marked lane is pushed into every session digest and never decays — promote what is starting, unmark what is not.")
   # a warning, not an error: guardrails are a judgement call and blocking the
   # compile over one would be worse than the inflation it guards against
   if (nguard > GUARDRAIL_MAX)
@@ -1489,6 +1626,97 @@ END {
     err("0 live records but " nquar " quarantined: refusing to publish (ledger is unreadable, not empty)")
     close("cat 1>&2")
     exit 3
+  }
+
+  # ---- backlog lens rendering ----
+  # The pulled counterpart of the digest below: UNCAPPED — every live,
+  # non-dormant idea is listed as a headline, because this file is read by
+  # someone who chose triage mode and a triage read wants the whole live
+  # list. The dormant tail collapses to counts (decay is the only cap), and
+  # the marked lane renders first, oldest commitment on top.
+  if (lens == "backlog") {
+    printf "# ZAMM Backlog (%s: files=%d parsed=%d live=%d hot=%d marked=%d quarantined=%d; generated file - do not edit)\n", today, nfiles, nrec - nbad, nlive, nhot, nmarked, nquar
+    print ""
+    if (nlive == 0) {
+      print "(no ideas in the backlog)"
+      if (ndangling > 0 || ndupvote > 0 || nbadvoteref > 0) {
+        print ""
+        emit_degraded()
+      }
+      emit_state()
+      close("cat 1>&2")
+      exit ((ndangling > 0 || ndupvote > 0 || nbadvoteref > 0) ? 2 : 0)
+    }
+    print "Entry format: - headline [record-id votes +bg]; ~ = variants (parallel forks)."
+    print "Hot-to-cold within each area; hot = recently added or voted up. Read the"
+    print "record (+bg) before working an idea; supersede or vote instead of duplicating."
+    print ""
+    emit_degraded()
+    if (nmarked > 0) {
+      print "## Marked (selected for implementation - promote when work starts)"
+      print ""
+      # oldest mark first: the longest-standing commitment is what a reader
+      # should confront first. Selection sort over the small marked set —
+      # bounded by MARKED_MAX in any healthy ledger.
+      nmk = 0
+      for (i = 1; i <= nsort; i++)
+        if (sorted[i] in markedof) mklist[++nmk] = sorted[i]
+      for (i = 1; i <= nmk; i++) {
+        best = i
+        for (j = i + 1; j <= nmk; j++) {
+          if (markedof[mklist[j]] < markedof[mklist[best]] ||
+              (markedof[mklist[j]] == markedof[mklist[best]] && mklist[j] < mklist[best]))
+            best = j
+        }
+        tmpm = mklist[i]; mklist[i] = mklist[best]; mklist[best] = tmpm
+        id = mklist[i]
+        print "- " headline(id) " " pointer(id) " (marked " markedof[id] ")"
+        printed[id] = 1
+      }
+      if (nmarked > MARKED_MAX)
+        print "(" nmarked " marked exceeds the soft cap " MARKED_MAX " - promote or unmark)"
+      print ""
+    }
+    # areas, ordered by their hottest member; entries hot-to-cold
+    hdr = 0
+    for (i = 1; i <= nsort; i++) {
+      id = sorted[i]
+      if ((id in printed) || (id in dormant)) continue
+      a = area(id)
+      if (a in areadone) continue
+      areadone[a] = 1
+      if (!hdr) { print "## Ideas (hot to cold)"; hdr = 1 }
+      print ""
+      print "### " ((a == "") ? "(no scope)" : a)
+      for (j = i; j <= nsort; j++) {
+        jd = sorted[j]
+        if ((jd in printed) || (jd in dormant)) continue
+        if (area(jd) != a) continue
+        # the scope prefix only earns its ink when it adds a subpath the
+        # section heading does not already say
+        emitline(jd, (pscope[jd] != a) ? 1 : 0)
+      }
+    }
+    nunlist = 0
+    ndorm = 0; nda = 0
+    for (i = 1; i <= nsort; i++) {
+      id = sorted[i]
+      if ((id in printed) || !(id in dormant)) continue
+      a = area(id)
+      if (!(a in dcount)) dareas[++nda] = a
+      dcount[a]++
+      ndorm++
+    }
+    if (ndorm > 0) {
+      s = ""
+      for (i = 1; i <= nda; i++)
+        s = s ((i > 1) ? ", " : "") dcount[dareas[i]] " " dareas[i]
+      print ""
+      print "Dormant (cooled below the floor; re-up by superseding or voting, or see backlog list --all): " s
+    }
+    emit_state()
+    close("cat 1>&2")
+    exit ((nquar > 0 || ndangling > 0 || ndupvote > 0 || nbadvoteref > 0) ? 2 : 0)
   }
 
   printf "# ZAMM Memory Digest (%s: files=%d parsed=%d live=%d quarantined=%d; generated file - do not edit)\n", today, nfiles, nrec - nbad, nlive, nquar
@@ -1817,12 +2045,81 @@ EOF
   rm -f "$pmf"
 }
 
+# ---- Backlog summary: one pushed line (plus the small marked lane) is the
+#      knowledge digest's ENTIRE standing exposure to the backlog. The
+#      backlog tree compiles through a full recursive pass of this same
+#      script, so the counts come from the same validation and graph the
+#      lens itself publishes — never from a shortcut re-parse. Absent tree:
+#      no line at all (absence is data; the feature is simply unused).
+append_backlog_summary() {
+  [ -d "$PROJECT_ROOT/zamm-memory/backlog" ] || return 0
+  brc=0
+  sh "$0" --project-root "$PROJECT_ROOT" --tree backlog >/dev/null || brc=$?
+  # 2 = degraded lens, 3 = nothing live survived: both published-or-refused
+  # states the operator must hear about, but neither may hide the knowledge
+  # digest — the line carries the degradation and the overall exit becomes 2.
+  # Anything else non-zero is an unreadable backlog tree (G3): the digest
+  # compile fails whole, previous digest untouched.
+  if [ "$brc" -eq 2 ] || [ "$brc" -eq 3 ]; then
+    {
+      echo ""
+      echo "Backlog: DEGRADED - run: zamm-run.sh backlog check"
+    } >> "$TMP_FILE"
+    BACKLOG_DEGRADED=1
+    return 0
+  fi
+  if [ "$brc" -ne 0 ]; then
+    echo "ERROR: the backlog tree did not compile (rc=$brc); previous digest left untouched." >&2
+    exit 4
+  fi
+  bstate="$OUT_DIR/backlog-state.tsv"
+  if [ ! -f "$bstate" ]; then
+    echo "ERROR: the backlog pass reported success but left no backlog-state.tsv; previous digest left untouched." >&2
+    exit 4
+  fi
+  tab=$(printf '\t')
+  blive=$(awk -F"$tab" '$1 == "live"   { print $2; exit }' "$bstate")
+  bhot=$(awk  -F"$tab" '$1 == "hot"    { print $2; exit }' "$bstate")
+  bmark=$(awk -F"$tab" '$1 == "marked" { print $2; exit }' "$bstate")
+  {
+    # The marked lane renders BEFORE the one-liner: it is the only backlog
+    # content that earned a pushed seat, and it nags oldest-first until
+    # someone promotes or unmarks. Zero marked = no section and no ", 0
+    # marked" noise on the line.
+    if [ "${bmark:-0}" -gt 0 ]; then
+      echo ""
+      echo "## Marked backlog (implement or unmark)"
+      echo ""
+      grep "^mselect${tab}" "$bstate" | sort -t "$tab" -k2,2 -k3,3 |
+        while IFS="$tab" read -r _ mdate mid mhl; do
+          echo "- $mhl [$mid] (marked $mdate)"
+        done
+      if grep -q "^marked_over${tab}" "$bstate"; then
+        echo "(over the soft cap - promote what is starting, unmark what is not)"
+      fi
+    fi
+    echo ""
+    if [ "${bmark:-0}" -gt 0 ]; then
+      echo "Backlog: ${blive:-0} live (${bhot:-0} hot, ${bmark} marked) - zamm-run.sh backlog list"
+    else
+      echo "Backlog: ${blive:-0} live (${bhot:-0} hot) - zamm-run.sh backlog list"
+    fi
+  } >> "$TMP_FILE"
+}
+
 if [ "$CHECK" -eq 1 ]; then
+  # name the tree in the verdict: `check` runs this once per record tree,
+  # and two identical pass lines would leave the reader guessing which is which
+  if [ "$TREE" = "backlog" ]; then
+    checkname="ZAMM backlog check"
+  else
+    checkname="ZAMM check"
+  fi
   if [ "$rc" -ne 0 ]; then
-    echo "ZAMM check failed." >&2
+    echo "$checkname failed." >&2
     exit "$rc"
   fi
-  echo "ZAMM check passed."
+  echo "$checkname passed."
 elif [ "$LIST_INERT" -eq 1 ] || [ "$LIST_LIVE" -eq 1 ] || [ "$LIST_VOTES" -eq 1 ]; then
   # read-only: the awk wrote the list rows to the private temp file, so
   # emit them and publish nothing. Exit 2 (a degraded but valid ledger) is not
@@ -1855,7 +2152,10 @@ else
     echo "ERROR: digest compilation failed; previous digest left untouched." >&2
     exit "$rc"
   fi
-  append_plans_section
+  if [ "$TREE" = "knowledge" ]; then
+    append_plans_section
+    append_backlog_summary
+  fi
   # The digest and the sidecar are two separate renames that cannot be one
   # atomic step, and rename ORDER alone only chooses which mismatched pairing
   # survives a crash between them. So the pair carries a shared generation
@@ -1871,10 +2171,23 @@ else
     mv "$STATE_TMP" "$STATE_FILE"
   fi
   mv "$TMP_FILE" "$OUT_FILE"
-  if [ "$rc" -eq 2 ]; then
-    echo "ZAMM digest: $OUT_FILE (degraded - see ## Degraded)"
+  # A degraded backlog pass degrades the DIGEST run too: exit 2 must always
+  # pair with a visible degradation notice in the published output, and the
+  # published digest carries the "Backlog: DEGRADED" line.
+  degnote="degraded - see ## Degraded"
+  if [ "$rc" -eq 0 ] && [ "${BACKLOG_DEGRADED:-0}" -eq 1 ]; then
+    rc=2
+    degnote="degraded backlog - see the Backlog line"
+  fi
+  if [ "$TREE" = "backlog" ]; then
+    outname="ZAMM backlog lens"
   else
-    echo "ZAMM digest: $OUT_FILE"
+    outname="ZAMM digest"
+  fi
+  if [ "$rc" -eq 2 ]; then
+    echo "$outname: $OUT_FILE ($degnote)"
+  else
+    echo "$outname: $OUT_FILE"
   fi
   exit "$rc"
 fi

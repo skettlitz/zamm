@@ -777,3 +777,56 @@ gitignore-syntax file told the user to write a marker the script can never
 match; and the v1/v2→v3 migration guide no longer claims
 `archive/knowledge/` is unread by the compiler — the claim that produced this
 whole class of bug. 426 tests green.
+
+## Locked 2026-08-31 (the backlog: ideas as a third tree)
+
+ZAMM had boxes for facts (knowledge records, pushed under a strict
+attention budget) and active intentions (plans, pushed unbounded with full
+lifecycle ceremony), and nothing for latent intentions — so wishes got
+parked as Draft plans, billing every session start and carrying obligations
+they could not honor. The backlog is the third box: ordinary immutable
+schema-3 records in `zamm-memory/backlog/<YYYY>/`, compiled by the same
+compiler behind a `--tree` flag into an UNCAPPED pulled lens
+(`.compiled/backlog.md`, printed by `backlog list`) instead of the digest.
+Everything below rendering policy is shared — enumeration, the G1-G5
+discipline, validation, the supersede graph, votes, decay, dormancy — and
+everything about an idea lives in its tree (votes, tombstones, erasures; no
+cross-tree edges), which is also what keeps the change invisible to older
+v3 toolchains: every walker enumerates named trees only, so no VERSION
+bump and no migration.
+
+Per-tree policy, locked in both directions: `importance: guardrail` is an
+error in the backlog (its one power is digest admission; the marked lane is
+how an idea earns pushed attention) while knowledge keeps guardrails;
+backlog votes are plan-less triage votes while knowledge votes still
+require `plan:`; OTHER_MAX does not apply in the backlog (capture defaults
+to `other`, and because candidate validation is an error-line diff the cap
+would have made the sixth context-free add refuse outright) while knowledge
+keeps the cap.
+
+Capture is the cheapest write in the toolchain: `backlog add 'One
+sentence.'` is complete — slug derived, scope defaulted, the sentence is
+the headline. An idea is progressive disclosure: piped stdin of any size (a
+paragraph or a book) parks under `## Background` unless it carries its own
+headings, the lens shows headlines only (`+bg` flags depth), `backlog show`
+opens the record. The tree is created on demand; a treeless project lists
+and checks as cleanly empty (absence is data).
+
+The marked lane is the selected stage between latent and active:
+`marked: <date>` on the head (via `backlog mark`/`unmark`, which supersede
+with the key toggled) renders the idea in the session digest, exempts it
+from dormancy, and nags past a soft cap of 7. The effective state is the
+NEWEST marking decision in the applied chain, so a plain re-up inherits the
+lane and its original date, and only the explicit `marked: no`, a promote,
+or a tombstone leaves it. The digest carries exactly one `Backlog: N live
+(M hot[, K marked])` line — `, 0 marked` never renders — and a degraded
+backlog pass degrades the digest visibly (`Backlog: DEGRADED`, exit 2)
+while an unreadable backlog tree fails it closed (exit 4, previous digest
+untouched).
+
+`backlog promote <id>` renders `Origin-idea:` into the plan file BEFORE the
+publish rename, which is what makes an interrupted promote decidable on
+retry: a same-slug plan with the matching origin is this promote's partial
+result (the rerun finishes the tombstone), one without it refuses — the
+create-then-stamp ordering an external re-review caught as a guarantee-2
+violation before a line was written. 469 tests green.

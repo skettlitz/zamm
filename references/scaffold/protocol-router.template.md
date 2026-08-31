@@ -20,6 +20,8 @@ One step: it validates the record and recompiles the digest, and writes nothing 
 
 **Plans (ZAMM owns them):** durable work runs in plan directories — `plan create '<title>'`, `plan list`, `plan check`, `plan archive` (same entrypoint). Status flow: Draft -> Implementing -> Review -> Done/Abandoned; close-out needs learnings, telemetry and a votes record (see full protocol).
 
+**Backlog (ideas; latent work):** an idea worth keeping but not starting goes into the backlog, never into a Draft plan — `backlog add 'One sentence.'` is a complete capture (pipe any depth on stdin; it lands under `## Background`). Read `backlog list` BEFORE adding and supersede or vote instead of duplicating. Ideas decay to dormancy on their own; `backlog mark <id>` selects one for implementation (it enters the digest and stops decaying), `backlog promote <id>` turns it into a plan. The digest's one `Backlog:` line is the whole session-start exposure.
+
 **Health:** `status` for an overview; `check` validates memory and plans.
 
 **Load the full protocol from `<zamm-skill>/references/scaffold/protocol-body.template.md` BEFORE:** initializing an empty ledger, reconciliation, plan transitions or close-out, record schema questions, erasure of secrets, or anything the router does not answer. The router is a map, not the manual.

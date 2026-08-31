@@ -464,6 +464,7 @@ write_current_zamm_version() {
 
 # --- Ledger + plan roots ---
 ensure_dir "$PROJECT_ROOT/zamm-memory/knowledge"
+ensure_dir "$PROJECT_ROOT/zamm-memory/backlog"
 ensure_dir "$PROJECT_ROOT/zamm-memory/active/plans"
 ensure_dir "$PROJECT_ROOT/zamm-memory/archive/plans"
 ensure_dir "$PROJECT_ROOT/zamm-memory/archive/knowledge/initializations"

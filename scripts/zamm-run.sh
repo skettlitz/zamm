@@ -55,8 +55,8 @@ Usage: zamm-run.sh [--project-root <path>] <command> [args...]
 
 Project
   scaffold             install ZAMM here, or refresh the rendered surfaces
-  status               health overview: ledger, plans, drift
-  check                validate everything (memory + plans)
+  status               health overview: ledger, backlog, plans, drift
+  check                validate everything (memory + backlog + plans)
   help [<topic>]       this text, or help for one command
 
 Memory
@@ -71,6 +71,18 @@ Memory
   memory discard <slug>
                        show and delete an unpublished draft
   memory archive       move fully-retired chains out of the scan path
+
+Backlog
+  backlog add '<sentence>'
+                       capture an idea; one sentence is enough
+  backlog list         the whole live backlog, hot to cold (--all: dormant too)
+  backlog show <slug>  one idea in full
+  backlog mark <slug>  select an idea for implementation (pushed into the digest)
+  backlog unmark <slug>
+                       deselect a marked idea
+  backlog promote <slug> ['<plan title>']
+                       turn an idea into a plan and retire it
+  backlog check        validate the backlog ledger
 
 Plans
   plan list            active plans grouped by status
@@ -111,6 +123,37 @@ Usage: zamm-run.sh plan <command> [args...]
   check                validate active plans
   create <title>       new plan directory and file
   archive [--list]     move terminal plans to the archive (--list previews)
+EOF
+      ;;
+    backlog) cat <<'EOF'
+Usage: zamm-run.sh backlog <command> [args...]
+
+  add '<sentence>'     capture an idea: the sentence is the headline (all the
+                       lens ever shows), the slug is derived, scope defaults
+                       to other. An idea is progressive disclosure — pipe any
+                       depth on stdin, a paragraph or a whole book: plain
+                       prose is parked under ## Background (unbounded; +bg in
+                       the lens, opened by backlog show), stdin with its own
+                       headings is used verbatim. Optional: --scope <area>,
+                       --slug <slug>, --supersedes <id> (re-up: sharpen an
+                       existing idea), --importance useful|minor, --durability
+                       days..permanent. For other record types (--type
+                       tombstone|votes|erasure) the positional is the SLUG,
+                       as in memory create.
+  list [--all]         recompile and print the lens: marked lane first, then
+                       every live idea hot to cold, dormant collapsed to
+                       counts (--all lists dormant ids too)
+  show <slug|id>       one idea in full
+  mark <slug|id>       select an idea for implementation: it enters the
+                       session digest and stops decaying until promoted,
+                       unmarked, or tombstoned
+  unmark <slug|id>     deselect (writes the explicit marked: no decision)
+  promote <slug|id> ['<plan title>']
+                       create the plan (title defaults to the idea headline),
+                       retire the idea with a tombstone linking both ways
+  check                validate the backlog ledger, write nothing
+
+Read the lens before adding: supersede or vote instead of duplicating.
 EOF
       ;;
   esac
@@ -486,6 +529,35 @@ print_status() {
     printf '          RECOVERY FILES: %s left by an interrupted publish (zamm-run.sh memory drafts)\n' "$nrec"
   echo
 
+  # ---- backlog (optional tree; absence is data, not a gap to report) ----
+  if [ -d "$ROOT/zamm-memory/backlog" ]; then
+    _blens="$ROOT/zamm-memory/.compiled/backlog.md"
+    _bstate="$ROOT/zamm-memory/.compiled/backlog-state.tsv"
+    if [ ! -f "$_blens" ]; then
+      printf 'Backlog   lens not yet compiled\n'
+      printf '          run: zamm-run.sh memory digest\n'
+    else
+      _btab=$(printf '\t')
+      _blive=$(awk -F"$_btab" '$1 == "live"   { print $2; exit }' "$_bstate" 2>/dev/null)
+      _bhot=$(awk  -F"$_btab" '$1 == "hot"    { print $2; exit }' "$_bstate" 2>/dev/null)
+      _bmark=$(awk -F"$_btab" '$1 == "marked" { print $2; exit }' "$_bstate" 2>/dev/null)
+      printf 'Backlog   %s live ideas, %s hot, %s marked\n' \
+        "${_blive:-?}" "${_bhot:-?}" "${_bmark:-?}"
+      # same watch as the digest: idea files newer than the lens read STALE,
+      # and an unreadable backlog tree fails closed (G3)
+      if ! _bnw=$(find "$ROOT/zamm-memory/backlog" -type f -name '*.md' -newer "$_blens"); then
+        echo 'zamm: cannot enumerate the backlog tree (unreadable, not empty).' >&2
+        exit 4
+      fi
+      _bnewer=$(printf '%s\n' "$_bnw" | grep -c . || true)
+      if [ "${_bnewer:-0}" -gt 0 ]; then
+        printf '          STALE: %s file(s) newer than the lens\n' "$_bnewer"
+        echo '          run: zamm-run.sh memory digest'
+      fi
+    fi
+    echo
+  fi
+
   # Plans enumerate through the checked manifest, never a glob: a status that
   # reported "none active" over an unreadable tree would hide the failure.
   pmf=$(mktemp "${TMPDIR:-/tmp}/zamm-status-pmf.XXXXXX")
@@ -646,8 +718,14 @@ find_recovery_files() {
   # means nothing was ever written here, not a tree we failed to read.
   [ -e "$ROOT/zamm-memory" ] || return 0
   zamm_verify_no_symlinks "$ROOT" || return 4
-  find "$ROOT/zamm-memory/knowledge" -type f -name '.*.md.pending.*' || {
-    echo "zamm: cannot enumerate zamm-memory/knowledge (unreadable, not empty)." >&2
+  # backlog add composes through the same pending-file protocol, so its
+  # crashes leave the same debris; the tree is optional and absent is data
+  _rftrees="$ROOT/zamm-memory/knowledge"
+  [ -d "$ROOT/zamm-memory/backlog" ] &&
+    _rftrees="$_rftrees $ROOT/zamm-memory/backlog"
+  # shellcheck disable=SC2086 -- deliberate word splitting over fixed paths
+  find $_rftrees -type f -name '.*.md.pending.*' || {
+    echo "zamm: cannot enumerate the record trees (unreadable, not empty)." >&2
     return 4
   }
 }
@@ -794,10 +872,11 @@ memory_publish() {
 # "no match" (references/invariants.md, G3).
 resolve_record() {
   needle="$1"
+  rtree="${2:-knowledge}"
   zamm_verify_no_symlinks "$ROOT" || exit 4
-  rtrees="$ROOT/zamm-memory/knowledge"
-  [ -d "$ROOT/zamm-memory/archive/knowledge" ] &&
-    rtrees="$rtrees $ROOT/zamm-memory/archive/knowledge"
+  rtrees="$ROOT/zamm-memory/$rtree"
+  [ -d "$ROOT/zamm-memory/archive/$rtree" ] &&
+    rtrees="$rtrees $ROOT/zamm-memory/archive/$rtree"
   # shellcheck disable=SC2086
   all=$(find $rtrees -type f -name '*.md') || {
     echo "zamm: cannot enumerate the ledger (unreadable, not empty)." >&2
@@ -817,7 +896,11 @@ resolve_record() {
   n=$(printf '%s\n' "$matches" | grep -c . || true)
   if [ "${n:-0}" -eq 0 ]; then
     echo "zamm: no record matches \"$needle\"" >&2
-    echo "  try: zamm-run.sh memory list --all" >&2
+    if [ "$rtree" = "backlog" ]; then
+      echo "  try: zamm-run.sh backlog list --all" >&2
+    else
+      echo "  try: zamm-run.sh memory list --all" >&2
+    fi
     exit 1
   fi
   if [ "$n" -gt 1 ]; then
@@ -976,9 +1059,19 @@ plan_create() {
   trap 'rm -rf "$tmp"' EXIT HUP INT TERM
   mkdir "$tmp/workdir"
   pf="$tmp/$today-$slug.plan.md"
-  ZAMM_PLAN_TITLE="$title" awk -v today="$today" '
+  # ZAMM_PLAN_ORIGIN (backlog promote only) renders the provenance line INTO
+  # the plan while it is still in the private temp tree — so the published
+  # directory carries its origin from birth, and an interrupted promote is
+  # decidable on retry (guarantee 2). Stamping after the rename left a
+  # window where the partial plan was indistinguishable from a stranger's.
+  ZAMM_PLAN_TITLE="$title" ZAMM_PLAN_ORIGIN="${ZAMM_PLAN_ORIGIN:-}" awk -v today="$today" '
     $0 == "# <Plan title>"             { print "# " ENVIRON["ZAMM_PLAN_TITLE"]; next }
-    $0 == "Last updated: <YYYY-MM-DD>" { print "Last updated: " today; next }
+    $0 == "Last updated: <YYYY-MM-DD>" {
+      print "Last updated: " today
+      if (ENVIRON["ZAMM_PLAN_ORIGIN"] != "")
+        print "Origin-idea: " ENVIRON["ZAMM_PLAN_ORIGIN"]
+      next
+    }
     { print }
   ' "$template" > "$pf"
 
@@ -988,6 +1081,10 @@ plan_create() {
     die "plan create: rendered plan is missing 'Status: Draft'"
   if grep -q '<Plan title>' "$pf"; then
     die "plan create: title placeholder was not substituted"
+  fi
+  if [ -n "${ZAMM_PLAN_ORIGIN:-}" ]; then
+    grep -q "^Origin-idea: ${ZAMM_PLAN_ORIGIN}\$" "$pf" ||
+      die "plan create: the origin line was not rendered (template shape changed?)"
   fi
 
   # Publish the complete tree with ONE rename. No lock: two agents creating
@@ -1019,9 +1116,384 @@ plan_create() {
   echo "Created. Fill Scope and Done-when, then set Status: Implementing." >&2
 }
 
+# ---------------- backlog ----------------
+# Ideas are ordinary records in zamm-memory/backlog/ — same schema, same
+# immutability, compiled by the same compiler into the pulled lens
+# .compiled/backlog.md. These verbs are thin sugar over that machinery; the
+# capture path (add) is deliberately the cheapest write in the toolchain.
+
+require_backlog_tree() {
+  [ -d "$ROOT/zamm-memory/backlog" ] ||
+    die "no backlog tree at zamm-memory/backlog ('backlog add' creates it)"
+}
+
+backlog_check() {
+  case "${1-}" in -h|--help) group_usage backlog 0 ;; esac
+  [ $# -eq 0 ] || die "backlog check takes no arguments (got: $*)"
+  # Absent is data: a project that never captured an idea has nothing to
+  # check, which is not the same as a tree that cannot be read.
+  if [ ! -d "$ROOT/zamm-memory/backlog" ]; then
+    echo "ZAMM backlog: no backlog tree; nothing to check. ('backlog add' creates it.)"
+    exit 0
+  fi
+  exec sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" --tree backlog --check
+}
+
+backlog_list() {
+  case "${1-}" in -h|--help) group_usage backlog 0 ;; esac
+  _bl_all=0
+  if [ "${1-}" = "--all" ]; then _bl_all=1; shift; fi
+  [ $# -eq 0 ] || die "backlog list: unknown argument: $*"
+  if [ ! -d "$ROOT/zamm-memory/backlog" ]; then
+    echo "ZAMM backlog: empty - no zamm-memory/backlog/ tree yet ('backlog add' creates it)."
+    exit 0
+  fi
+  # like memory digest: recompile, print the artifact, propagate the code —
+  # a degraded lens (2) is still printed, a refusal or unreadable tree is not
+  rc=0
+  sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" --tree backlog >/dev/null || rc=$?
+  if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
+    exit "$rc"
+  fi
+  cat "$ROOT/zamm-memory/.compiled/backlog.md"
+  if [ "$_bl_all" -eq 1 ]; then
+    # dormant ids = live rows the lens did not select. Two invocations of
+    # the same toolchain; a write between them is ordinary eventual
+    # consistency (each side is a truthful reading of some real state).
+    _bl_tab=$(printf '\t')
+    sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" --tree backlog --list-live |
+      awk -F"$_bl_tab" -v statef="$ROOT/zamm-memory/.compiled/backlog-state.tsv" '
+        BEGIN {
+          while ((getline line < statef) > 0) {
+            n = split(line, f, "\t")
+            if (n >= 2 && f[1] == "select") sel[f[2]] = 1
+          }
+          close(statef)
+        }
+        !($1 in sel) {
+          if (!hdr) {
+            print ""
+            print "Dormant ideas (cooled below the floor; supersede or vote to re-up):"
+            hdr = 1
+          }
+          print "- " $1 ": " $4
+        }
+      '
+  fi
+  exit "$rc"
+}
+
+backlog_show() {
+  case "${1-}" in -h|--help) group_usage backlog 0 ;; esac
+  [ $# -ge 1 ] || die "backlog show: need a slug or record id"
+  [ $# -le 1 ] || die "backlog show: too many arguments (one slug or id)"
+  require_backlog_tree
+  path=$(resolve_record "$1" backlog)
+  rel="${path#"$ROOT/"}"
+  case "$rel" in
+    */archive/backlog/*) echo "# $rel  (ARCHIVED - fully-retired chain)" ;;
+    *) echo "# $rel" ;;
+  esac
+  echo
+  cat "$path"
+}
+
+# Resolve a needle (full id or bare slug) against the LIVE backlog heads and
+# print the matching --list-live row. Superseded, tombstoned and quarantined
+# ideas deliberately do not resolve: marking or promoting a non-head would
+# fork the chain behind the operator's back. Runs inside $(...) — callers
+# MUST `|| exit $?`.
+resolve_live_idea() {
+  _rl_needle="$1"
+  _rl_tab=$(printf '\t')
+  _rl_rows=$(sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" --tree backlog --list-live) || {
+    echo "zamm: the backlog did not compile; cannot resolve \"$_rl_needle\"." >&2
+    return 4
+  }
+  _rl_m=$(printf '%s\n' "$_rl_rows" | awk -F"$_rl_tab" -v n="$_rl_needle" '
+    {
+      id = $1
+      # id = YYYY-MM-DD-<slug>-<suffix>: slug is chars 12 .. length-6
+      s = (length(id) > 17) ? substr(id, 12, length(id) - 17) : ""
+      if (id == n || s == n) print
+    }')
+  _rl_n=$(printf '%s\n' "$_rl_m" | grep -c . || true)
+  if [ "${_rl_n:-0}" -eq 0 ]; then
+    echo "zamm: no live idea matches \"$_rl_needle\"" >&2
+    echo "  try: zamm-run.sh backlog list --all (a superseded or retired idea does not resolve here)" >&2
+    return 1
+  fi
+  if [ "$_rl_n" -gt 1 ]; then
+    echo "zamm: \"$_rl_needle\" matches $_rl_n live ideas:" >&2
+    printf '%s\n' "$_rl_m" | while IFS="$_rl_tab" read -r _rid _ _ _; do
+      [ -n "$_rid" ] && echo "  $_rid" >&2
+    done
+    echo "  Use the full id to pick one." >&2
+    return 1
+  fi
+  printf '%s\n' "$_rl_m"
+}
+
+# one frontmatter value, read from the frontmatter block ONLY — a body line
+# that happens to start with "scope:" must not be mistaken for the key
+fm_field() {
+  awk -v k="$2" '
+    NR == 1 { if ($0 == "---") { infm = 1; next } else exit }
+    infm && $0 == "---" { exit }
+    infm && index($0, k ":") == 1 {
+      v = substr($0, length(k) + 2)
+      sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v)
+      print v
+      exit
+    }
+  ' "$1"
+}
+
+# the record body: everything after the closing ---, leading blanks dropped
+fm_body() {
+  awk '
+    c >= 2 { if (!started && $0 == "") next; started = 1; print; next }
+    $0 == "---" { c++ }
+  ' "$1"
+}
+
+backlog_markctl() {
+  _mk_action="$1"; shift
+  case "${1-}" in -h|--help) group_usage backlog 0 ;; esac
+  [ $# -ge 1 ] || die "backlog $_mk_action: need a slug or record id"
+  [ $# -le 1 ] || die "backlog $_mk_action: too many arguments (one slug or id)"
+  require_backlog_tree
+  _mk_tab=$(printf '\t')
+  _mk_row=$(resolve_live_idea "$1") || exit $?
+  _mk_id=${_mk_row%%"$_mk_tab"*}
+  # effective marked state comes from the compiled lens, never from the head
+  # file alone: the lane is inherited through the chain (see effmark in
+  # zamm-compile.sh), so the head may carry no marked: key and still be in it
+  rc=0
+  sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" --tree backlog >/dev/null || rc=$?
+  if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
+    die "backlog $_mk_action: the backlog did not compile (rc=$rc)"
+  fi
+  _mk_date=$(awk -F"$_mk_tab" -v id="$_mk_id" \
+    '$1 == "mselect" && $3 == id { print $2; exit }' \
+    "$ROOT/zamm-memory/.compiled/backlog-state.tsv")
+  if [ "$_mk_action" = "mark" ] && [ -n "$_mk_date" ]; then
+    die "backlog mark: $_mk_id is already marked (since $_mk_date)"
+  fi
+  if [ "$_mk_action" = "unmark" ] && [ -z "$_mk_date" ]; then
+    die "backlog unmark: $_mk_id is not marked"
+  fi
+  _mk_path=$(resolve_record "$_mk_id" backlog)
+  _mk_scope=$(fm_field "$_mk_path" scope)
+  _mk_imp=$(fm_field "$_mk_path" importance)
+  _mk_dur=$(fm_field "$_mk_path" durability)
+  _mk_slug=$_mk_id
+  _mk_slug=${_mk_slug#??????????-}   # strip YYYY-MM-DD-
+  _mk_slug=${_mk_slug%-?????}        # strip -suffix
+  if [ "$_mk_action" = "mark" ]; then
+    _mk_val=${ZAMM_TODAY:-$(date +%Y-%m-%d)}
+  else
+    _mk_val="no"
+  fi
+  # the marking decision is an ordinary superseding record: same body, the
+  # marked: key toggled — so G1 and candidate validation apply unchanged,
+  # and the decision is greppable history like everything else
+  fm_body "$_mk_path" | sh "$INTERNAL/zamm-new-memory.sh" \
+    --project-root "$ROOT" --tree backlog \
+    --scope "$_mk_scope" \
+    --importance "${_mk_imp:-useful}" --durability "${_mk_dur:-months}" \
+    --supersedes "$_mk_id" --marked "$_mk_val" "$_mk_slug" >/dev/null ||
+    die "backlog $_mk_action: could not write the superseding record"
+  if [ "$_mk_action" = "mark" ]; then
+    echo "Marked for implementation ($_mk_val): $_mk_id"
+    echo "  It now appears in the session digest and stops decaying until"
+    echo "  promoted, unmarked, or tombstoned."
+  else
+    echo "Unmarked: $_mk_id"
+  fi
+}
+
+backlog_promote() {
+  case "${1-}" in -h|--help) group_usage backlog 0 ;; esac
+  [ $# -ge 1 ] || die "backlog promote: need a slug or record id (plus an optional plan title)"
+  require_backlog_tree
+  _bp_needle="$1"; shift
+  _bp_tab=$(printf '\t')
+
+  # Retry legs first (guarantee 2: a rerun converges). The origin line is
+  # rendered into the plan BEFORE its publish rename, so an existing plan
+  # carrying it is unambiguously an earlier promote of this same idea.
+  _bp_pmf=$(mktemp "${TMPDIR:-/tmp}/zamm-promote-mf.XXXXXX") ||
+    die "backlog promote: could not create a scratch file"
+  if ! sh "$INTERNAL/zamm-plan-manifest.sh" --project-root "$ROOT" > "$_bp_pmf"; then
+    rm -f "$_bp_pmf"
+    die "backlog promote: cannot enumerate the plan tree (unreadable, not empty)"
+  fi
+  _bp_originpf=""
+  while IFS="$_bp_tab" read -r _bp_tag _bp_p1 _bp_rest; do
+    [ "$_bp_tag" = "PLANFILE" ] || continue
+    _bp_ov=$(sed -n 's/^Origin-idea: //p' "$_bp_p1" 2>/dev/null | head -1)
+    [ -n "$_bp_ov" ] || continue
+    # match the full id OR its slug: the id a retry types is usually the one
+    # the FIRST promote resolved from — possibly an ancestor of the head the
+    # plan recorded — so the bare slug is the stable retry handle
+    _bp_os=${_bp_ov#??????????-}
+    _bp_os=${_bp_os%-?????}
+    _bp_ns=$_bp_needle
+    case "$_bp_ns" in
+      [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*)
+        _bp_ns=${_bp_ns#??????????-}
+        _bp_ns=${_bp_ns%-?????}
+        ;;
+    esac
+    if [ "$_bp_ov" = "$_bp_needle" ] || [ "$_bp_os" = "$_bp_ns" ]; then
+      _bp_originpf="$_bp_p1"
+      break
+    fi
+  done < "$_bp_pmf"
+  rm -f "$_bp_pmf"
+
+  _bp_row=""
+  _bp_live=1
+  _bp_row=$(resolve_live_idea "$_bp_needle" 2>/dev/null) || _bp_live=0
+
+  if [ -n "$_bp_originpf" ]; then
+    _bp_pdir=$(dirname "$_bp_originpf")
+    if [ "$_bp_live" -eq 0 ]; then
+      echo "Already promoted: ${_bp_pdir#"$ROOT/"} carries this origin and the idea is retired."
+      echo "Nothing to do."
+      exit 0
+    fi
+    # crash window: the plan landed, the tombstone did not — finish it
+    _bp_id=${_bp_row%%"$_bp_tab"*}
+    _bp_pdirname=$(basename "$_bp_pdir")
+    _bp_slug=$_bp_id
+    _bp_slug=${_bp_slug#??????????-}
+    _bp_slug=${_bp_slug%-?????}
+    printf 'Promoted to plan %s.\n' "$_bp_pdirname" | sh "$INTERNAL/zamm-new-memory.sh" \
+      --project-root "$ROOT" --tree backlog --type tombstone \
+      --supersedes "$_bp_id" "$_bp_slug" >/dev/null ||
+      die "backlog promote: could not write the tombstone"
+    echo "Resumed an interrupted promote: ${_bp_pdir#"$ROOT/"} already existed;"
+    echo "the tombstone retiring $_bp_id is now written."
+    exit 0
+  fi
+
+  [ "$_bp_live" -eq 1 ] || {
+    # replay resolve loudly for its diagnostics (the quiet run above fed the
+    # retry legs; this one is for the operator)
+    resolve_live_idea "$_bp_needle" >/dev/null || exit $?
+  }
+  _bp_id=${_bp_row%%"$_bp_tab"*}
+  _bp_hl=${_bp_row##*"$_bp_tab"}
+  if [ $# -gt 0 ]; then
+    _bp_title="$*"
+  else
+    _bp_title=$_bp_hl
+  fi
+
+  _bp_pf_rel=$(ZAMM_PLAN_ORIGIN="$_bp_id" plan_create "$_bp_title") ||
+    die "backlog promote: plan creation failed"
+  _bp_pdir_rel=${_bp_pf_rel%/*}
+  _bp_pdirname=${_bp_pdir_rel##*/}
+
+  _bp_slug=$_bp_id
+  _bp_slug=${_bp_slug#??????????-}
+  _bp_slug=${_bp_slug%-?????}
+  printf 'Promoted to plan %s.\n' "$_bp_pdirname" | sh "$INTERNAL/zamm-new-memory.sh" \
+    --project-root "$ROOT" --tree backlog --type tombstone \
+    --supersedes "$_bp_id" "$_bp_slug" >/dev/null || {
+    echo "zamm: the plan was created but the tombstone was not written." >&2
+    echo "  Rerun 'backlog promote $_bp_id' to finish (it will recognize the plan)." >&2
+    exit 1
+  }
+  echo "Promoted: $_bp_id"
+  echo "  plan: $_bp_pdir_rel (Origin-idea recorded)"
+  echo "  the idea is retired in the backlog (tombstone names the plan)"
+}
+
+backlog_add() {
+  case "${1-}" in -h|--help) group_usage backlog 0 ;; esac
+  _ba_scope=""; _ba_slug=""; _ba_type="memory"; _ba_pos=""
+  _ba_fwd=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --scope) [ $# -ge 2 ] || die "backlog add: --scope requires a value"; _ba_scope="$2"; shift 2 ;;
+      --slug)  [ $# -ge 2 ] || die "backlog add: --slug requires a value"; _ba_slug="$2"; shift 2 ;;
+      --type)  [ $# -ge 2 ] || die "backlog add: --type requires a value"; _ba_type="$2"; shift 2 ;;
+      --supersedes|--importance|--durability|--date|--marked|--up|--down|--erases)
+        [ $# -ge 2 ] || die "backlog add: $1 requires a value"
+        # these values are charset-limited downstream (ids, dates, keywords);
+        # refusing whitespace here keeps the accumulated list word-splittable
+        case "$2" in
+          *[!A-Za-z0-9,-]*) die "backlog add: $1 value contains characters the record contract refuses" ;;
+        esac
+        _ba_fwd="$_ba_fwd $1 $2"
+        shift 2
+        ;;
+      --no-validate) _ba_fwd="$_ba_fwd --no-validate"; shift ;;
+      -*) die "backlog add: unknown option: $1" ;;
+      *)
+        [ -z "$_ba_pos" ] || die "backlog add: more than one positional argument (quote the sentence)"
+        _ba_pos="$1"; shift
+        ;;
+    esac
+  done
+
+  if [ "$_ba_type" != "memory" ]; then
+    # tombstone/votes/erasure mirror memory create: the positional is the SLUG
+    [ -n "$_ba_pos" ] || die "backlog add: --type $_ba_type needs a <topic-slug>"
+    # shellcheck disable=SC2086 -- forwarded flags are whitespace-refusing by construction
+    sh "$INTERNAL/zamm-new-memory.sh" --project-root "$ROOT" --tree backlog \
+      --type "$_ba_type" ${_ba_scope:+--scope "$_ba_scope"} $_ba_fwd "$_ba_pos"
+    return
+  fi
+
+  # the capture contract: one quoted sentence is a complete invocation
+  [ -n "$_ba_pos" ] || die "backlog add: need the idea as one quoted sentence (e.g. backlog add 'We could ...')"
+  if [ -z "$_ba_slug" ]; then
+    _ba_slug=$(printf '%s' "$_ba_pos" | tr 'A-Z' 'a-z' | tr -cs 'a-z0-9' '-' |
+      sed 's/^-*//; s/-*$//' | cut -c1-40 | sed 's/-*$//')
+    [ -n "$_ba_slug" ] || die "backlog add: the sentence produced an empty slug; pass --slug"
+  fi
+  _ba_body="$_ba_pos"
+  if [ ! -t 0 ]; then
+    # Piped stdin is the idea's depth. An idea is progressive disclosure:
+    # the sentence is the headline (all the lens ever shows), and anything
+    # more — a paragraph or a whole book — lives under ## Background, which
+    # the record contract leaves unbounded (only the digest block is
+    # capped). Plain prose is therefore parked under ## Background
+    # automatically; stdin that carries its own headings is an author-
+    # structured body and passes through verbatim.
+    _ba_extra=$(cat)
+    if [ -n "$(printf '%s' "$_ba_extra" | tr -d '[:space:]')" ]; then
+      if printf '%s\n' "$_ba_extra" | grep -q '^#'; then
+        _ba_body="$_ba_body
+
+$_ba_extra"
+      else
+        _ba_body="$_ba_body
+
+## Background
+
+$_ba_extra"
+      fi
+    fi
+  fi
+  # shellcheck disable=SC2086 -- forwarded flags are whitespace-refusing by construction
+  printf '%s\n' "$_ba_body" | sh "$INTERNAL/zamm-new-memory.sh" \
+    --project-root "$ROOT" --tree backlog \
+    --scope "${_ba_scope:-other}" $_ba_fwd "$_ba_slug"
+}
+
 run_check_all() {
-  crc=0; prc=0; xrc=0
+  crc=0; prc=0; xrc=0; brc=0
   sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" --check || crc=$?
+  # the backlog tree is optional (absence is data); when present it is
+  # checked with the same rigor as the knowledge ledger
+  if [ -d "$ROOT/zamm-memory/backlog" ]; then
+    sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" --tree backlog --check || brc=$?
+  fi
   sh "$INTERNAL/zamm-plan-check.sh" --project-root "$ROOT" || prc=$?
   # cross-object reconciliation runs last: it assumes each side is individually
   # well-formed and only checks that plans and their votes records agree.
@@ -1029,7 +1501,7 @@ run_check_all() {
   # An enumeration failure (4) outranks a validation failure (1): "could not
   # read" must never be flattened into "checked and found problems".
   rc=0
-  for c in $crc $prc $xrc; do
+  for c in $crc $brc $prc $xrc; do
     [ "$c" -eq 0 ] && continue
     [ "$c" -ge 2 ] && rc=4
     [ "$rc" -eq 0 ] && rc=1
@@ -1073,6 +1545,7 @@ do_help() {
         *)       group_usage plan 0 ;;          # incl. show/create (built-in)
       esac
       ;;
+    backlog) group_usage backlog 0 ;;           # every verb is a built-in
     scaffold) exec bash "$INTERNAL/zamm-scaffold.sh" --help ;;
     *)        usage 0 ;;                        # status, check, help, unknown
   esac
@@ -1133,6 +1606,24 @@ case "$cmd" in
       *) unknown "memory $verb" ;;
     esac
     require_root; require_version
+    ;;
+
+  backlog)
+    [ $# -gt 0 ] || group_usage backlog 0
+    verb="$1"; shift
+    # Help is read-only: route it before the version gate or the built-ins.
+    wants_help "$@" && do_help backlog "$verb"
+    case "$verb" in
+      add)     require_root; require_version; backlog_add "$@"; exit 0 ;;
+      list)    require_root; require_version; backlog_list "$@"; exit 0 ;;
+      show)    require_root; require_version; backlog_show "$@"; exit 0 ;;
+      mark)    require_root; require_version; backlog_markctl mark "$@"; exit 0 ;;
+      unmark)  require_root; require_version; backlog_markctl unmark "$@"; exit 0 ;;
+      promote) require_root; require_version; backlog_promote "$@"; exit 0 ;;
+      check)   require_root; require_version; backlog_check "$@"; exit 0 ;;
+      help|--help|-h) group_usage backlog 0 ;;
+      *) unknown "backlog $verb" ;;
+    esac
     ;;
 
   plan)

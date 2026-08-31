@@ -1,4 +1,4 @@
-# SKILL-BLOCK:zamm:BEGIN version=sha:e6de29ab7001 date=2026-08-28
+# SKILL-BLOCK:zamm:BEGIN version=sha:72682e27434e date=2026-08-31
 # Retired trees and plan scratch: keep them out of codebase search, but
 # readable to the compiler (the sandbox still allows find(1) here).
 # Do not copy these into .cursorignore — see the note in that file.

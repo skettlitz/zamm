@@ -10,12 +10,18 @@
 # references/invariants.md.
 #
 # Usage: zamm-new-memory.sh [--project-root <path>] [--type memory|tombstone|votes|erasure]
+#                           [--tree knowledge|backlog]
 #                           [--scope <tag[, tag2[, tag3]]>] [--supersedes <id[,id...]>]
 #                           [--erases <id[,id...]>] [--up <id[,id...]>] [--down <id[,id...]>]
 #                           [--importance guardrail|useful|minor]
 #                           [--durability days|weeks|months|years|permanent]
-#                           [--plan <plan-dir-slug>] [--date YYYY-MM-DD]
+#                           [--plan <plan-dir-slug>] [--marked YYYY-MM-DD|no]
+#                           [--date YYYY-MM-DD]
 #                           [--edit] [--no-validate] <topic-slug> < body.md
+#
+# --tree backlog writes an idea into the backlog ledger (validated against
+# the backlog tree, no guardrail importance, no --plan); --marked puts a
+# backlog idea into (a date) or out of (no) the marked lane.
 #
 # --scope takes 1-3 comma-separated area tags from the fixed set (domain,
 # contracts, conventions, internals, quality, tooling, ops, meta; or other
@@ -35,12 +41,14 @@ export LC_ALL
 
 PROJECT_ROOT="$PWD"
 RTYPE="memory"
+TREE="knowledge"
 SCOPE=""
 SUPERSEDES=""
 ERASES=""
 IMPORTANCE="useful"
 DURABILITY="months"
 PLAN=""
+MARKED=""
 RDATE=""
 SLUG=""
 UP=""
@@ -71,6 +79,8 @@ while [ $# -gt 0 ]; do
     # under `set -u` aborts with a raw "unbound variable" when the option is the
     # last token (e.g. `... create foo --scope`), instead of clear usage text.
     --type)       need_val "$@"; RTYPE="$2"; shift 2 ;;
+    --tree)       need_val "$@"; TREE="$2"; shift 2 ;;
+    --marked)     need_val "$@"; MARKED="$2"; shift 2 ;;
     --scope)      need_val "$@"; SCOPE="$2"; shift 2 ;;
     --supersedes) need_val "$@"; SUPERSEDES="$2"; shift 2 ;;
     --erases)     need_val "$@"; ERASES="$2"; shift 2 ;;
@@ -133,6 +143,38 @@ case "$RTYPE" in
     exit 1
     ;;
 esac
+case "$TREE" in
+  knowledge|backlog) ;;
+  *)
+    echo "ERROR: --tree must be knowledge or backlog" >&2
+    exit 1
+    ;;
+esac
+# Per-tree policy, refused at the CLI so the author hears it before composing
+# anything; the compile-side errors are the deep lock for hand-written files.
+if [ "$TREE" = "backlog" ]; then
+  if [ "$IMPORTANCE" = "guardrail" ]; then
+    echo "ERROR: guardrail importance is not allowed in the backlog; mark the idea instead (backlog mark)" >&2
+    exit 1
+  fi
+  if [ -n "$PLAN" ]; then
+    echo "ERROR: backlog votes are triage votes and carry no --plan" >&2
+    exit 1
+  fi
+fi
+if [ -n "$MARKED" ]; then
+  if [ "$TREE" != "backlog" ] || [ "$RTYPE" != "memory" ]; then
+    echo "ERROR: --marked is only meaningful on a backlog memory record" >&2
+    exit 1
+  fi
+  case "$MARKED" in
+    no|[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+    *)
+      echo "ERROR: --marked must be a YYYY-MM-DD date or \"no\"" >&2
+      exit 1
+      ;;
+  esac
+fi
 
 # Values that become frontmatter lines are DATA, never structure. A newline in
 # --supersedes or --plan would break out of its `key: value` line and forge
@@ -312,7 +354,7 @@ if [ -n "$RDATE" ]; then
   fi
 fi
 YEAR=${RECDATE%%-*}
-DIR="$PROJECT_ROOT/zamm-memory/knowledge/$YEAR"
+DIR="$PROJECT_ROOT/zamm-memory/$TREE/$YEAR"
 # The year directory is a DYNAMIC path component the canonical-root check
 # cannot list: a symlinked knowledge/<year> would route the new record
 # outside the project — and hide it from every enumeration, which never
@@ -324,7 +366,7 @@ DIR="$PROJECT_ROOT/zamm-memory/knowledge/$YEAR"
 zamm_verify_no_symlinks "$PROJECT_ROOT" || exit 4
 mkdir -p "$DIR" 2>/dev/null || true
 if [ -L "$DIR" ] || [ ! -d "$DIR" ]; then
-  echo "ERROR: zamm-memory/knowledge/$YEAR is a symlink or not a real directory;" >&2
+  echo "ERROR: zamm-memory/$TREE/$YEAR is a symlink or not a real directory;" >&2
   echo "       refusing to write a record through it (no symlinks in the ledger)." >&2
   exit 4
 fi
@@ -379,6 +421,7 @@ emit_frontmatter() {
     echo "importance: $IMPORTANCE"
     echo "durability: $DURABILITY"
   fi
+  if [ -n "$MARKED" ]; then echo "marked: $MARKED"; fi
   if [ -n "$PLAN" ]; then echo "plan: $PLAN"; fi
   if [ "$RTYPE" = "votes" ]; then
     echo "up:${UP:+ $UP}"
@@ -422,7 +465,7 @@ while [ "$tries" -lt 5 ]; do
   # neither *.md nor *.md.draft, so no enumeration ever sees it.
   cleanup
   WORK=$(mktemp "$DIR/.$BASE.md.pending.XXXXXX") || {
-    echo "ERROR: could not create a private temporary file under zamm-memory/knowledge/$YEAR" >&2
+    echo "ERROR: could not create a private temporary file under zamm-memory/$TREE/$YEAR" >&2
     exit 1
   }
   apply_record_mode "$WORK"
@@ -440,7 +483,7 @@ while [ "$tries" -lt 5 ]; do
 
   if [ "$VALIDATE" -eq 1 ]; then
     zamm_validate_candidate "$PROJECT_ROOT" "$SCRIPT_DIR" "$WORK" \
-      "knowledge/$YEAR" || exit 1
+      "$TREE/$YEAR" "$TREE" || exit 1
   fi
 
   # Atomic no-clobber claim: link() fails with EEXIST when the name is taken,

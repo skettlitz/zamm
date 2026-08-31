@@ -26,15 +26,21 @@ Canonical skill name/folder is `zamm`.
    Writers only ever add uniquely named files; committed records are never edited.
 3. Corrections do not touch old records: a new record declares `supersedes: <old-id>` and the old
    file simply drops out of view while staying in history.
-4. At session start the agent runs `zamm-run.sh memory digest`, which ranks all live records — author-rated
+4. Ideas worth keeping but not starting go into a third tree, `zamm-memory/backlog/` — the same
+   immutable records, compiled into a separate on-demand lens (`backlog list`) instead of the
+   session digest. Capture is one sentence (`backlog add`); depth of any size rides below the
+   headline. Ideas cool into dormancy on their own unless superseded or voted up; marking one
+   for implementation pushes it into the digest until it is promoted into a plan or unmarked.
+5. At session start the agent runs `zamm-run.sh memory digest`, which ranks all live records — author-rated
    importance, decaying over an author-rated shelf-life, corrected by votes from plan outcomes —
    and emits a bounded digest: an actionable top section balanced across knowledge areas (so one
    hot topic cannot drown the rest), one-line reminders below it, and counts for everything else.
    Fully decayed records go dormant: unlisted, but still greppable in the ledger. The digest
    ends with a compact listing of active plans (status, progress, title) plus the most
-   recently archived plan IDs, so session start needs no separate plan discovery and a plan
-   that moved to the archive on another machine stays findable after a pull.
-5. Finished plans move to the archive.
+   recently archived plan IDs and a one-line backlog summary, so session start needs no
+   separate discovery and a plan that moved to the archive on another machine stays findable
+   after a pull.
+6. Finished plans move to the archive.
 
 Here is one record file — composed by the agent and landed in one step by
 `zamm-run.sh memory create`, which validates it and writes nothing at all if it fails the
@@ -99,9 +105,10 @@ ZAMM runs mostly agent-side. The human:
 | Path | Purpose | Committed? |
 | --- | --- | --- |
 | `zamm-memory/knowledge/<YYYY>/` | immutable ledger records | yes |
+| `zamm-memory/backlog/<YYYY>/` | immutable idea records (the backlog) | yes |
 | `zamm-memory/active/plans/`, `zamm-memory/archive/plans/` | plan contexts | yes |
 | `zamm-memory/VERSION` | installed protocol version (`3`) | yes |
-| `zamm-memory/.compiled/memory.md` | generated digest | no (gitignored) |
+| `zamm-memory/.compiled/` | generated digest and backlog lens | no (gitignored) |
 | `AGENTS.md` managed block | rendered runtime protocol | yes |
 | `.cursor/rules/zamm.mdc` | rendered runtime protocol (Cursor) | when used |
 | `.gitignore`, `.gitattributes`, `.cursorignore`, `.cursorindexingignore` | required lines appended / created | yes |
@@ -164,8 +171,8 @@ Everything runs through one entrypoint, which finds the project root itself
 
 ```
 scaffold             install ZAMM here, or refresh the rendered surfaces
-status               health overview: ledger, plans, drift
-check                validate everything (memory + plans)
+status               health overview: ledger, backlog, plans, drift
+check                validate everything (memory + backlog + plans)
 help [<topic>]       this text, or help for one command
 
 memory digest        rebuild and print the digest
@@ -179,6 +186,17 @@ memory drafts        list hand-written drafts not yet published
 memory discard <slug>
                      show and delete an unpublished draft
 memory archive       move fully-retired chains out of the scan path
+
+backlog add '<sentence>'
+                     capture an idea; one sentence is enough
+backlog list         the whole live backlog, hot to cold (--all: dormant too)
+backlog show <slug>  one idea in full
+backlog mark <slug>  select an idea for implementation (pushed into the digest)
+backlog unmark <slug>
+                     deselect a marked idea
+backlog promote <slug> ['<plan title>']
+                     turn an idea into a plan and retire it
+backlog check        validate the backlog ledger
 
 plan list            active plans grouped by status
 plan show <slug>     one plan, with progress

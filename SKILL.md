@@ -39,6 +39,7 @@ version that rendered it. When it differs from the installed skill, tell the hum
 | digest shows `Needs reconciliation` | resolve it this session | `Reconciliation (MUST)` |
 | digest shows no live records | ask before initialization; never write placeholder records | `references/initialization/existing-project.md` |
 | a distillation cue fires: remember-this; correction/standing rule; strong emotion with substance; repeated failure or dead end; pointable research result | ledger write transaction (below) | `Distillation (MUST)`; full semantics: `references/distillation-triggers.md` |
+| an idea surfaces worth keeping but not starting (someday/maybe, "we could ...") | read `backlog list`, then `backlog add '<sentence>'` — or supersede/vote an existing idea; never park it as a Draft plan | `Backlog` |
 | plan moves to `Review` or `Abandoned` | learnings + votes record + telemetry fields | `Plan Status Transitions (MUST)` |
 | plan `Done` (human-approved, from `Review` only) | archive flow | `Archive Flow (Optional)` |
 | secrets or personal data landed in a record | exceptional erasure; git-history rewriting needs separate human approval | `Erasure (exceptional)` |
@@ -65,12 +66,13 @@ Referenced section names live in the rendered runtime files / protocol template 
 - Plan status buckets: `bash <zamm-skill>/scripts/zamm-run.sh plan list`
 - Archive terminal plans: `bash <zamm-skill>/scripts/zamm-run.sh plan archive` — moves terminal plan directories; refuses any plan that fails `plan check`.
 - Validate plans: `bash <zamm-skill>/scripts/zamm-run.sh plan check` — required fields for the declared status, unchecked Done-when items.
-- Validate everything: `bash <zamm-skill>/scripts/zamm-run.sh check` — ledger + plans, one exit code.
+- Validate everything: `bash <zamm-skill>/scripts/zamm-run.sh check` — ledger + backlog + plans, one exit code.
 - Health overview: `bash <zamm-skill>/scripts/zamm-run.sh status` — read-only.
 - Browse the ledger: `bash <zamm-skill>/scripts/zamm-run.sh memory list [--all] [--scope <area>]` and `memory show <slug|id>`.
 - Hand-composed drafts (the two-step alternative to stdin): `memory publish <slug|id>` lands one, `memory drafts` lists those not yet published, `memory discard <slug|id>` shows and deletes one. A draft is inert: `<id>.md.draft` is not a `*.md` file, so no compile enumerates it — only `publish` reads one, as a validated overlay, before landing it.
 - Retire storage: `bash <zamm-skill>/scripts/zamm-run.sh memory archive` — moves fully-retired chains out of the scan path; verifies the digest is unchanged.
 - New plan: `bash <zamm-skill>/scripts/zamm-run.sh plan create '<title>'`; inspect one with `plan show <slug>`.
+- Backlog (ideas): `bash <zamm-skill>/scripts/zamm-run.sh backlog add '<sentence>'` captures one (pipe depth on stdin — it lands under `## Background`); `backlog list [--all]` prints the pulled lens; `backlog show <slug|id>` opens a record; `backlog mark`/`unmark <slug|id>` select/deselect for implementation (marked ideas render in the digest and stop decaying); `backlog promote <slug|id> ['<title>']` turns one into a plan and retires it; `backlog check` validates the tree.
 
 ## Gated guides
 

@@ -124,6 +124,7 @@ class Ledger:
         down=None,
         extra=None,
         sfx=None,
+        tree="knowledge",
     ) -> str:
         """Write a well-formed record; returns its id."""
         if sfx is None:
@@ -161,8 +162,21 @@ class Ledger:
         text = "---\n" + "\n".join(fm) + "\n---\n"
         if type != "votes":
             text += body.rstrip("\n") + "\n"
-        self.write(f"zamm-memory/knowledge/{date[:4]}/{rid}.md", text)
+        self.write(f"zamm-memory/{tree}/{date[:4]}/{rid}.md", text)
         return rid
+
+    def add_idea(self, slug, body="A synthetic idea for testing.", *,
+                 scope="tooling", durability="months", marked=None, **kw) -> str:
+        """Write a well-formed backlog record; returns its id.
+
+        Ideas are ordinary records in the backlog tree — same writer, other
+        root. `marked` lands as the marked: frontmatter key (a date or "no").
+        """
+        extra = dict(kw.pop("extra", None) or {})
+        if marked is not None:
+            extra["marked"] = marked
+        return self.add(slug, body, tree="backlog", scope=scope,
+                        durability=durability, extra=extra, **kw)
 
     def draft(self, slug, body="A synthetic statement for testing.", **kw) -> str:
         """Write an <id>.md.draft — a record someone chose to compose over
@@ -354,6 +368,12 @@ class Ledger:
 
     def status(self, *args, **kw) -> Result:
         return self.zamm("status", *args, **kw)
+
+    def backlog(self, *args, **kw) -> Result:
+        return self.zamm("backlog", *args, **kw)
+
+    def backlog_lens(self) -> str:
+        return self.read("zamm-memory/.compiled/backlog.md")
 
     def check_all(self, *args, **kw) -> Result:
         return self.zamm("check", *args, **kw)

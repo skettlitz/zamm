@@ -1,4 +1,4 @@
-# SKILL-BLOCK:zamm:BEGIN version=sha:e6de29ab7001 date=2026-08-28
+# SKILL-BLOCK:zamm:BEGIN version=sha:72682e27434e date=2026-08-31
 # ZAMM deliberately lists NOTHING here.
 #
 # The Cursor Agent Sandbox maps every .cursorignore-matched path to EPERM,

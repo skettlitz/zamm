@@ -25,8 +25,10 @@ zamm_verify_roots() {
   for _zvr_rel in \
     zamm-memory \
     zamm-memory/knowledge \
+    zamm-memory/backlog \
     zamm-memory/archive \
     zamm-memory/archive/knowledge \
+    zamm-memory/archive/backlog \
     zamm-memory/archive/plans \
     zamm-memory/active \
     zamm-memory/active/plans \
@@ -82,7 +84,9 @@ zamm_verify_no_symlinks() {
   _zvl_root="$1"
   _zvl_bad=0
   for _zvl_tree in "$_zvl_root/zamm-memory/knowledge" \
-                   "$_zvl_root/zamm-memory/archive/knowledge"; do
+                   "$_zvl_root/zamm-memory/archive/knowledge" \
+                   "$_zvl_root/zamm-memory/backlog" \
+                   "$_zvl_root/zamm-memory/archive/backlog"; do
     [ -d "$_zvl_tree" ] || continue
     if ! _zvl_links=$(find "$_zvl_tree" -type l); then
       echo "ERROR: could not enumerate ${_zvl_tree#"$_zvl_root/"} (unreadable, not empty)." >&2
