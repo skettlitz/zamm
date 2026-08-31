@@ -134,7 +134,12 @@ Update the `zamm` skill directory, then have the agent run
 `zamm-run.sh scaffold`: it re-renders every scaffold-managed runtime file
 (`AGENTS.md` managed block, `.cursor/rules/zamm.mdc`, `.cursorignore`, `.cursorindexingignore`) from the installed skill.
 Rendered runtime files carry a skill-version stamp; agents notice the drift and offer this
-refresh on their own.
+refresh on their own. ZAMM writes no ignore rules into `.cursorignore` (in
+the Cursor sandbox an ignored path reads as EPERM, which breaks the commands
+that must enumerate the ledger); retired trees and plan scratch are hidden
+from search via `.cursorindexingignore` instead. A refresh removes the ignore
+rules older ZAMM versions wrote into `.cursorignore`, printing each one; rules
+you added yourself are left alone and reported by `status`.
 
 Upgrading a project from tiered card memory (v1/v2): run the migration guide
 `references/migrations/v1-v2-to-v3-memory.md` first; the scaffold refuses to run over a pre-v3

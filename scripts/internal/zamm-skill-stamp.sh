@@ -39,9 +39,15 @@ fi
 # all of scripts/. A change to any of them should read STALE until re-scaffold;
 # hashing only references/scaffold + references/templates + scripts left edits
 # to SKILL.md and references/distillation-triggers.md invisible to drift.
+# Dotfiles are pruned at every depth (files and directories both). The skill
+# tracks none of them, but a working copy collects them — .DS_Store above all —
+# and hashing those made the stamp differ between the author's tree and a clean
+# clone of the SAME commit, so every fresh clone reported STALE surfaces and no
+# re-scaffold could ever fix it. Anything normative lives in a non-dot path.
 digest=$({
   { [ -f "$SKILL_DIR/SKILL.md" ] && printf '%s\n' "$SKILL_DIR/SKILL.md"; }
-  find "$SKILL_DIR/references" "$SKILL_DIR/scripts" -type f 2>/dev/null
+  find "$SKILL_DIR/references" "$SKILL_DIR/scripts" \
+    -name '.*' -prune -o -type f -print 2>/dev/null
 } | LC_ALL=C sort | {
   while IFS= read -r f; do
     printf '%s\n' "${f#"$SKILL_DIR"}"

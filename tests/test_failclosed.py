@@ -16,6 +16,93 @@ from harness import (
     needs_permission_bits,
 )
 
+class PlanWorkdirIsNotLedgerState(ZammTest):
+    """`status` watches the plan tree at the depth the DIGEST compiles from.
+
+    A plan directory holds two very different things: the `.plan.md` the
+    compiler reads at -maxdepth 2, and `workdir/`, which the protocol offers
+    agents for transient artifacts and which nothing in the toolchain ever
+    reads. Scanning the whole tree conflated them, and both failure modes are
+    G3 confusions in opposite directions: scratch that cannot change the
+    digest reported the digest STALE (an error the user cannot clear by
+    rerunning — recompiling changes nothing), and scratch that could not be
+    READ took the whole command down, which is how the Cursor sandbox, where
+    ignored paths return EPERM, broke `status` outright.
+    """
+
+    def _plan_with_workdir(self):
+        self.led.add("alive", "A living record.")
+        self.led.add_plan("2026-01-05-working", status="Implementing")
+        workdir = (self.led.root /
+                   "zamm-memory/active/plans/2026-01-05-working/workdir")
+        workdir.mkdir(parents=True, exist_ok=True)
+        self.assertCode(self.led.compile(), EXIT_OK)
+        return workdir
+
+    def test_workdir_scratch_does_not_stale_the_digest(self):
+        """PRE-FIX: a note under workdir/ was newer than the digest, so
+        status said STALE and told the operator to recompile — which
+        produced a byte-identical digest and left the warning standing."""
+        workdir = self._plan_with_workdir()
+        self.assertNotIn_("STALE", self.led.status().out,
+                          "a freshly compiled ledger is not stale")
+
+        time.sleep(1.1)          # mtime granularity: make "newer" unambiguous
+        (workdir / "scratch-notes.md").write_text("Transient working notes.\n")
+
+        self.assertNotIn_(
+            "STALE", self.led.status().out,
+            "workdir is scratch the digest never reads: recompiling it "
+            "cannot change the digest, so it cannot make the digest stale")
+
+    def test_an_edited_plan_file_still_stales_the_digest(self):
+        """The other half: narrowing the scan must not blind it to the plan
+        state the digest DOES embed."""
+        self._plan_with_workdir()
+        plan = (self.led.root / "zamm-memory/active/plans/2026-01-05-working"
+                / "2026-01-05-working.plan.md")
+
+        time.sleep(1.1)
+        with open(plan, "a") as fh:
+            fh.write("\nAn edit to the plan itself.\n")
+
+        self.assertIn_("STALE", self.led.status().out,
+                       "an edited plan file must still make the digest stale")
+
+    @needs_permission_bits
+    def test_an_unreadable_workdir_does_not_break_status(self):
+        """PRE-FIX (and the bug that motivated this): the Cursor Agent
+        Sandbox maps .cursorignore'd paths to EPERM, plan workdirs were
+        ignored, and the unbounded scan therefore exited 4 —
+        'cannot enumerate the ledger or plan tree' — for every project with a
+        plan in progress. The tree the digest reads was perfectly readable."""
+        workdir = self._plan_with_workdir()
+        (workdir / "scratch-notes.md").write_text("Transient working notes.\n")
+        os.chmod(workdir, 0o000)
+        try:
+            r = self.led.status()
+        finally:
+            os.chmod(workdir, 0o755)
+
+        self.assertCode(r, EXIT_OK,
+                        "unreadable scratch is not an unreadable ledger")
+
+    @needs_permission_bits
+    def test_an_unreadable_plan_tree_still_fails_closed(self):
+        """Narrowing the scan must not soften G3 where it applies: the plan
+        directories themselves are digest input."""
+        self._plan_with_workdir()
+        locked = self.led.root / "zamm-memory/active/plans/2026-01-05-working"
+        os.chmod(locked, 0o000)
+        try:
+            r = self.led.status()
+        finally:
+            os.chmod(locked, 0o755)
+
+        self.assertCode(r, EXIT_UNREADABLE)
+        self.assertIn_("unreadable, not empty", r.err)
+
+
 class TestEnumerationFailsClosed(ZammTest):
     """PRE-FIX: `{ find; find; } | sort | awk` reported only awk's exit
     status, so a find that could not read a subtree returned 0 and the

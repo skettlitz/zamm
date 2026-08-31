@@ -351,6 +351,26 @@ print_status() {
   else
     printf '          rendered surfaces: %s\n' "$stamp"
   fi
+  # A zamm-memory rule in .cursorignore is the one project-local
+  # misconfiguration that breaks ZAMM from the outside: the Cursor Agent
+  # Sandbox maps matched paths to EPERM, and every checked enumeration then
+  # fails closed (G3) with a generic "unreadable" message that points nowhere
+  # near this file. Scaffold reclaims the rules IT wrote; a hand-added one is
+  # the user's, so this is a warning, not a deletion — and not an exit code:
+  # outside the sandbox the same file is harmless.
+  if [ -f "$ROOT/.cursorignore" ]; then
+    _cig=$(awk '{ l = $0; sub(/^[ \t]+/, "", l)
+                  if (l == "" || l ~ /^#/) next
+                  if (l ~ /zamm-memory/) printf "          %s\n", l }' \
+             "$ROOT/.cursorignore")
+    if [ -n "$_cig" ]; then
+      printf '          WARNING: .cursorignore lists zamm-memory path(s):\n'
+      printf '%s\n' "$_cig"
+      printf '          In the Cursor sandbox those read as EPERM and ZAMM commands\n'
+      printf '          fail closed. Move them to .cursorindexingignore (hidden from\n'
+      printf '          search, still readable), or re-run: zamm-run.sh scaffold\n'
+    fi
+  fi
   echo
 
   if [ ! -f "$DIGEST" ]; then
@@ -405,7 +425,7 @@ print_status() {
     # for type and supersedes edges, so an edited archived record makes the
     # digest just as stale as an edited live one. (Optional tree — a missing
     # operand would make find fail and read as unreadable.)
-    _nwtrees="$ROOT/zamm-memory/knowledge $ROOT/zamm-memory/active/plans"
+    _nwtrees="$ROOT/zamm-memory/knowledge"
     [ -d "$ROOT/zamm-memory/archive/knowledge" ] &&
       _nwtrees="$_nwtrees $ROOT/zamm-memory/archive/knowledge"
     # shellcheck disable=SC2086 -- deliberate word splitting over fixed paths
@@ -413,7 +433,19 @@ print_status() {
       echo 'zamm: cannot enumerate the ledger or plan tree (unreadable, not empty).' >&2
       exit 4
     fi
-    newer=$(printf '%s\n' "$_nwl" | grep -c . || true)
+    # Plans are scanned at the depth the digest actually compiles from — the
+    # same -mindepth 2 -maxdepth 2 '*.plan.md' the plan manifest uses. A full
+    # -depth walk here descended into <plan>/workdir/, which the digest never
+    # reads: a scratch note under workdir then reported the digest STALE when
+    # recompiling could not change a byte of it, and an unreadable workdir
+    # (the Cursor sandbox maps ignored paths to EPERM) failed the whole
+    # command closed. Matching the compiler's own depth fixes both.
+    if ! _nwp=$(find "$ROOT/zamm-memory/active/plans" \
+                  -mindepth 2 -maxdepth 2 -name '*.plan.md' -newer "$DIGEST"); then
+      echo 'zamm: cannot enumerate the ledger or plan tree (unreadable, not empty).' >&2
+      exit 4
+    fi
+    newer=$(printf '%s\n%s\n' "$_nwl" "$_nwp" | grep -c . || true)
     if [ "${newer:-0}" -gt 0 ]; then
       printf '          STALE: %s file(s) newer than the digest\n' "$newer"
       echo '          run: zamm-run.sh memory digest'

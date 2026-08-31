@@ -14,13 +14,19 @@ against whatever the code happens to do now.
 
 import concurrent.futures
 import re
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
 
 from harness import (
     EXIT_CONTRACT,
     EXIT_DEGRADED,
     EXIT_OK,
     EXIT_REFUSED_PUBLISH,
+    SKILL_DIR,
     ZammTest,
+    ignore_rules,
 )
 
 
@@ -341,10 +347,14 @@ class TestScaffoldSafety(ZammTest):
         self.assertEqual(before, self.led.read("AGENTS.md"), "file must be untouched")
         self.assertIn_("Never deploy on Fridays.", self.led.read("AGENTS.md"))
 
-    def test_cursorignore_keeps_user_rules_and_gains_zamm_rules(self):
+    def test_cursorignore_keeps_user_rules_and_gains_the_zamm_block(self):
         """PRE-FIX: whole-file ownership forced a choice between 'no ZAMM
-        rules' (normal run left the file alone) and 'user rules deleted'
-        (--overwrite-templates replaced the file).
+        block at all' (normal run left the file alone) and 'user rules
+        deleted' (--overwrite-templates replaced the file).
+
+        What the block CONTAINS is asserted once, in
+        test_surfaces.TestScaffoldRefresh — this test owns the ownership
+        model, not the rule layout.
         """
         self._bare_project()
         self.led.write(".cursorignore", "node_modules/**\n")
@@ -353,19 +363,55 @@ class TestScaffoldSafety(ZammTest):
 
         content = self.led.read(".cursorignore")
         self.assertIn_("node_modules/**", content)
-        self.assertIn_("zamm-memory/active/plans/**/workdir/**", content)
-        ignore_rules = [
-            ln.strip() for ln in content.splitlines()
-            if ln.strip() and not ln.strip().startswith("#")
-        ]
-        self.assertNotIn(
-            "zamm-memory/archive/**",
-            ignore_rules,
-            "archive must not be in .cursorignore: Cursor sandbox maps it to "
-            "EPERM and memory digest fail-closes",
-        )
-        index = self.led.read(".cursorindexingignore")
-        self.assertIn_("zamm-memory/archive/**", index)
+        self.assertEqual(content.count("SKILL-BLOCK:zamm:BEGIN"), 1)
+
+    def test_scaffold_reclaims_ignore_rules_it_wrote_before_the_split(self):
+        """PRE-FIX: the sandbox fix only rewrote the managed block, but every
+        project scaffolded before the block existed (skill <= v3's first
+        release wrote .cursorignore as a whole marker-less file) still had a
+        bare `zamm-memory/archive/**` line ABOVE it. Re-running scaffold —
+        the remedy the drift notice prescribes — reported success and left
+        `memory digest` failing closed in the Cursor sandbox exactly as
+        before.
+
+        Those exact lines are ZAMM's own past output, so scaffold reclaims
+        them; anything else in the file is the user's and is untouchable.
+        """
+        self._bare_project()
+        self.led.write(".cursorignore",
+                       "node_modules/**\n"
+                       "zamm-memory/archive/**\n"
+                       "zamm-memory/active/plans/**/workdir/**\n"
+                       "zamm-memory/archive/**/*.bak\n"
+                       "dist/\n")
+
+        r = self.led.scaffold()
+
+        self.assertCode(r, 0)
+        rules = ignore_rules(self.led.read(".cursorignore"))
+        self.assertNotIn("zamm-memory/archive/**", rules)
+        self.assertNotIn("zamm-memory/active/plans/**/workdir/**", rules)
+        self.assertIn_("removed:", r.out, "the reclaim must be reported")
+        # the user's rules — including one that merely RESEMBLES a ZAMM rule
+        self.assertIn("node_modules/**", rules)
+        self.assertIn("dist/", rules)
+        self.assertIn("zamm-memory/archive/**/*.bak", rules,
+                      "a user rule is not ours to delete, however similar")
+
+    def test_reclaiming_legacy_rules_is_idempotent(self):
+        """A second run has nothing left to reclaim and must say so by
+        staying silent — a scaffold that reports removals forever teaches
+        operators to ignore the message."""
+        self._bare_project()
+        self.led.write(".cursorignore", "zamm-memory/archive/**\n")
+        self.assertCode(self.led.scaffold(), 0)
+
+        r = self.led.scaffold()
+
+        self.assertCode(r, 0)
+        self.assertNotIn_("removed:", r.out)
+        self.assertEqual(
+            self.led.read(".cursorignore").count("SKILL-BLOCK:zamm:BEGIN"), 1)
 
     def test_scaffold_is_idempotent(self):
         """Re-running must not duplicate managed blocks or ignore rules."""
@@ -379,8 +425,13 @@ class TestScaffoldSafety(ZammTest):
         self.assertEqual(
             self.led.read(".gitignore").count("zamm-memory/.compiled/"), 1
         )
+        # Counting parsed rules, not substrings: both files are mostly prose
+        # now, and 'zamm-memory/archive/**' appears in their explanatory
+        # comments too — a substring count would pass on a commented-out rule
+        # and fail on a correct file that mentions it twice.
         self.assertEqual(
-            self.led.read(".cursorindexingignore").count("zamm-memory/archive/**"), 1
+            ignore_rules(self.led.read(".cursorindexingignore"))
+            .count("zamm-memory/archive/**"), 1
         )
 
     def test_drift_stamp_is_content_derived_without_git(self):
@@ -396,3 +447,48 @@ class TestScaffoldSafety(ZammTest):
         self.assertTrue(
             stamp.startswith("git:") or stamp.startswith("sha:"), stamp
         )
+
+    def _skill_copy(self):
+        dst = tempfile.mkdtemp(prefix="zamm-skill-")
+        self.addCleanup(shutil.rmtree, dst, ignore_errors=True)
+        shutil.copytree(
+            SKILL_DIR, dst, dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns(".git", "zamm-memory", "data"),
+        )
+        return Path(dst)
+
+    def _stamp_of(self, skill):
+        r = subprocess.run(
+            ["sh", str(skill / "scripts/internal/zamm-skill-stamp.sh")],
+            capture_output=True, text=True, check=True)
+        return r.stdout.strip()
+
+    def test_the_stamp_ignores_dotfiles_a_checkout_never_carries(self):
+        """PRE-FIX: the stamp hashed EVERY file under references/ and
+        scripts/, dotfiles included. macOS Finder litter (.DS_Store) in the
+        author's working copy therefore made the very same commit hash
+        differently there than in a clean clone — so every clone reported
+        'rendered surfaces STALE' out of the box, and re-scaffolding could
+        not fix it: it stamped the author's local value back in.
+
+        The skill tracks no dotfile, so pruning them costs no coverage.
+        """
+        skill = self._skill_copy()
+        clean = self._stamp_of(skill)
+
+        (skill / "references/.DS_Store").write_bytes(b"\x00Finder litter\n")
+        (skill / "scripts/.DS_Store").write_bytes(b"\x00Finder litter\n")
+
+        self.assertEqual(clean, self._stamp_of(skill),
+                         "untracked dotfiles must not move the stamp")
+
+    def test_the_stamp_still_moves_when_a_real_fragment_changes(self):
+        """The pruning must not blunt the signal it exists to carry."""
+        skill = self._skill_copy()
+        before = self._stamp_of(skill)
+
+        target = skill / "references/scaffold/cursorindexingignore"
+        target.write_text(target.read_text() + "\n# an edit\n")
+
+        self.assertNotEqual(before, self._stamp_of(skill),
+                            "an edited scaffold source must read STALE")

@@ -8,8 +8,11 @@ check for the invocation, not the mention.
 
 import re
 import shutil
+import subprocess
+import tempfile
+from pathlib import Path
 
-from harness import EXIT_OK, SKILL_DIR, ZammTest
+from harness import EXIT_OK, SKILL_DIR, ZammTest, ignore_rules
 
 
 class TestStatusScript(ZammTest):
@@ -100,26 +103,53 @@ class TestScaffoldRefresh(ZammTest):
         self.assertCode(r, 0)
         content = self.led.read(".cursorignore")
         self.assertIn_("node_modules/**", content)
-        self.assertIn_("zamm-memory/active/plans/**/workdir/**", content)
         self.assertEqual(content.count("SKILL-BLOCK:zamm:BEGIN"), 1)
 
-    def test_cursorignore_does_not_hide_archive_from_the_compiler(self):
-        """Cursor Agent Sandbox maps .cursorignore to EPERM for find(1).
-        Archive/knowledge must stay readable so memory digest can enumerate
-        retired ids; hide it from search via .cursorindexingignore instead.
+    def test_does_not_delete_user_rules_from_cursorindexingignore(self):
+        """.cursorindexingignore is a second user-owned managed-block target,
+        and it now carries every ZAMM ignore rule — so it needs the same lock
+        .cursorignore has had since the whole-file era ended."""
+        self.led.write(".cursorindexingignore",
+                       "build-artifacts/**\n" + self.led.read(".cursorindexingignore"))
+
+        r = self.led.scaffold()
+
+        self.assertCode(r, 0)
+        content = self.led.read(".cursorindexingignore")
+        self.assertIn_("build-artifacts/**", content)
+        self.assertIn("zamm-memory/archive/**", ignore_rules(content))
+        self.assertEqual(content.count("SKILL-BLOCK:zamm:BEGIN"), 1)
+
+    def test_zamm_writes_no_rules_into_cursorignore(self):
+        """The Cursor Agent Sandbox maps every .cursorignore path to EPERM,
+        and ZAMM enumerates its trees with checked find(1) calls that fail
+        closed on an unreadable path (invariants G3). So no zamm-memory rule
+        may live here AT ALL — not archive/** (which broke `memory digest`),
+        and not the plan workdir rules (which broke `status` and, because the
+        self-containment scan must walk workdir/ to enforce G5, `plan
+        archive`). Everything is hidden from search via .cursorindexingignore
+        instead: excluded from the index, still readable.
+
+        The assertion is deliberately a property of ALL rules rather than a
+        list of forbidden spellings: '/zamm-memory/archive/**' and
+        'zamm-memory/archive/' hide the tree exactly as well, and a test that
+        names one string would let either back in.
         """
-        ignore = self.led.read(".cursorignore")
-        ignore_rules = [
-            ln.strip() for ln in ignore.splitlines()
-            if ln.strip() and not ln.strip().startswith("#")
-        ]
-        self.assertNotIn("zamm-memory/archive/**", ignore_rules)
-        self.assertIn("zamm-memory/active/plans/**/workdir/**", ignore_rules)
-        self.assertIn("zamm-memory/archive/plans/**/workdir/**", ignore_rules)
-        self.assertIn_(
-            "zamm-memory/archive/**",
-            self.led.read(".cursorindexingignore"),
-        )
+        for rule in ignore_rules(self.led.read(".cursorignore")):
+            self.assertNotIn(
+                "zamm-memory", rule,
+                "no zamm-memory rule may sit in .cursorignore: the Cursor "
+                "sandbox maps it to EPERM and ZAMM commands fail closed",
+            )
+
+    def test_cursorindexingignore_hides_every_retired_tree(self):
+        """The other half of the split: what left .cursorignore has to be
+        here, or retired records and plan scratch flood codebase search."""
+        rules = ignore_rules(self.led.read(".cursorindexingignore"))
+
+        self.assertIn("zamm-memory/archive/**", rules)
+        self.assertIn("zamm-memory/active/plans/**/workdir/**", rules)
+        self.assertIn("zamm-memory/archive/plans/**/workdir/**", rules)
 
     def test_agents_block_is_rerendered_either_way(self):
         """Documented behaviour: the AGENTS.md managed block refreshes on a
@@ -135,6 +165,81 @@ class TestScaffoldRefresh(ZammTest):
                 self.assertEqual(content.count("SKILL-BLOCK:zamm:BEGIN"), 1)
                 self.assertEqual(content.count("SKILL-BLOCK:zamm:END"), 1)
                 self.assertIn_("Session start (MUST)", content)
+
+
+class TestScaffoldTemplateIntegrity(ZammTest):
+    """Half an ignore split must never look healthy.
+
+    The two ignore surfaces are one decision expressed in two files: rules
+    leave .cursorignore (where the Cursor sandbox turns them into EPERM) only
+    because .cursorindexingignore picks them up. Applying one side without
+    the other silently un-hides the whole archive from search, or worse,
+    leaves the EPERM hazard in place — so a missing template is refused the
+    way a missing protocol fragment is, not skipped.
+    """
+
+    def setUp(self):
+        super().setUp()
+        shutil.rmtree(self.led.root / "zamm-memory")
+        self.assertCode(self.led.scaffold(), 0)
+
+    def _skill_copy(self):
+        dst = tempfile.mkdtemp(prefix="zamm-skill-")
+        self.addCleanup(shutil.rmtree, dst, ignore_errors=True)
+        shutil.copytree(
+            SKILL_DIR, dst, dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns(".git", "zamm-memory", "data"),
+        )
+        return Path(dst)
+
+    def _scaffold_from(self, skill):
+        return subprocess.run(
+            ["bash", f"{skill}/scripts/zamm-run.sh",
+             "--project-root", str(self.led.root), "scaffold"],
+            capture_output=True, text=True,
+        )
+
+    def test_a_missing_ignore_template_refuses_instead_of_skipping(self):
+        """PRE-FIX both upserts sat behind `[ -f "$SCAFFOLD_DIR/..." ]`, so a
+        skill tree missing one template scaffolded successfully and told the
+        operator to review a file it had never written."""
+        skill = self._skill_copy()
+        (skill / "references/scaffold/cursorindexingignore").unlink()
+
+        r = self._scaffold_from(skill)
+
+        self.assertNotEqual(r.returncode, 0,
+                            "a half-applied ignore split must refuse")
+        self.assertIn_("cursorindexingignore", r.stdout + r.stderr)
+
+    def test_repair_advice_uses_the_markers_of_the_file_it_refuses(self):
+        """PRE-FIX the advice hardcoded the AGENTS.md HTML-comment marker for
+        every caller. Following it on a gitignore-syntax file wrote a marker
+        the script can never match (its regex is ^# SKILL-BLOCK:zamm:BEGIN) —
+        and an HTML comment there is a live ignore PATTERN, not a comment."""
+        index = self.led.root / ".cursorindexingignore"
+        index.write_text(index.read_text().replace(
+            "# SKILL-BLOCK:zamm:BEGIN", "# SKILL-BLOCK:zamm:MANGLED", 1))
+
+        r = self.led.scaffold()
+
+        self.assertNotEqual(r.code, 0, "a malformed block must refuse")
+        advice = r.out + r.err
+        self.assertIn_("begin: # SKILL-BLOCK:zamm:BEGIN", advice)
+        self.assertNotIn_("<!--", advice,
+                          "gitignore syntax has no HTML comments")
+
+    def test_agents_md_still_gets_html_comment_advice(self):
+        """The other side of the same fix: AGENTS.md is Markdown and its
+        markers really are HTML comments."""
+        agents = self.led.root / "AGENTS.md"
+        agents.write_text(agents.read_text().replace(
+            "<!-- SKILL-BLOCK:zamm:BEGIN", "<!-- SKILL-BLOCK:zamm:MANGLED", 1))
+
+        r = self.led.scaffold()
+
+        self.assertNotEqual(r.code, 0)
+        self.assertIn_("begin: <!-- SKILL-BLOCK:zamm:BEGIN", r.out + r.err)
 
 
 class TestHelp(ZammTest):

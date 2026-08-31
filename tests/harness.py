@@ -456,6 +456,20 @@ class ZammTest(unittest.TestCase):
 # with the rest of the fixture builders.
 # ---------------------------------------------------------------------
 
+def ignore_rules(text):
+    """The ACTIVE rules of a gitignore-syntax file: comments and blank lines
+    dropped.
+
+    Assertions about ignore files have to parse, not substring-match: the
+    scaffold blocks are mostly prose now (".cursorignore" carries a note
+    explaining why ZAMM writes no rules there), so a raw `in` check passes on
+    a rule that is only mentioned in a comment — and a raw `not in` check
+    fails on the explanation itself.
+    """
+    return [ln.strip() for ln in text.splitlines()
+            if ln.strip() and not ln.strip().startswith("#")]
+
+
 RUN = str(SCRIPTS / "zamm-run.sh")
 
 HELP_PATHS = [

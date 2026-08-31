@@ -256,6 +256,40 @@ class TestDriftDetection(ZammTest):
 
         self.assertIn_("STALE", self.led.status().out)
 
+    def test_status_warns_about_a_hand_added_zamm_rule_in_cursorignore(self):
+        """The one project-local misconfiguration that breaks ZAMM from the
+        outside: the Cursor Agent Sandbox maps .cursorignore paths to EPERM,
+        so a zamm-memory rule there makes checked enumerations fail closed
+        with a generic 'unreadable' message that points nowhere near the
+        file that caused it. Scaffold reclaims the rules IT wrote; a rule the
+        user added is theirs, so status names it instead of deleting it."""
+        self._scaffold_fresh()
+        self.led.add("a-rule", "A statement.")
+        self.led.compile()
+        self.led.write(".cursorignore",
+                       self.led.read(".cursorignore") + "\nzamm-memory/**\n")
+
+        r = self.led.status()
+
+        self.assertCode(r, EXIT_OK, "advisory: outside the sandbox it is harmless")
+        self.assertIn_("WARNING: .cursorignore lists zamm-memory path(s):", r.out)
+        self.assertIn_("zamm-memory/**", r.out)
+        self.assertIn_(".cursorindexingignore", r.out, "name the remedy")
+
+    def test_status_is_quiet_about_a_cursorignore_with_no_zamm_rules(self):
+        """The scaffolded .cursorignore is nothing BUT prose about
+        zamm-memory — a substring check would warn on every healthy
+        project, which is how advisory warnings get ignored."""
+        self._scaffold_fresh()
+        self.led.add("a-rule", "A statement.")
+        self.led.compile()
+
+        r = self.led.status()
+
+        self.assertIn_("zamm-memory", self.led.read(".cursorignore"),
+                       "the block explains itself in comments")
+        self.assertNotIn_("WARNING: .cursorignore", r.out)
+
     def test_overwrite_templates_flag_is_gone(self):
         """The legacy mode flag is removed from the scaffold script itself,
         not just hidden by the dispatcher."""

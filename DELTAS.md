@@ -724,3 +724,56 @@ Finally the falsification the requirements pass skipped: the three genuinely
 new locks (the live-and-archived warning, the case-fold diagnostic, and
 plan-create loser detection) were run against baselines with each defect
 reinjected, and all three fail there and pass here. 389 tests green.
+
+## Locked 2026-08-28 (ZAMM writes nothing into .cursorignore)
+
+The Cursor Agent Sandbox maps every `.cursorignore`-matched path to EPERM,
+and ZAMM enumerates its trees with checked `find(1)` calls that fail closed
+on an unreadable path (G3). Those two facts make `.cursorignore` an unusable
+place for a `zamm-memory` rule: the rule does not hide the tree from ZAMM, it
+breaks whichever command walks it. Commit 6c37ed1 moved `archive/**` out
+after `memory digest` broke, but kept the plan-workdir rules on the theory
+that workdirs are scratch nothing reads. Two commands read them anyway —
+`status` (staleness scan) and `plan archive`, whose self-containment scan
+*must* walk `workdir/` because G5 refuses a symlink at any position — so both
+still failed closed in the sandbox.
+
+So the rule is now categorical rather than case-by-case: **ZAMM writes no
+rules into `.cursorignore` at all**, only a comment explaining why. Every
+rule lives in `.cursorindexingignore`, which keeps retired trees and plan
+scratch out of codebase search without denying reads. There is nothing left
+to reason about per-path, which is the point — the previous split invited
+exactly the judgement call that got it wrong twice.
+
+Three consequences, each locked by a test:
+
+- **Re-scaffold reclaims what earlier versions wrote.** Projects scaffolded
+  before the managed block existed (skill ≤ the first v3 release wrote
+  `.cursorignore` as a whole marker-less file) kept a bare
+  `zamm-memory/archive/**` line above the block, so the prescribed remedy —
+  re-run scaffold — reported success and left the bug in place. Scaffold now
+  removes those exact lines wherever they sit and prints each removal. Exact
+  whole-line matches only: a user rule that merely resembles one
+  (`zamm-memory/archive/**/*.bak`) is theirs and stays, and `status` reports
+  a hand-added `zamm-memory` rule as a warning rather than deleting it.
+- **`status` watches the plan tree at the depth the digest compiles from**
+  (`-mindepth 2 -maxdepth 2 -name '*.plan.md'`, the plan manifest's own
+  depth). The unbounded walk conflated the `.plan.md` the compiler reads with
+  `workdir/`, which nothing reads: scratch reported the digest STALE when
+  recompiling could not change a byte of it, and unreadable scratch took the
+  whole command down.
+- **The skill stamp ignores dotfiles.** It hashed every file under
+  `references/` and `scripts/`, so a `.DS_Store` in a working copy made the
+  same commit hash differently there than in a clean clone — every clone
+  reported STALE surfaces, and re-scaffolding could not fix it because it
+  stamped the local value back in. The skill tracks no dotfile, so pruning
+  them costs no coverage.
+
+Smaller repairs in the same pass: a missing ignore template is now a hard
+error instead of a silent skip (half an ignore split must not look healthy);
+the malformed-block repair advice quotes the markers of the file it is
+refusing rather than always AGENTS.md's HTML-comment form, which for a
+gitignore-syntax file told the user to write a marker the script can never
+match; and the v1/v2→v3 migration guide no longer claims
+`archive/knowledge/` is unread by the compiler — the claim that produced this
+whole class of bug. 426 tests green.

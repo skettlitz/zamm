@@ -248,7 +248,7 @@ ensure_line() {
 # after it. Structure is validated first and anything unexpected refuses:
 # never "repair" a malformed block by dropping an unbounded tail.
 assert_managed_block_wellformed() {
-  local path="$1" begin_regex="$2" end_marker="$3"
+  local path="$1" begin_regex="$2" end_marker="$3" begin_marker="$4"
   local nbegin nend
 
   nbegin="$(grep -Ec "$begin_regex" "$path" || true)"
@@ -273,12 +273,86 @@ assert_managed_block_wellformed() {
   else
     echo "ERROR: $path has a ZAMM end marker with no begin marker."
   fi
+  # Both markers come from the CALLER. Hardcoding the AGENTS.md HTML-comment
+  # form here told a user with a damaged .cursorignore to write a marker this
+  # script can never match (its regex is ^# SKILL-BLOCK:zamm:BEGIN), and an
+  # HTML comment in a gitignore-syntax file is a live pattern, not a comment.
   echo "       Refusing to edit: repairing this automatically would mean deleting"
   echo "       content the scaffold does not own. Fix the markers by hand, or"
   echo "       delete the ZAMM block entirely and re-run. Expected markers:"
-  echo "         begin: <!-- SKILL-BLOCK:zamm:BEGIN version=... date=... -->"
+  echo "         begin: ${begin_marker}"
   echo "         end:   ${end_marker}"
+  echo "       (the version= and date= values are not checked)"
   exit 1
+}
+
+# Rules THIS skill wrote into .cursorignore before the sandbox EPERM hazard
+# was understood: the whole-file era (up to v3's first release) shipped them
+# as the entire file, and the managed-block era shipped them inside the block.
+# A re-scaffold removes them wherever they sit, because they are ZAMM's own
+# past output — reclaiming it is not editing the user's rules, git still has
+# them, and leaving them behind means the prescribed remedy ("re-run
+# scaffold") reports success while the sandbox failure it fixes persists.
+#
+# Exact whole-line matches only. A user rule that merely resembles one of
+# these (zamm-memory/archive/**/*.bak, say) is theirs and stays.
+ZAMM_LEGACY_IGNORE_RULES="zamm-memory/archive/**
+zamm-memory/active/plans/**/workdir/**
+zamm-memory/archive/plans/**/workdir/**"
+
+strip_legacy_ignore_lines() {
+  local path="$1"
+  [ -f "$path" ] || return 0
+  local filtered_file notices_file rule
+
+  # Sibling temps for the same reason as upsert_managed_block_at_end: the
+  # final mv is an atomic rename only within one filesystem.
+  filtered_file="$(mktemp "${path}.zamm.XXXXXX")"
+  notices_file="$(mktemp "${path}.zamm.XXXXXX")"
+  # The rule list reaches awk through the ENVIRONMENT, not -v: a -v value
+  # containing a real newline is rejected outright by BSD awk ("newline in
+  # string"), and this list is one rule per line.
+  if ! ZAMM_LEGACY_RULES="$ZAMM_LEGACY_IGNORE_RULES" awk \
+    -v begin_regex="$ZAMM_IGNORE_BEGIN_MARKER_REGEX" \
+    -v end_marker="$ZAMM_IGNORE_END_MARKER" \
+    -v filtered="$filtered_file" \
+    -v notices="$notices_file" '
+    BEGIN {
+      n = split(ENVIRON["ZAMM_LEGACY_RULES"], r, "\n")
+      for (i = 1; i <= n; i++) legacy[r[i]] = 1
+      in_block = 0
+    }
+    {
+      if (in_block == 0 && ($0 ~ begin_regex)) {
+        in_block = 1
+      } else if (in_block == 1 && ($0 == end_marker)) {
+        in_block = 0
+      } else if (in_block == 0 && ($0 in legacy)) {
+        # Outside the block only: what is inside is replaced wholesale by the
+        # upsert that follows, and reporting it as "removed" would announce a
+        # deletion the user never had a say in.
+        print $0 > notices
+        next
+      }
+      print > filtered
+    }
+  ' "$path"; then
+    rm -f "$filtered_file" "$notices_file"
+    echo "ERROR: could not read $path to check it for legacy ZAMM rules."
+    exit 1
+  fi
+
+  if [ -s "$notices_file" ]; then
+    while IFS= read -r rule; do
+      [ -n "$rule" ] || continue
+      echo "  removed: $path: $rule (legacy ZAMM rule, now in .cursorindexingignore)"
+    done < "$notices_file"
+    copy_mode "$path" "$filtered_file"
+    mv "$filtered_file" "$path"
+  else
+    rm -f "$filtered_file"      # nothing to reclaim: do not even touch mtime
+  fi
+  rm -f "$notices_file"
 }
 
 upsert_managed_block_at_end() {
@@ -291,7 +365,7 @@ upsert_managed_block_at_end() {
   local filtered_file
 
   ensure_file_exists "$path"
-  assert_managed_block_wellformed "$path" "$begin_marker_regex" "$end_marker"
+  assert_managed_block_wellformed "$path" "$begin_marker_regex" "$end_marker" "$begin_marker"
 
   if grep -Eq "$begin_marker_regex" "$path"; then
     had_existing_block=1
@@ -403,26 +477,42 @@ ensure_line "$PROJECT_ROOT/.gitattributes" "zamm-memory/**/*.md text eol=lf"
 # choosing between "no ZAMM rules at all" (normal run kept their file
 # untouched) and "your rules deleted" (--overwrite-templates replaced it).
 #
-# Split is load-bearing: Cursor Agent Sandbox maps .cursorignore to EPERM
-# for find(1), and the compiler must enumerate archive/knowledge. Workdirs
-# stay in .cursorignore (scratch the compiler does not read). Retired trees
-# go in .cursorindexingignore (hidden from search, still readable to digest).
-if [ -f "$SCAFFOLD_DIR/cursorignore" ]; then
+# The split is load-bearing, and it is one-sided: the Cursor Agent Sandbox
+# maps every .cursorignore-matched path to EPERM, so a zamm-memory rule there
+# makes a checked find(1) fail closed (invariants G3) and breaks the command
+# that walks that tree. ZAMM therefore writes NO rules into .cursorignore at
+# all — only the note explaining why — and hides retired trees and plan
+# scratch via .cursorindexingignore, which excludes from the index without
+# denying reads. Both files still get a managed block: the note has to live
+# somewhere a reader looks, and the block is also what lets a re-scaffold
+# reclaim the rules older versions of this skill wrote (see
+# strip_legacy_ignore_lines).
+#
+# A missing template is a hard error, not a silent skip: half of this split
+# applied (archive out of .cursorignore, nothing hiding it from the index, or
+# worse, the reverse) is exactly the state that must not look healthy. Same
+# rule as the protocol fragments below.
+for surface in cursorignore cursorindexingignore; do
+  ignore_src="$SCAFFOLD_DIR/$surface"
+  if [ ! -f "$ignore_src" ]; then
+    echo "ERROR: missing scaffold template file: $ignore_src"
+    exit 1
+  fi
+  # Assign first, then pass: the exit status of a command substitution in
+  # ARGUMENT position is discarded, so an unreadable template would have
+  # rendered an empty managed block while scaffold reported success. As an
+  # assignment, set -e sees the failure.
+  ignore_content="$(cat "$ignore_src")"
+  if [ "$surface" = "cursorignore" ]; then
+    strip_legacy_ignore_lines "$PROJECT_ROOT/.cursorignore"
+  fi
   upsert_managed_block_at_end \
-    "$PROJECT_ROOT/.cursorignore" \
+    "$PROJECT_ROOT/.$surface" \
     "$ZAMM_IGNORE_BEGIN_MARKER" \
     "$ZAMM_IGNORE_BEGIN_MARKER_REGEX" \
     "$ZAMM_IGNORE_END_MARKER" \
-    "$(cat "$SCAFFOLD_DIR/cursorignore")"
-fi
-if [ -f "$SCAFFOLD_DIR/cursorindexingignore" ]; then
-  upsert_managed_block_at_end \
-    "$PROJECT_ROOT/.cursorindexingignore" \
-    "$ZAMM_IGNORE_BEGIN_MARKER" \
-    "$ZAMM_IGNORE_BEGIN_MARKER_REGEX" \
-    "$ZAMM_IGNORE_END_MARKER" \
-    "$(cat "$SCAFFOLD_DIR/cursorindexingignore")"
-fi
+    "$ignore_content"
+done
 
 # --- AGENTS.md + Cursor rule (composed from canonical fragments) ---
 # The always-on surfaces carry the compact ROUTER, not the full protocol:

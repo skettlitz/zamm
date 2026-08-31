@@ -139,13 +139,25 @@ archive tree) as a migration source.
 3. Migrate lineage only as provenance: `Ln` chains may be noted in
    `migrated-from` context or Background; they are not v3 supersede edges.
 4. Delete the four tier files (git history preserves them). Leave
-   `zamm-memory/archive/knowledge/` untouched — it is not part of the v3
-   ledger and is not scanned by the compiler.
+   `zamm-memory/archive/knowledge/` untouched — retired chains stay where
+   they are. It IS read by the toolchain: the compiler parses archived
+   headers for type and supersede edges, `memory show` resolves archived
+   ids, and `status` watches the tree for staleness. So it must stay
+   readable — never hide it behind `.cursorignore` (see step 5).
 5. Run `bash <zamm-skill>/scripts/zamm-run.sh scaffold` — on a repo without
    `active/knowledge/` and with the new records in place it will create the
    ledger directories, append `zamm-memory/.compiled/` to `.gitignore`,
-   append the `.gitattributes` line, refresh `AGENTS.md` and
-   `.cursor/rules/zamm.mdc` from the v3 protocol, and write `VERSION` as `3`.
+   append the `.gitattributes` line, refresh `AGENTS.md`,
+   `.cursor/rules/zamm.mdc`, `.cursorignore` and `.cursorindexingignore`
+   from the v3 protocol, and write `VERSION` as `3`. The two ignore files
+   are a deliberate split: the Cursor Agent Sandbox maps every
+   `.cursorignore` path to EPERM, and ZAMM enumerates its trees with checked
+   `find(1)` calls that fail closed on an unreadable path, so ZAMM writes no
+   rules into `.cursorignore` at all and hides retired trees and plan
+   scratch via `.cursorindexingignore` instead. If a pre-v3 scaffold left
+   `zamm-memory/archive/**` or a plan-workdir rule in your `.cursorignore`,
+   this run removes those lines and says so; a `zamm-memory` rule you added
+   yourself is left alone and reported by `status` as a warning.
    (The scaffold refuses to run while tier card files remain under
    `zamm-memory/active/knowledge/` — the guard that you completed step 4. A
    leftover pre-v3 `VERSION` value is expected at this point; the scaffold

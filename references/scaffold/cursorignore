@@ -1,6 +1,13 @@
-# Plan workdirs are scratch, not protocol. Archive/knowledge must NOT be
-# listed here: Cursor Agent Sandbox maps .cursorignore to EPERM, and
-# `memory digest` fail-closes if it cannot find(1) archived record names.
-# Hide retired trees from search via .cursorindexingignore instead.
-zamm-memory/active/plans/**/workdir/**
-zamm-memory/archive/plans/**/workdir/**
+# ZAMM deliberately lists NOTHING here.
+#
+# The Cursor Agent Sandbox maps every .cursorignore-matched path to EPERM,
+# and the ZAMM toolchain enumerates its trees with checked find(1) calls that
+# fail closed on an unreadable path (references/invariants.md, G3: absent is
+# data, unreadable is an error). Any zamm-memory rule in this file therefore
+# breaks a ZAMM command inside the sandbox: archive/** broke `memory digest`,
+# and the plan workdir rules broke `status` and `plan archive`, whose
+# self-containment scan must walk workdir/ to enforce G5.
+#
+# Retired trees and plan scratch are hidden from codebase search via
+# .cursorindexingignore instead: excluded from the index, still readable.
+# Do not move those rules back here.
