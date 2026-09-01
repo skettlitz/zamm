@@ -866,3 +866,43 @@ carries a record about — so a deleted backlog-state.tsv killed status
 mid-output at exit 2 with no diagnostic. The lens/state pair now gets the
 same generation-coherence check as the knowledge sidecar: report,
 name the recompile remedy, finish the report. 474 tests green.
+
+## Locked 2026-09-01 (backlog round 3: the graph is the authority)
+
+A ten-angle adversarial review of round 2 produced 23 findings, eight of
+the twelve correctness ones reproduced live, and they shared one lesson
+round 2 had only half-learned: promote and the marked lane were still
+reasoning over PROXIES for the supersede graph instead of the graph. The
+fix is a new read-only compile mode — `--list-graph`: id, union-find
+group, liveness, applied edges — and a promote rebuilt on it. A plan
+origin belongs to the idea being promoted iff it is a graph ANCESTOR of
+the resolved live head, so an interrupted promote converges even after
+the head advances past the recorded origin (pre-fix, that retry printed
+"Already promoted", exited 0, and never wrote its tombstone); a completed
+promote replays as a no-op iff the origin family is fully retired, so the
+exact id, an ancestor id, and the bare slug all converge while an
+unrelated same-slug idea — a different component — can never be adopted.
+resolve_live_idea now returns TYPED codes (live / none / ambiguous /
+unreadable) with diagnostics captured once: ambiguity lists ids again,
+unreadability refuses with G3 before any mutation decision, a superseded
+needle names its live successor, and the find-glob probe that called two
+live ideas "retired" and treated `*` as a pattern is deleted. The origin
+scan reads PLANFILE and ARCHFILE rows in one awk pass (an archived plan
+is the normal end state and must keep replay convergent), and the
+manifest damage check is an ALLOWLIST of the five known-good tags — a
+blocklist of anomaly tags fails open the day the manifest grows one.
+
+The marked lane's tombstone rule is now NODE-based: build_tombkill marks
+every record behind any tombstone as lane-dead in one multi-source BFS,
+so a revival starts outside the lane whichever record it supersedes —
+the path-based wall held only for revivals that superseded the tombstone
+itself, and superseding the dead CONTENT record inherited the dead mark.
+The wall is REMOVED from the dominance pass, where it severed real
+descent and handed comparable decisions back to the random-suffix
+tiebreak; dominance is one multi-source BFS of pure ancestry, and
+pushsups() is the single definition of edge expansion for every walk.
+Cleanups from the same review: one guarded read of the backlog sidecar
+behind the shared pair_coherent (closing the TOCTOU abort), id_to_slug
+for the shell's id grammar, and the four test gaps locked — both revival
+shapes, the no-match diagnostic, format-proof same-day assertions, and a
+named failure when Origin-idea goes missing. 479 tests green.

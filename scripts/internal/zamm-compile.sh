@@ -28,6 +28,7 @@ CHECK=0
 LIST_INERT=0
 LIST_LIVE=0
 LIST_VOTES=0
+LIST_GRAPH=0
 CANDIDATE=""
 TREE="knowledge"
 while [ $# -gt 0 ]; do
@@ -70,12 +71,16 @@ while [ $# -gt 0 ]; do
       LIST_LIVE=1
       shift
       ;;
+    --list-graph)
+      LIST_GRAPH=1
+      shift
+      ;;
     --list-votes)
       LIST_VOTES=1
       shift
       ;;
     -h|--help)
-      echo "Usage: zamm-compile.sh [--project-root <path>] [--tree knowledge|backlog] [--check [--with-candidate <draft>]] [--list-live] [--list-inert] [--list-votes]"
+      echo "Usage: zamm-compile.sh [--project-root <path>] [--tree knowledge|backlog] [--check [--with-candidate <draft>]] [--list-live] [--list-inert] [--list-votes] [--list-graph]"
       echo "  --with-candidate validates the ledger AS IF the named .md.draft were"
       echo "  published, without renaming anything into the live namespace."
       exit 0
@@ -277,7 +282,7 @@ fi
 
 set +e
 awk \
-  -v today="$TODAY" -v check="$CHECK" -v listinert="$LIST_INERT" -v listlive="$LIST_LIVE" -v listvotes="$LIST_VOTES" -v root="$PROJECT_ROOT/" -v statefile="$STATE_TMP" -v lens="$TREE" '
+  -v today="$TODAY" -v check="$CHECK" -v listinert="$LIST_INERT" -v listlive="$LIST_LIVE" -v listvotes="$LIST_VOTES" -v listgraph="$LIST_GRAPH" -v root="$PROJECT_ROOT/" -v statefile="$STATE_TMP" -v lens="$TREE" '
 BEGIN {
   DIGEST_MAX = 75       # full digest blocks (actionable: headline + elaboration)
   HEADLINE_MAX = 150    # headline-only reminders (topic exists; open if relevant)
@@ -1100,6 +1105,22 @@ function addvotes(voter, list, sign, w,   m, t, tgt, av) {
   }
 }
 
+# Enqueue the applied supersede targets of cur onto q; returns the new tail
+# index. ONE definition of the edge expansion every ancestor walk uses
+# (chainagg, effmark collection, effmark dominance) — three hand-copied
+# loops once began to drift, and walks that traverse different graphs are
+# exactly how lane resolution goes silently wrong.
+function pushsups(q, qt, cur,   m, tg, t, tgt) {
+  if (asup[cur] != "") {
+    m = split(asup[cur], tg, ",")
+    for (t = 1; t <= m; t++) {
+      tgt = trim(tg[t])
+      if (tgt != "") q[++qt] = tgt
+    }
+  }
+  return qt
+}
+
 # DAG walk over the ancestor set: which 1 = up count, 2 = down count, 3 = score.
 # Walks asup[] (the APPLIED edges) only, so votes aggregate across exactly the
 # lineage that liveness recognises — never through a quarantined or dangling
@@ -1107,7 +1128,7 @@ function addvotes(voter, list, sign, w,   m, t, tgt, av) {
 # The visited set (vseen/epoch) makes each node contribute once, which both
 # handles diamonds and bounds the walk by the ledger size, so there is no
 # arbitrary node cap to silently truncate a long ancestry.
-function chainagg(id, which,   q, qh, qt, cur, m, tg, t, tgt, tot) {
+function chainagg(id, which,   q, qh, qt, cur, tot) {
   epoch++
   tot = 0; qh = 1; qt = 1; q[1] = id
   while (qh <= qt) {
@@ -1117,15 +1138,40 @@ function chainagg(id, which,   q, qh, qt, cur, m, tg, t, tgt, tot) {
     if (which == 1)      tot += vup_id[cur]
     else if (which == 2) tot += vdn_id[cur]
     else                 tot += vsc_id[cur]
-    if (asup[cur] != "") {
-      m = split(asup[cur], tg, ",")
-      for (t = 1; t <= m; t++) {
-        tgt = trim(tg[t])
-        if (tgt != "") q[++qt] = tgt
-      }
-    }
+    qt = pushsups(q, qt, cur)
   }
   return tot
+}
+
+# The dead lanes: a tombstone kills the marked: key of every record BEHIND
+# it — its victims and their entire ancestor cones — as a property of the
+# NODES, not of the path a later walk happens to take. The earlier path-based
+# wall held only when a revival superseded the tombstone record itself;
+# superseding the dead CONTENT record directly (the natural gesture — it is
+# the record that carries the content) sidestepped the wall and inherited the
+# dead mark (round-3 review finding, reproduced). One multi-source BFS per
+# compile, seeded with every tombstone applied-edge target.
+function build_tombkill(   i, id, qh, qt, m, tg, t, tgt, cur) {
+  qh = 1; qt = 0
+  for (i = 1; i <= nrec; i++) {
+    id = order[i]
+    if ((id in erased) || (id in bad)) continue
+    if (rtype[id] != "tombstone" || asup[id] == "") continue
+    m = split(asup[id], tg, ",")
+    for (t = 1; t <= m; t++) {
+      tgt = trim(tg[t])
+      if (tgt != "" && !(tgt in tombkilled)) { tombkilled[tgt] = 1; tkq[++qt] = tgt }
+    }
+  }
+  while (qh <= qt) {
+    cur = tkq[qh++]
+    if (asup[cur] == "") continue
+    m = split(asup[cur], tg, ",")
+    for (t = 1; t <= m; t++) {
+      tgt = trim(tg[t])
+      if (tgt != "" && !(tgt in tombkilled)) { tombkilled[tgt] = 1; tkq[++qt] = tgt }
+    }
+  }
 }
 
 # Effective marked state of a backlog head, resolved by GRAPH PRECEDENCE:
@@ -1137,52 +1183,44 @@ function chainagg(id, which,   q, qh, qt, cur, m, tg, t, tgt, tot) {
 # UNDOMINATED decision nodes — those no other decision node can reach along
 # applied supersede edges — form the frontier, and only genuinely
 # incomparable fork decisions fall back to the deterministic id tiebreak.
-# A tombstone is a WALL in every walk: retiring a chain ends its lane, so a
-# record that revives a tombstoned chain must not inherit the dead mark.
-# Returns the marked date, or "" when the decision is "no" or none exists —
-# a superseding record that OMITS the key inherits the lane. Walks asup[]
-# only, like the vote aggregation, so a quarantined ancestor cannot decide.
-function effmark(id,   q, qh, qt, cur, m, tg, t, tgt, nm, i2, best) {
+# Tombstone-killed decisions (build_tombkill) contribute nothing, so a
+# revival starts outside the lane whichever record it supersedes. Dominance
+# itself is PURE ANCESTRY with no tombstone wall: a wall there severed real
+# descent and handed comparable decisions to the suffix tiebreak — the
+# pathology this function exists to prevent (round-3 review finding,
+# reproduced). Returns the marked date, or "" when the decision is "no" or
+# none exists — a superseding record that OMITS the key inherits the lane.
+# Walks asup[] only, like the vote aggregation, so a quarantined ancestor
+# cannot decide.
+function effmark(id,   q, qh, qt, cur, nm, i2, best) {
   if (id in hasmark) return mkval(id)
-  # collect the reachable decision nodes
+  # collect the reachable, still-living decision nodes
   mkepoch++
   nm = 0; qh = 1; qt = 1; q[1] = id
   while (qh <= qt) {
     cur = q[qh++]
     if (mkseen[cur] == mkepoch) continue
     mkseen[cur] = mkepoch
-    if (cur != id && (cur in hasmark)) mkm[++nm] = cur
-    if (cur != id && rtype[cur] == "tombstone") continue
-    if (asup[cur] != "") {
-      m = split(asup[cur], tg, ",")
-      for (t = 1; t <= m; t++) {
-        tgt = trim(tg[t])
-        if (tgt != "") q[++qt] = tgt
-      }
-    }
+    if ((cur in hasmark) && !(cur in tombkilled)) mkm[++nm] = cur
+    qt = pushsups(q, qt, cur)
   }
   if (nm == 0) return ""
-  if (nm == 1) return mkval(mkm[1])
-  # dominance: walk from each decision node; every other decision node it
-  # reaches is an ancestor it revised, hence overridden
-  for (i2 = 1; i2 <= nm; i2++) mkdom[mkm[i2]] = 0
+  # dominance: ONE walk seeded from the applied targets of every decision
+  # node; any decision node it reaches was revised by a descendant and is
+  # overridden. (Only mkm members are ever read back from mkdom, and each is
+  # reset first, so writes to other ids are inert.)
+  mkepoch++
+  qh = 1; qt = 0
   for (i2 = 1; i2 <= nm; i2++) {
-    mkepoch++
-    qh = 1; qt = 1; q[1] = mkm[i2]
-    while (qh <= qt) {
-      cur = q[qh++]
-      if (mkseen[cur] == mkepoch) continue
-      mkseen[cur] = mkepoch
-      if (cur != mkm[i2] && (cur in hasmark)) mkdom[cur] = 1
-      if (cur != mkm[i2] && rtype[cur] == "tombstone") continue
-      if (asup[cur] != "") {
-        m = split(asup[cur], tg, ",")
-        for (t = 1; t <= m; t++) {
-          tgt = trim(tg[t])
-          if (tgt != "") q[++qt] = tgt
-        }
-      }
-    }
+    mkdom[mkm[i2]] = 0
+    qt = pushsups(q, qt, mkm[i2])
+  }
+  while (qh <= qt) {
+    cur = q[qh++]
+    if (mkseen[cur] == mkepoch) continue
+    mkseen[cur] = mkepoch
+    if (cur in hasmark) mkdom[cur] = 1
+    qt = pushsups(q, qt, cur)
   }
   best = ""
   for (i2 = 1; i2 <= nm; i2++)
@@ -1537,6 +1575,7 @@ END {
   }
 
   # 3. live set, scores, conflict census
+  if (lens == "backlog") build_tombkill()
   nlive = 0
   for (i = 1; i <= nrec; i++) {
     id = order[i]
@@ -1590,6 +1629,23 @@ END {
         alltags = alltags (alltags == "" ? "" : ",") tagsc[id, t]
       if (alltags == "") alltags = "-"
       printf "%s\t%s\t%s\t%s\n", id, (pscope[id] == "" ? "-" : pscope[id]), alltags, headline(id)
+    }
+    close("cat 1>&2")
+    exit 0
+  }
+
+  # The applied graph, one row per non-quarantined record: id, union-find
+  # group label, liveness, type, applied supersede targets (comma-joined,
+  # "-" when none). Consumers that must reason about ancestry — backlog
+  # promote deciding whether a plan origin belongs to the chain it is about
+  # to retire — read THIS instead of re-deriving relatedness from filenames
+  # or slugs: the compiler owns the edges, and a slug is not proof of
+  # identity.
+  if (listgraph == 1) {
+    for (i = 1; i <= nrec; i++) {
+      id = order[i]
+      if ((id in erased) || (id in bad)) continue
+      printf "%s\t%s\t%d\t%s\t%s\n", id, group(id), (id in live) ? 1 : 0, rtype[id], (asup[id] == "" ? "-" : asup[id])
     }
     close("cat 1>&2")
     exit 0
@@ -2154,7 +2210,7 @@ if [ "$CHECK" -eq 1 ]; then
     exit "$rc"
   fi
   echo "$checkname passed."
-elif [ "$LIST_INERT" -eq 1 ] || [ "$LIST_LIVE" -eq 1 ] || [ "$LIST_VOTES" -eq 1 ]; then
+elif [ "$LIST_INERT" -eq 1 ] || [ "$LIST_LIVE" -eq 1 ] || [ "$LIST_VOTES" -eq 1 ] || [ "$LIST_GRAPH" -eq 1 ]; then
   # read-only: the awk wrote the list rows to the private temp file, so
   # emit them and publish nothing. Exit 2 (a degraded but valid ledger) is not
   # a failure for a read-only listing; only a real failure (>2) refuses.
