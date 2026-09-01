@@ -617,13 +617,13 @@ class TestPromote(ZammTest):
         never described it. Replay now keys on the exact Origin-idea id."""
         self.assertCode(self.led.backlog("promote", "build-the-frobnicator"),
                         EXIT_OK)
-        self.assertCode(self.led.backlog("add", "Build the frobnicator."),
-                        EXIT_OK, "an unrelated idea may reuse the words")
-        fresh = [p.stem for p in
-                 (self.led.root / "zamm-memory/backlog").rglob(
-                     "*build-the-frobnicator*.md")
-                 if "type: tombstone" not in p.read_text()
-                 and "supersedes:" not in p.read_text()][-1]
+        add = self.led.backlog("add", "Build the frobnicator.")
+        self.assertCode(add, EXIT_OK, "an unrelated idea may reuse the words")
+        # the add prints the landed path — the one deterministic handle on
+        # the fresh record (a glob over the tree orders by filesystem whim
+        # and once picked the RETIRED record, turning this into a test of
+        # the replay no-op instead)
+        fresh = os.path.basename(add.out.strip())[:-3]
 
         r = self.led.backlog("promote", fresh)
 
