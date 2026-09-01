@@ -75,7 +75,9 @@ Memory
 Backlog
   backlog add '<sentence>'
                        capture an idea; one sentence is enough
-  backlog list         the whole live backlog, hot to cold (--all: dormant too)
+  backlog list [--scope <tag>]
+                       the whole live backlog, hot to cold (--all: dormant
+                       too; --scope filters, e.g. domain/lobby)
   backlog show <slug>  one idea in full
   backlog mark <slug>  select an idea for implementation (pushed into the digest)
   backlog unmark <slug>
@@ -130,19 +132,26 @@ Usage: zamm-run.sh backlog <command> [args...]
 
   add '<sentence>'     capture an idea: the sentence is the headline (all the
                        lens ever shows), the slug is derived, scope defaults
-                       to other. An idea is progressive disclosure — pipe any
-                       depth on stdin, a paragraph or a whole book: plain
+                       to other. If you already know the topic, say so:
+                       --scope domain/lobby clusters siblings in the lens and
+                       makes --scope filters work; the default stays cheap
+                       and uncapped. An idea is progressive disclosure — pipe
+                       any depth on stdin, a paragraph or a whole book: plain
                        prose is parked under ## Background (unbounded; +bg in
                        the lens, opened by backlog show), stdin with its own
-                       headings is used verbatim. Optional: --scope <area>,
+                       headings is used verbatim. Optional: --scope <tag>,
                        --slug <slug>, --supersedes <id> (re-up: sharpen an
                        existing idea), --importance useful|minor, --durability
                        days..permanent. For other record types (--type
                        tombstone|votes|erasure) the positional is the SLUG,
                        as in memory create.
-  list [--all]         recompile and print the lens: marked lane first, then
-                       every live idea hot to cold, dormant collapsed to
-                       counts (--all lists dormant ids too)
+  list [--all] [--scope <tag>]
+                       recompile and print the lens: marked lane first, then
+                       every live idea clustered by subpath inside its area
+                       (headings carry the counts), dormant collapsed to
+                       counts (--all lists dormant ids too). --scope prints a
+                       filtered row listing instead — any tag, prefix match,
+                       so --scope domain also finds domain/lobby.
   show <slug|id>       one idea in full
   mark <slug|id>       select an idea for implementation: it enters the
                        session digest and stops decaying until promoted,
@@ -1167,9 +1176,21 @@ backlog_check() {
 
 backlog_list() {
   case "${1-}" in -h|--help) group_usage backlog 0 ;; esac
-  _bl_all=0
-  if [ "${1-}" = "--all" ]; then _bl_all=1; shift; fi
-  [ $# -eq 0 ] || die "backlog list: unknown argument: $*"
+  _bl_all=0; _bl_scope=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --all) _bl_all=1; shift ;;
+      --scope)
+        [ $# -ge 2 ] || die "backlog list: --scope requires an area or area/subpath"
+        [ -n "$2" ] || die "backlog list: --scope requires a non-empty value"
+        _bl_scope="$2"; shift 2 ;;
+      --scope=*)
+        _bl_scope="${1#--scope=}"
+        [ -n "$_bl_scope" ] || die "backlog list: --scope= requires a non-empty value"
+        shift ;;
+      *) die "backlog list: unknown argument: $1" ;;
+    esac
+  done
   if [ ! -d "$ROOT/zamm-memory/backlog" ]; then
     echo "ZAMM backlog: empty - no zamm-memory/backlog/ tree yet ('backlog add' creates it)."
     exit 0
@@ -1179,6 +1200,37 @@ backlog_list() {
   rc=0
   sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" --tree backlog >/dev/null || rc=$?
   if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
+    exit "$rc"
+  fi
+  if [ -n "$_bl_scope" ]; then
+    # the query surface: a filtered ROW listing, mirroring memory list
+    # --scope exactly (any tag, prefix semantics, secondary doors count).
+    # The unfiltered lens stays the one pulled digest. Default view is the
+    # lens contents (non-dormant); --all adds the dormant tail.
+    _bl_tab=$(printf '\t')
+    _bl_filter=""
+    if [ "$_bl_all" -eq 0 ]; then
+      _bl_state="$ROOT/zamm-memory/.compiled/backlog-state.tsv"
+      pair_coherent "$ROOT/zamm-memory/.compiled/backlog.md" "$_bl_state" ||
+        die "lens and state sidecar are from different compiles; run: zamm-run.sh memory digest (or use --all)"
+      _bl_filter=$(awk -F"$_bl_tab" '$1 == "select" { print $2 }' "$_bl_state" | sort -u)
+    fi
+    sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" --tree backlog --list-live |
+    while IFS="$_bl_tab" read -r _bl_id _bl_primary _bl_alltags _bl_hl; do
+      [ -n "$_bl_id" ] || continue
+      if [ "$_bl_all" -eq 0 ]; then
+        printf '%s\n' "$_bl_filter" | grep -qx "$_bl_id" || continue
+      fi
+      _bl_matched=0
+      _bl_oldifs=$IFS; IFS=,
+      for _bl_tag in $_bl_alltags; do
+        case "$_bl_tag" in "$_bl_scope"|"$_bl_scope"/*) _bl_matched=1; break ;; esac
+      done
+      IFS=$_bl_oldifs
+      [ "$_bl_matched" -eq 1 ] || continue
+      printf '%-22s %-34s %s\n' "$_bl_primary" "$(id_to_slug "$_bl_id")" \
+        "$(printf '%s' "$_bl_hl" | cut -c1-72)"
+    done
     exit "$rc"
   fi
   cat "$ROOT/zamm-memory/.compiled/backlog.md"

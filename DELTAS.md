@@ -906,3 +906,30 @@ behind the shared pair_coherent (closing the TOCTOU abort), id_to_slug
 for the shell's id grammar, and the four test gaps locked — both revival
 shapes, the no-match diagnostic, format-proof same-day assertions, and a
 named failure when Origin-idea goes missing. 479 tests green.
+
+## Locked 2026-09-01 (backlog lens legibility: cluster, count, filter)
+
+First real-user feedback, and it confirmed the design's own contract: the
+fix needed no new field, flag semantics, or taxonomy — the primary tag
+already carried everything. Inside each `###` area block the lens now
+clusters entries by full primary scope (clusters ordered by their hottest
+member, rank order within, bare-area entries their own cluster), so
+same-subpath siblings sit together instead of interleaving by rank across
+the area; the heading carries the live counts with the subpath breakdown
+(`### domain (7: lobby 4, art 2)`) — the statistics surface, keyed off the
+primary tag since secondaries are bare areas by contract. `backlog list
+--scope <tag>` is the query surface: a filtered row listing mirroring
+`memory list --scope` exactly (any tag, prefix semantics, secondary doors
+count; dormant excluded by default, `--all` adds it), while the unfiltered
+lens stays the one pulled digest. The protocol now states the clustering
+rule — one idea = one thing you would promote; siblings you might start
+separately are separate records SHARING a subpath, never one blob, never a
+new area — and nudges capture: `other` stays the cheap uncapped default,
+but when the topic is already known, `--scope domain/lobby` is what makes
+clusters and filters exist. Deliberately NOT built: any mechanical nudge
+when `other` dominates — the box must not nag.
+
+Dogfood note: this pass went through its own machinery — the feedback was
+captured as three scoped backlog ideas, one was promoted (`backlog
+promote`, Origin-idea recorded), and the siblings were tombstoned into the
+plan. 482 tests green.

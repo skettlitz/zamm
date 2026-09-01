@@ -189,7 +189,9 @@ memory archive       move fully-retired chains out of the scan path
 
 backlog add '<sentence>'
                      capture an idea; one sentence is enough
-backlog list         the whole live backlog, hot to cold (--all: dormant too)
+backlog list [--scope <tag>]
+                     the whole live backlog, hot to cold (--all: dormant
+                     too; --scope filters, e.g. domain/lobby)
 backlog show <slug>  one idea in full
 backlog mark <slug>  select an idea for implementation (pushed into the digest)
 backlog unmark <slug>

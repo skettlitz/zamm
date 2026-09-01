@@ -1767,7 +1767,15 @@ END {
         print "(" nmarked " marked exceeds the soft cap " MARKED_MAX " - promote or unmark)"
       print ""
     }
-    # areas, ordered by their hottest member; entries hot-to-cold
+    # Areas ordered by their hottest member; INSIDE an area, entries
+    # cluster by full primary scope — same-subpath siblings sit together
+    # instead of interleaving by rank across the whole area (first user
+    # feedback: same-day lobby ideas scattered between art and cameras
+    # read as ungrouped). Clusters order by their hottest member, rank
+    # order within; bare-area entries are their own cluster. The heading
+    # carries the live counts with the subpath breakdown — the statistics
+    # surface the user asked for, keyed off the primary tag (secondaries
+    # are bare areas by contract, so the breakdown is well defined).
     hdr = 0
     for (i = 1; i <= nsort; i++) {
       id = sorted[i]
@@ -1776,15 +1784,41 @@ END {
       if (a in areadone) continue
       areadone[a] = 1
       if (!hdr) { print "## Ideas (hot to cold)"; hdr = 1 }
-      print ""
-      print "### " ((a == "") ? "(no scope)" : a)
+      # counting pass: block total plus per-subpath counts, subpaths in
+      # hottest-member order (the same order the render pass will use)
+      atot = 0; nsp = 0
       for (j = i; j <= nsort; j++) {
         jd = sorted[j]
         if ((jd in printed) || (jd in dormant)) continue
         if (area(jd) != a) continue
-        # the scope prefix only earns its ink when it adds a subpath the
-        # section heading does not already say
-        emitline(jd, (pscope[jd] != a) ? 1 : 0)
+        atot++
+        p = pscope[jd]
+        if (p == a) continue
+        if (!((a SUBSEP p) in spc)) splist[++nsp] = p
+        spc[a SUBSEP p]++
+      }
+      hline = "### " ((a == "") ? "(no scope)" : a) " (" atot
+      if (nsp > 0) {
+        hline = hline ":"
+        for (s = 1; s <= nsp; s++)
+          hline = hline ((s > 1) ? "," : "") " " substr(splist[s], length(a) + 2) " " spc[a SUBSEP splist[s]]
+      }
+      print ""
+      print hline ")"
+      # render pass: one adjacent run per primary scope
+      for (j = i; j <= nsort; j++) {
+        jd = sorted[j]
+        if ((jd in printed) || (jd in dormant)) continue
+        if (area(jd) != a) continue
+        p = pscope[jd]
+        for (k = j; k <= nsort; k++) {
+          kd = sorted[k]
+          if ((kd in printed) || (kd in dormant)) continue
+          if (area(kd) != a || pscope[kd] != p) continue
+          # the scope prefix only earns its ink when it adds a subpath
+          # the section heading does not already say
+          emitline(kd, (p != a) ? 1 : 0)
+        }
       }
     }
     nunlist = 0

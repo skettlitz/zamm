@@ -102,6 +102,77 @@ class TestBacklogLens(ZammTest):
         self.assertIn_("### tooling", r.out)
         self.assertIn_("### domain", r.out)
 
+    def test_same_subpath_ideas_cluster_inside_their_area(self):
+        """First user feedback: same-day lobby ideas interleaved with art
+        and bare-domain entries by rank, which read as ungrouped. Inside an
+        area block, entries now cluster by full primary scope — clusters by
+        hottest member, rank order within — and the heading carries the
+        counts (the statistics surface, no new metadata)."""
+        # ranks interleave the subpaths on purpose: lobby, art, lobby, bare
+        self.led.add_idea("lobby-hot", "Lobby door idea.",
+                          scope="domain/lobby", date="2026-07-18")
+        self.led.add_idea("art-mid", "Art wall idea.",
+                          scope="domain/art", date="2026-07-17")
+        self.led.add_idea("lobby-cool", "Lobby desk idea.",
+                          scope="domain/lobby", date="2026-07-16",
+                          importance="minor")
+        self.led.add_idea("bare-domain", "General domain idea.",
+                          scope="domain", date="2026-07-15",
+                          importance="minor")
+
+        r = self.led.backlog("list")
+
+        self.assertCode(r, EXIT_OK)
+        self.assertIn_("### domain (4: lobby 2, art 1)", r.out,
+                       "the heading is the counts line")
+        lines = [ln for ln in r.out.splitlines() if ln.startswith("- ")]
+        order = [next(w for w in ("Lobby door", "Art wall", "Lobby desk",
+                                  "General domain") if w in ln)
+                 for ln in lines]
+        self.assertEqual(order, ["Lobby door", "Lobby desk", "Art wall",
+                                 "General domain"],
+                         "clusters by hottest member, siblings adjacent, "
+                         "rank order within the cluster")
+
+    def test_a_subpath_free_area_counts_plainly(self):
+        self.led.add_idea("plain", "A plain idea.", scope="tooling",
+                          date="2026-07-18")
+        r = self.led.backlog("list")
+        self.assertIn_("### tooling (1)", r.out)
+
+    def test_list_scope_filters_like_memory_list(self):
+        """The query surface: prefix semantics over ANY tag (secondaries are
+        selection doors), dormant excluded by default, --all adds it."""
+        self.led.add_idea("lobby-idea", "Lobby door idea.",
+                          scope="domain/lobby", date="2026-07-18")
+        self.led.add_idea("art-idea", "Art wall idea.",
+                          scope="domain/art", date="2026-07-18")
+        self.led.add_idea("second-door", "Reachable via secondary.",
+                          scope="tooling, domain", date="2026-07-18")
+        cold = self.led.add_idea("cold-lobby", "A cooled lobby thought.",
+                                 scope="domain/lobby", date="2026-01-05",
+                                 importance="minor", durability="days")
+
+        r = self.led.backlog("list", "--scope", "domain/lobby")
+        self.assertCode(r, EXIT_OK)
+        self.assertIn_("lobby-idea", r.out)
+        self.assertNotIn_("art-idea", r.out)
+        self.assertNotIn_("cold-lobby", r.out,
+                          "dormant is excluded by default")
+
+        r = self.led.backlog("list", "--scope", "domain")
+        self.assertIn_("lobby-idea", r.out, "prefix match: domain finds "
+                                            "domain/lobby")
+        self.assertIn_("art-idea", r.out)
+        self.assertIn_("second-door", r.out,
+                       "a secondary tag is a selection door here too")
+
+        r = self.led.backlog("list", "--scope", "domain/lobby", "--all")
+        self.assertIn_("cold-lobby", r.out, "--all adds the dormant tail")
+
+        r = self.led.backlog("list", "--scope", "domain", "--bogus")
+        self.assertNotEqual(r.code, 0, "unknown arguments still refuse")
+
     def test_treeless_project_lists_a_clean_empty_backlog(self):
         """Absence is data: a project that never captured an idea is not a
         gap to report, and unlike the knowledge compile this is exit 0."""
