@@ -830,3 +830,39 @@ retry: a same-slug plan with the matching origin is this promote's partial
 result (the rerun finishes the tombstone), one without it refuses — the
 create-then-stamp ordering an external re-review caught as a guarantee-2
 violation before a line was written. 469 tests green.
+
+## Locked 2026-08-31 (backlog round 2: exact origins, manifest authority, graph-precedence marks)
+
+A second external review of the just-shipped backlog found four defects,
+two reproduced live before fixing. All four were one class of error seen
+four ways: a shortcut standing in for the real authority. Promote's replay
+detection accepted SLUG equality as proof of identity, so promoting a
+fresh idea that shared a slug with an already-promoted one "resumed" the
+old promote and silently retired the new idea into a stranger's plan —
+replay now keys on the EXACT Origin-idea id (of the resolved live head for
+the crash leg, of the typed full id for the completed leg), and a slug
+retry of a retired chain gets a pointer at the chain instead of adoption.
+Promote also trusted the plan manifest's EXIT CODE while the manifest
+represents damage as data rows (MISSING, UNREADABLE, SYMLINK, NOTDIR,
+DUP, DEBRIS) with exit 0 — and the origin scan is mutation authority, so
+an unseen plan could change the verdict; any anomaly row now refuses
+before anything is created or retired (G3), stricter than zamm-archive's
+MISSING-only rule because archive re-validates what it moves and the scan
+IS promote's check.
+
+The marked lane resolved decisions by lexically greatest record id —
+but same-day ids order by RANDOM SUFFIX, so a same-day mark → unmark →
+re-up resurrected the mark whenever the mark record drew the greater
+suffix; and the walk crossed tombstones, so reviving a retired chain
+inherited its dead mark. Decisions now resolve by GRAPH PRECEDENCE: a
+descendant's decision dominates every ancestor's (superseding IS the act
+of revising), tombstones are walls, and the deterministic id tiebreak
+applies only to genuinely incomparable fork decisions — locked with
+adversarial suffixes on both sides.
+
+And `status` read the backlog sidecar through bare command substitutions
+under set -e — the exact assign-then-fail behavior this ledger already
+carries a record about — so a deleted backlog-state.tsv killed status
+mid-output at exit 2 with no diagnostic. The lens/state pair now gets the
+same generation-coherence check as the knowledge sidecar: report,
+name the recompile remedy, finish the report. 474 tests green.

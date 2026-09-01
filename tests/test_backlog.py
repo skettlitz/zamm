@@ -11,6 +11,7 @@ digest coupling, and the promote flow's rerun convergence (guarantee 2).
 
 import os
 import re
+import shutil
 import time
 
 from harness import (
@@ -442,6 +443,49 @@ class TestMarkedLane(ZammTest):
         self.assertIn_("(marked 2026-07-12)", r.out,
                        "the newer decision (a date) must win")
 
+    def test_same_day_unmark_survives_a_plain_reup(self):
+        """PRE-FIX (second review round): decisions were resolved by
+        lexically greatest id, but same-day ids order by RANDOM SUFFIX —
+        so a same-day mark -> unmark -> re-up resurrected the mark
+        whenever the mark record drew the greater suffix. Decisions now
+        resolve by graph precedence: the unmark supersedes the mark, so
+        it wins regardless of suffix order. Both directions locked."""
+        for msfx, usfx in (("zzzzz", "22222"), ("22222", "zzzzz")):
+            with self.subTest(mark_suffix=msfx, unmark_suffix=usfx):
+                slug = f"flip-{msfx}"
+                m1 = self.led.add_idea(slug, "The mark.", date="2026-07-01",
+                                       marked="2026-07-01", sfx=msfx)
+                m2 = self.led.add_idea(slug, "The unmark.",
+                                       date="2026-07-01", marked="no",
+                                       supersedes=m1, sfx=usfx)
+                self.led.add_idea(slug, "The plain re-up.",
+                                  date="2026-07-01", supersedes=m2,
+                                  sfx="77777")
+                r = self.led.backlog("list")
+                self.assertCode(r, EXIT_OK)
+                self.assertNotIn_("The plain re-up. [2026-07-01-" + slug,
+                                  r.out.split("## Ideas")[0],
+                                  "the re-up must NOT sit in the marked "
+                                  "lane: the unmark is the descendant "
+                                  "decision and overrides the mark")
+
+    def test_reviving_a_tombstoned_chain_does_not_inherit_the_mark(self):
+        """A tombstone ends the lane for everything behind it (the
+        documented rule); PRE-FIX the inheritance walk crossed tombstones
+        and handed the revival its dead ancestor's mark."""
+        a = self.led.add_idea("phoenix", "The chosen one.",
+                              date="2026-07-01", marked="2026-07-01")
+        t = self.led.add_idea("phoenix", "Retired.", date="2026-07-02",
+                              type="tombstone", supersedes=a,
+                              scope=None, importance=None, durability=None)
+        self.led.add_idea("phoenix", "The revival.", date="2026-07-03",
+                          supersedes=t)
+        r = self.led.backlog("list")
+        self.assertCode(r, EXIT_OK)
+        self.assertIn_("The revival.", r.out)
+        self.assertNotIn_("## Marked", r.out,
+                          "reviving a retired chain starts outside the lane")
+
     def test_a_marked_idea_never_goes_dormant(self):
         """The dormancy exemption, the backlog's mirror of guardrails: a
         selected item never fades silently."""
@@ -507,13 +551,28 @@ class TestPromote(ZammTest):
                          "2026-07-19-frobnicator-phase-one").is_dir())
 
     def test_rerun_after_completion_converges(self):
+        """Replay is by the EXACT Origin-idea id — a slug retry gets a
+        pointer at the retired chain instead, never a silent no-op (a slug
+        is not proof of identity; second review round, finding 1)."""
         self.assertCode(self.led.backlog("promote", "build-the-frobnicator"),
                         EXIT_OK)
-        r = self.led.backlog("promote", "build-the-frobnicator")
-        self.assertCode(r, EXIT_OK, "a completed promote reruns as a no-op")
+        pf = (self.led.root / "zamm-memory/active/plans/"
+              "2026-07-19-build-the-frobnicator/"
+              "2026-07-19-build-the-frobnicator.plan.md")
+        origin = re.search(r"^Origin-idea: (\S+)$", pf.read_text(),
+                           flags=re.M).group(1)
+
+        r = self.led.backlog("promote", origin)
+        self.assertCode(r, EXIT_OK, "a completed promote reruns as a no-op "
+                                    "when retried with the exact origin id")
         self.assertIn_("Already promoted", r.out)
         self.assertEqual(len(self._tombstones()), 1,
                          "no second tombstone is written")
+
+        r = self.led.backlog("promote", "build-the-frobnicator")
+        self.assertNotEqual(r.code, 0)
+        self.assertIn_("matches a retired idea", r.output,
+                       "a slug retry is pointed at the chain, not replayed")
 
     def test_rerun_finishes_an_interrupted_promote(self):
         """Kill window: the plan rename landed, the tombstone did not. The
@@ -547,7 +606,57 @@ class TestPromote(ZammTest):
                           supersedes=idea)
         r = self.led.backlog("promote", idea)
         self.assertNotEqual(r.code, 0)
-        self.assertIn_("no live idea matches", r.output)
+        self.assertIn_("matches a retired idea", r.output,
+                       "a dead chain member earns a pointer, not adoption")
+
+    def test_an_unrelated_same_slug_idea_is_never_adopted(self):
+        """PRE-FIX (second review round, reproduced): replay detection
+        accepted SLUG equality, so promoting a fresh idea that happened to
+        share a slug with an already-promoted one 'resumed' the old promote
+        — no new plan, and the fresh idea silently retired into a plan that
+        never described it. Replay now keys on the exact Origin-idea id."""
+        self.assertCode(self.led.backlog("promote", "build-the-frobnicator"),
+                        EXIT_OK)
+        self.assertCode(self.led.backlog("add", "Build the frobnicator."),
+                        EXIT_OK, "an unrelated idea may reuse the words")
+        fresh = [p.stem for p in
+                 (self.led.root / "zamm-memory/backlog").rglob(
+                     "*build-the-frobnicator*.md")
+                 if "type: tombstone" not in p.read_text()
+                 and "supersedes:" not in p.read_text()][-1]
+
+        r = self.led.backlog("promote", fresh)
+
+        self.assertNotEqual(r.code, 0, "same title, same day: must refuse, "
+                                       "never adopt the stranger's plan")
+        self.assertIn_("plan already exists", r.output)
+        self.assertEqual(len(self._tombstones()), 1,
+                         "the fresh idea must NOT be retired")
+        lens = self.led.backlog("list")
+        self.assertIn_(fresh, lens.out, "the fresh idea stays live")
+
+        r = self.led.backlog("promote", fresh, "Frobnicator, second attempt")
+        self.assertCode(r, EXIT_OK,
+                        "a distinct title promotes into its own plan")
+        self.assertEqual(len(self._tombstones()), 2)
+
+    def test_promote_refuses_on_a_damaged_plan_tree(self):
+        """PRE-FIX (second review round, reproduced): the plan manifest
+        represents damage as data rows while exiting 0, and promote read
+        only PLANFILE rows — so it created and retired over a damaged tree.
+        The origin scan is mutation authority; any anomaly row refuses
+        before anything is created (G3)."""
+        shutil.rmtree(self.led.root / "zamm-memory/archive/plans")
+
+        r = self.led.backlog("promote", "build-the-frobnicator")
+
+        self.assertNotEqual(r.code, 0)
+        self.assertIn_("the plan tree is damaged", r.output)
+        self.assertIn_("MISSING", r.output)
+        self.assertEqual(len(self._tombstones()), 0, "nothing may be retired")
+        self.assertFalse(any(
+            (self.led.root / "zamm-memory/active/plans").iterdir()),
+            "nothing may be created")
 
 
 class TestBacklogStatusAndCheck(ZammTest):
@@ -574,6 +683,24 @@ class TestBacklogStatusAndCheck(ZammTest):
         self.led.add_idea("late-idea", "A later thought.", date="2026-07-19")
         r = self.led.status()
         self.assertIn_("newer than the lens", r.out)
+
+    def test_status_survives_a_missing_sidecar(self):
+        """PRE-FIX (second review round, reproduced): the sidecar reads ran
+        as bare command substitutions under set -e, so a deleted
+        backlog-state.tsv aborted status silently at exit 2 after the
+        Ledger section. The pair now gets the knowledge sidecar's
+        generation-coherence treatment: report, name the remedy, finish."""
+        self.led.add_idea("an-idea", "A statement.", date="2026-07-18")
+        self.assertCode(self.led.compile(), EXIT_OK)
+        (self.led.root / "zamm-memory/.compiled/backlog-state.tsv").unlink()
+
+        r = self.led.status()
+
+        self.assertCode(r, EXIT_OK, "status must complete, not die mid-output")
+        self.assertIn_("incoherent", r.out)
+        self.assertIn_("memory digest", r.out, "the remedy must be named")
+        self.assertIn_("Plans", r.out, "the sections after the backlog "
+                                       "block must still render")
 
     def test_check_covers_the_backlog_exactly_when_present(self):
         self.assertCode(self.led.check_all(), EXIT_OK,

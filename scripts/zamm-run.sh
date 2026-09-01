@@ -354,6 +354,13 @@ state_coherent() {
   [ -n "$sg" ] && [ "$sg" = "$dg" ]
 }
 
+# the same pairing rule for the backlog lens + backlog-state.tsv
+_bstate_gen_ok() {
+  _bg_sg=$(awk -F"$(printf '\t')" '$1 == "generation" { print $2; exit }' "$2" 2>/dev/null) || return 1
+  _bg_lg=$(sed -n 's/^<!-- zamm-generation: \(.*\) -->$/\1/p' "$1" | tail -1)
+  [ -n "$_bg_sg" ] && [ "$_bg_sg" = "$_bg_lg" ]
+}
+
 print_status() {
   DIGEST="$ROOT/zamm-memory/.compiled/memory.md"
   STATE="$ROOT/zamm-memory/.compiled/state.tsv"
@@ -536,11 +543,19 @@ print_status() {
     if [ ! -f "$_blens" ]; then
       printf 'Backlog   lens not yet compiled\n'
       printf '          run: zamm-run.sh memory digest\n'
+    elif [ ! -f "$_bstate" ] || ! _bstate_gen_ok "$_blens" "$_bstate"; then
+      # same coherence rule as the knowledge sidecar (state_coherent): the
+      # lens and its state are two renames, so a crash between them — or a
+      # deleted sidecar — leaves a mismatched pair. Report and name the
+      # remedy; a bare read here once aborted status mid-output under set -e
+      # with no diagnostic at all (an assignment substitution fails loudly).
+      printf 'Backlog   lens/state pair incoherent (interrupted compile, or a deleted sidecar)\n'
+      printf '          run: zamm-run.sh memory digest\n'
     else
       _btab=$(printf '\t')
-      _blive=$(awk -F"$_btab" '$1 == "live"   { print $2; exit }' "$_bstate" 2>/dev/null)
-      _bhot=$(awk  -F"$_btab" '$1 == "hot"    { print $2; exit }' "$_bstate" 2>/dev/null)
-      _bmark=$(awk -F"$_btab" '$1 == "marked" { print $2; exit }' "$_bstate" 2>/dev/null)
+      _blive=$(awk -F"$_btab" '$1 == "live"   { print $2; exit }' "$_bstate")
+      _bhot=$(awk  -F"$_btab" '$1 == "hot"    { print $2; exit }' "$_bstate")
+      _bmark=$(awk -F"$_btab" '$1 == "marked" { print $2; exit }' "$_bstate")
       printf 'Backlog   %s live ideas, %s hot, %s marked\n' \
         "${_blive:-?}" "${_bhot:-?}" "${_bmark:-?}"
       # same watch as the digest: idea files newer than the lens read STALE,
@@ -1320,42 +1335,57 @@ backlog_promote() {
   _bp_needle="$1"; shift
   _bp_tab=$(printf '\t')
 
-  # Retry legs first (guarantee 2: a rerun converges). The origin line is
-  # rendered into the plan BEFORE its publish rename, so an existing plan
-  # carrying it is unambiguously an earlier promote of this same idea.
+  # The origin scan is MUTATION AUTHORITY: promote tombstones an idea based
+  # on what it saw here, so an incomplete view must refuse before anything
+  # is created (G3). The manifest exits 0 while representing damage as data
+  # rows — MISSING roots, UNREADABLE entries, SYMLINKs, DUPs — and every
+  # one of those can hide the very plan whose origin would change the
+  # verdict. Stricter than zamm-archive's MISSING-only refusal on purpose:
+  # archive re-validates each plan it moves; promote's scan is the check.
   _bp_pmf=$(mktemp "${TMPDIR:-/tmp}/zamm-promote-mf.XXXXXX") ||
     die "backlog promote: could not create a scratch file"
   if ! sh "$INTERNAL/zamm-plan-manifest.sh" --project-root "$ROOT" > "$_bp_pmf"; then
     rm -f "$_bp_pmf"
     die "backlog promote: cannot enumerate the plan tree (unreadable, not empty)"
   fi
+  _bp_bad=$(awk -F"$_bp_tab" '
+    $1 == "MISSING" || $1 == "UNREADABLE" || $1 == "SYMLINK" ||
+    $1 == "NOTDIR" || $1 == "DUP" || $1 == "DEBRIS" {
+      print "  " $1 ": " $2
+    }' "$_bp_pmf")
+  if [ -n "$_bp_bad" ]; then
+    rm -f "$_bp_pmf"
+    echo "zamm: backlog promote: the plan tree is damaged; refusing to create or retire anything:" >&2
+    printf '%s\n' "$_bp_bad" >&2
+    echo "  Repair the tree (zamm-run.sh plan check names the fixes), then rerun." >&2
+    exit 4
+  fi
+
+  # Retry legs (guarantee 2: a rerun converges). The origin line is rendered
+  # into the plan BEFORE its publish rename, so a plan carrying the EXACT id
+  # is unambiguously an earlier promote of that record. Exact ids only:
+  # slug equality once adopted an unrelated same-slug idea into an old plan
+  # and silently retired it (second review round, reproduced).
+  _bp_row=""
+  _bp_live=1
+  _bp_row=$(resolve_live_idea "$_bp_needle" 2>/dev/null) || _bp_live=0
+  _bp_id=""
+  [ "$_bp_live" -eq 1 ] && _bp_id=${_bp_row%%"$_bp_tab"*}
+
   _bp_originpf=""
   while IFS="$_bp_tab" read -r _bp_tag _bp_p1 _bp_rest; do
     [ "$_bp_tag" = "PLANFILE" ] || continue
     _bp_ov=$(sed -n 's/^Origin-idea: //p' "$_bp_p1" 2>/dev/null | head -1)
     [ -n "$_bp_ov" ] || continue
-    # match the full id OR its slug: the id a retry types is usually the one
-    # the FIRST promote resolved from — possibly an ancestor of the head the
-    # plan recorded — so the bare slug is the stable retry handle
-    _bp_os=${_bp_ov#??????????-}
-    _bp_os=${_bp_os%-?????}
-    _bp_ns=$_bp_needle
-    case "$_bp_ns" in
-      [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*)
-        _bp_ns=${_bp_ns#??????????-}
-        _bp_ns=${_bp_ns%-?????}
-        ;;
-    esac
-    if [ "$_bp_ov" = "$_bp_needle" ] || [ "$_bp_os" = "$_bp_ns" ]; then
+    # the live head id covers the crash leg (plan landed, tombstone did
+    # not); the typed needle covers the completed leg retried by full id
+    if { [ -n "$_bp_id" ] && [ "$_bp_ov" = "$_bp_id" ]; } ||
+       [ "$_bp_ov" = "$_bp_needle" ]; then
       _bp_originpf="$_bp_p1"
       break
     fi
   done < "$_bp_pmf"
   rm -f "$_bp_pmf"
-
-  _bp_row=""
-  _bp_live=1
-  _bp_row=$(resolve_live_idea "$_bp_needle" 2>/dev/null) || _bp_live=0
 
   if [ -n "$_bp_originpf" ]; then
     _bp_pdir=$(dirname "$_bp_originpf")
@@ -1365,7 +1395,6 @@ backlog_promote() {
       exit 0
     fi
     # crash window: the plan landed, the tombstone did not — finish it
-    _bp_id=${_bp_row%%"$_bp_tab"*}
     _bp_pdirname=$(basename "$_bp_pdir")
     _bp_slug=$_bp_id
     _bp_slug=${_bp_slug#??????????-}
@@ -1379,12 +1408,27 @@ backlog_promote() {
     exit 0
   fi
 
-  [ "$_bp_live" -eq 1 ] || {
+  if [ "$_bp_live" -eq 0 ]; then
+    # a needle that matches a RETIRED chain deserves a pointer, not a shrug —
+    # and never adoption: the chain's own tombstone says what happened. A
+    # name probe, deliberately tolerant: any chain member counts, and an
+    # unreadable tree falls through to the loud resolve below.
+    case "$_bp_needle" in
+      [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*) _bp_pat="${_bp_needle}.md" ;;
+      *) _bp_pat="????-??-??-${_bp_needle}-?????.md" ;;
+    esac
+    _bp_any=$(find "$ROOT/zamm-memory/backlog" -type f -name "$_bp_pat" 2>/dev/null | head -1)
+    if [ -n "$_bp_any" ]; then
+      echo "zamm: \"$_bp_needle\" matches a retired idea, not a live one." >&2
+      echo "  Its chain records what happened: zamm-run.sh backlog show <full-id>" >&2
+      echo "  (a promoted idea's tombstone names the plan; a completed promote replays" >&2
+      echo "  as a no-op only when retried with the exact Origin-idea id)" >&2
+      exit 1
+    fi
     # replay resolve loudly for its diagnostics (the quiet run above fed the
     # retry legs; this one is for the operator)
     resolve_live_idea "$_bp_needle" >/dev/null || exit $?
-  }
-  _bp_id=${_bp_row%%"$_bp_tab"*}
+  fi
   _bp_hl=${_bp_row##*"$_bp_tab"}
   if [ $# -gt 0 ]; then
     _bp_title="$*"

@@ -1128,24 +1128,31 @@ function chainagg(id, which,   q, qh, qt, cur, m, tg, t, tgt, tot) {
   return tot
 }
 
-# Effective marked state of a backlog head: the NEWEST marking decision in
-# the applied ancestor chain wins. The marked: key on the head itself
-# outranks everything; otherwise the marked:-bearing ancestor with the
-# greatest id decides (ids lead with the creation date, and lexical order is
-# the same tiebreak the ranking uses). Returns the marked date, or "" when the decision
-# is "no" or no decision exists — so a superseding record that OMITS the key
-# inherits the lane, and only an explicit `marked: no` (unmark) or a
-# tombstone (which kills the head entirely) leaves it. Walks asup[] only,
-# like the vote aggregation, so a quarantined ancestor cannot decide the lane.
-function effmark(id,   q, qh, qt, cur, m, tg, t, tgt, best) {
-  if (id in hasmark) return (rmarked[id] == "no") ? "" : rmarked[id]
+# Effective marked state of a backlog head, resolved by GRAPH PRECEDENCE:
+# a decision made on a descendant record overrides every decision on its
+# ancestors, because superseding IS the act of revising — id order proves
+# nothing (same-day ids differ only by a random suffix, so a lexical
+# "newest id wins" let a mark resurface after a same-day unmark). The
+# marked: key on the head itself outranks everything; otherwise the
+# UNDOMINATED decision nodes — those no other decision node can reach along
+# applied supersede edges — form the frontier, and only genuinely
+# incomparable fork decisions fall back to the deterministic id tiebreak.
+# A tombstone is a WALL in every walk: retiring a chain ends its lane, so a
+# record that revives a tombstoned chain must not inherit the dead mark.
+# Returns the marked date, or "" when the decision is "no" or none exists —
+# a superseding record that OMITS the key inherits the lane. Walks asup[]
+# only, like the vote aggregation, so a quarantined ancestor cannot decide.
+function effmark(id,   q, qh, qt, cur, m, tg, t, tgt, nm, i2, best) {
+  if (id in hasmark) return mkval(id)
+  # collect the reachable decision nodes
   mkepoch++
-  best = ""; qh = 1; qt = 1; q[1] = id
+  nm = 0; qh = 1; qt = 1; q[1] = id
   while (qh <= qt) {
     cur = q[qh++]
     if (mkseen[cur] == mkepoch) continue
     mkseen[cur] = mkepoch
-    if (cur != id && (cur in hasmark) && cur > best) best = cur
+    if (cur != id && (cur in hasmark)) mkm[++nm] = cur
+    if (cur != id && rtype[cur] == "tombstone") continue
     if (asup[cur] != "") {
       m = split(asup[cur], tg, ",")
       for (t = 1; t <= m; t++) {
@@ -1154,9 +1161,36 @@ function effmark(id,   q, qh, qt, cur, m, tg, t, tgt, best) {
       }
     }
   }
-  if (best == "") return ""
-  return (rmarked[best] == "no") ? "" : rmarked[best]
+  if (nm == 0) return ""
+  if (nm == 1) return mkval(mkm[1])
+  # dominance: walk from each decision node; every other decision node it
+  # reaches is an ancestor it revised, hence overridden
+  for (i2 = 1; i2 <= nm; i2++) mkdom[mkm[i2]] = 0
+  for (i2 = 1; i2 <= nm; i2++) {
+    mkepoch++
+    qh = 1; qt = 1; q[1] = mkm[i2]
+    while (qh <= qt) {
+      cur = q[qh++]
+      if (mkseen[cur] == mkepoch) continue
+      mkseen[cur] = mkepoch
+      if (cur != mkm[i2] && (cur in hasmark)) mkdom[cur] = 1
+      if (cur != mkm[i2] && rtype[cur] == "tombstone") continue
+      if (asup[cur] != "") {
+        m = split(asup[cur], tg, ",")
+        for (t = 1; t <= m; t++) {
+          tgt = trim(tg[t])
+          if (tgt != "") q[++qt] = tgt
+        }
+      }
+    }
+  }
+  best = ""
+  for (i2 = 1; i2 <= nm; i2++)
+    if (!mkdom[mkm[i2]] && mkm[i2] > best) best = mkm[i2]
+  return mkval(best)
 }
+
+function mkval(x) { return (rmarked[x] == "no") ? "" : rmarked[x] }
 
 # ranking: score desc, then id desc (newer/later name wins ties) — deterministic
 # total order: score desc, then id desc (newer/later name wins ties).
