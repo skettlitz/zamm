@@ -31,16 +31,22 @@ Canonical skill name/folder is `zamm`.
    session digest. Capture is one sentence (`backlog add`); depth of any size rides below the
    headline. Ideas cool into dormancy on their own unless superseded or voted up; marking one
    for implementation pushes it into the digest until it is promoted into a plan or unmarked.
-5. At session start the agent runs `zamm-run.sh memory digest`, which ranks all live records — author-rated
+5. Episodes — things that happened and are worth a trace but imply no action and assert no
+   durable fact (a side quest, an outage, a considered non-action) — go into a fourth tree,
+   `zamm-memory/journal/`: cue-driven capture (`journal add`), a pulled timeline lens, and a
+   digestion trichotomy — compiled period views (`journal digest`, never stored), triage behind a
+   claim watermark (`journal review` / `settle`), and stored digest records (`journal elevate`).
+   Other skills operate it through one predicate grammar and a versioned export seam.
+6. At session start the agent runs `zamm-run.sh memory digest`, which ranks all live records — author-rated
    importance, decaying over an author-rated shelf-life, corrected by votes from plan outcomes —
    and emits a bounded digest: an actionable top section balanced across knowledge areas (so one
    hot topic cannot drown the rest), one-line reminders below it, and counts for everything else.
    Fully decayed records go dormant: unlisted, but still greppable in the ledger. The digest
    ends with a compact listing of active plans (status, progress, title) plus the most
-   recently archived plan IDs and a one-line backlog summary, so session start needs no
-   separate discovery and a plan that moved to the archive on another machine stays findable
-   after a pull.
-6. Finished plans move to the archive.
+   recently archived plan IDs, a one-line backlog summary and — only when journal digestion is
+   due — one `Journal:` line, so session start needs no separate discovery and a plan that
+   moved to the archive on another machine stays findable after a pull.
+7. Finished plans move to the archive.
 
 Here is one record file — composed by the agent and landed in one step by
 `zamm-run.sh memory create`, which validates it and writes nothing at all if it fails the
@@ -106,11 +112,12 @@ ZAMM runs mostly agent-side. The human:
 | --- | --- | --- |
 | `zamm-memory/knowledge/<YYYY>/` | immutable ledger records | yes |
 | `zamm-memory/backlog/<YYYY>/` | immutable idea records (the backlog) | yes |
+| `zamm-memory/journal/<YYYY>/` | immutable episode records, elevations and watermarks (the journal) | yes |
 | `zamm-memory/active/plans/`, `zamm-memory/archive/plans/` | plan contexts | yes |
 | `zamm-memory/VERSION` | installed protocol version (`3`) | yes |
-| `zamm-memory/.compiled/` | generated digest and backlog lens | no (gitignored) |
-| `AGENTS.md` managed block | rendered runtime protocol | yes |
-| `.cursor/rules/zamm.mdc` | rendered runtime protocol (Cursor) | when used |
+| `zamm-memory/.compiled/` | generated digest, backlog lens and journal lens | no (gitignored) |
+| `AGENTS.md` managed block | the always-on router (the full protocol stays in the skill, loaded on demand) | yes |
+| `.cursor/rules/zamm.mdc` | the same router, for Cursor | when used |
 | `.gitignore`, `.gitattributes`, `.cursorignore`, `.cursorindexingignore` | required lines appended / created | yes |
 
 ## Install the skill (human)
@@ -171,8 +178,8 @@ Everything runs through one entrypoint, which finds the project root itself
 
 ```
 scaffold             install ZAMM here, or refresh the rendered surfaces
-status               health overview: ledger, backlog, plans, drift
-check                validate everything (memory + backlog + plans)
+status               health overview: ledger, backlog, journal, plans, drift
+check                validate everything (memory + backlog + journal + plans)
 help [<topic>]       this text, or help for one command
 
 memory digest        rebuild and print the digest
@@ -199,6 +206,29 @@ backlog unmark <slug>
 backlog promote <slug> ['<plan title>']
                      turn an idea into a plan and retire it
 backlog check        validate the backlog ledger
+
+journal add '<sentence>'
+                     record an episode; one sentence is enough
+journal list [--all] [--scope <tag>] [--cue <slug>] [--since <date>]
+                     the timeline lens, newest first (--all: dormant too;
+                     filters print a row listing)
+journal show <slug>  one record in full
+journal search <predicates> [--text <pattern>] [--files]
+                     structured query: --class --scope --cue --kind
+                     --covers --agent --user --axis --since --until
+journal stats [--axis <name>] [<predicates>]
+                     coverage-honest aggregates for the human
+journal export [<predicates>]
+                     the versioned TSV seam for applications
+journal digest <YYYY[-MM]> [--detail ...] [--stats ...] [--elevations ...]
+                     the compiled period view (never stored)
+journal elevate <kind> <YYYY[-MM]>
+                     summarize a completed period; body on stdin
+journal review [--headlines] [--cue <slug>] [--scope <tag>] [--period <p>] [--pass <kind>]
+                     read what triage has not covered yet
+journal settle [--through <date>] [--pass <kind>]
+                     claim triage coverage with a watermark record
+journal check        validate the journal ledger
 
 plan list            active plans grouped by status
 plan show <slug>     one plan, with progress
@@ -244,9 +274,14 @@ In **development and testing**; the structure is still evolving and tested on in
 
 ## Learn more
 
-- Full operating contract: `<zamm-skill>/references/scaffold/protocol-body.template.md`
-  (rendered into each project's runtime files by the scaffold)
+- The spine of the operating contract: `<zamm-skill>/references/protocol.md`
+  (session start and end, the boundary test between the four trees, the rules they share),
+  loaded on demand; the scaffold renders only the always-on router
+  (`protocol-router.template.md`) into each project's runtime files
 - Agent entry point and dispatcher: `SKILL.md`
+- Each tree in layers an agent loads one at a time: an index (`<zamm-skill>/references/memory.md`,
+  `backlog.md`, `plans.md`, `journal.md`) over `<tree>-reading.md`, `<tree>-writing.md` (which
+  opens with who reads what you write) and `<tree>-maintenance.md`
 - Plan template: `<zamm-skill>/references/templates/plan.template.md`
 - Memory record template: `<zamm-skill>/references/templates/memory-record.template.md`
 - Existing project initialization: `<zamm-skill>/references/initialization/existing-project.md`

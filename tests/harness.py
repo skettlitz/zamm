@@ -133,7 +133,7 @@ class Ledger:
         rid = f"{date}-{slug}-{sfx}"
 
         fm = [f"type: {type}"]
-        if type == "memory":
+        if type in ("memory", "digest"):
             if scope:
                 fm.append(f"scope: {scope}")
         if supersedes:
@@ -144,7 +144,7 @@ class Ledger:
             if isinstance(erases, (list, tuple)):
                 erases = ", ".join(erases)
             fm.append(f"erases: {erases}")
-        if type == "memory":
+        if type in ("memory", "digest"):
             if importance:
                 fm.append(f"importance: {importance}")
             if durability:
@@ -177,6 +177,53 @@ class Ledger:
             extra["marked"] = marked
         return self.add(slug, body, tree="backlog", scope=scope,
                         durability=durability, extra=extra, **kw)
+
+    def add_episode(self, slug, body="A synthetic episode for testing.", *,
+                    scope="other", durability="weeks", cue=None, salience=None,
+                    axes=None, time=None, agent=None, user=None, **kw) -> str:
+        """Write a well-formed journal ENTRY; returns its id.
+
+        Episodes are ordinary records in the journal tree. The journal-only
+        keys land as frontmatter (axes is a {name: value} dict, values as
+        strings so a bipolar sign survives).
+        """
+        extra = dict(kw.pop("extra", None) or {})
+        if cue is not None:
+            extra["cue"] = cue
+        if salience is not None:
+            extra["salience"] = salience
+        if time is not None:
+            extra["time"] = time
+        if agent is not None:
+            extra["agent"] = agent
+        if user is not None:
+            extra["user"] = user
+        for name, value in (axes or {}).items():
+            extra[f"axis-{name}"] = value
+        return self.add(slug, body, tree="journal", scope=scope,
+                        durability=durability, extra=extra, **kw)
+
+    def add_elevation(self, kind, covers, body="A synthetic elevation.", *,
+                      slug=None, scope="other", durability="years", **kw) -> str:
+        """Write a journal ELEVATION (type: digest); returns its id."""
+        extra = dict(kw.pop("extra", None) or {})
+        extra["digest"] = kind
+        extra["covers"] = covers
+        return self.add(slug or f"{kind}-{covers}", body, tree="journal",
+                        type="digest", scope=scope, durability=durability,
+                        extra=extra, **kw)
+
+    def add_watermark(self, through, body=None, *, pass_=None, date=None,
+                      durability="weeks", **kw) -> str:
+        """Write a journal WATERMARK (reviewed-through claim); returns its id."""
+        extra = dict(kw.pop("extra", None) or {})
+        extra["reviewed-through"] = through
+        if pass_ is not None:
+            extra["pass"] = pass_
+        return self.add(f"reviewed-through-{through}",
+                        body or f"Reviewed through {through}.",
+                        tree="journal", scope="other", durability=durability,
+                        date=date or through, extra=extra, **kw)
 
     def draft(self, slug, body="A synthetic statement for testing.", **kw) -> str:
         """Write an <id>.md.draft — a record someone chose to compose over
@@ -375,6 +422,15 @@ class Ledger:
     def backlog_lens(self) -> str:
         return self.read("zamm-memory/.compiled/backlog.md")
 
+    def journal(self, *args, **kw) -> Result:
+        return self.zamm("journal", *args, **kw)
+
+    def journal_lens(self) -> str:
+        return self.read("zamm-memory/.compiled/journal.md")
+
+    def journal_state(self) -> str:
+        return self.read("zamm-memory/.compiled/journal-state.tsv")
+
     def check_all(self, *args, **kw) -> Result:
         return self.zamm("check", *args, **kw)
 
@@ -513,6 +569,8 @@ HELP_PATHS = [
     ["plan", "check", "--help"], ["plan", "create", "--help"],
     ["plan", "archive", "--help"],
     ["memory", "show", "-h"], ["plan", "create", "-h"],
+    ["help", "journal"], ["journal", "--help"], ["journal", "add", "--help"],
+    ["journal", "digest", "--help"], ["journal", "settle", "-h"],
 ]
 
 

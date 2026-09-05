@@ -3,12 +3,19 @@
 # knowledge ledger. Deterministic, read-only over the ledger, safe to rerun.
 # POSIX sh + POSIX awk only: runs on stock macOS, Linux, and git-bash.
 #
-# Usage: zamm-compile.sh [--project-root <path>] [--tree knowledge|backlog] [--check]
+# Usage: zamm-compile.sh [--project-root <path>] [--tree knowledge|backlog|journal] [--check]
 #   --tree        which record tree to compile (default: knowledge). The
 #                 backlog tree compiles into the pulled lens
 #                 .compiled/backlog.md instead of the session digest, with
 #                 backlog policy (uncapped headline listing, no guardrails,
 #                 plan-less votes, marked lane) — see the lens switches below.
+#                 The journal tree compiles into the timeline lens
+#                 .compiled/journal.md with journal policy (three record
+#                 classes: entries, elevations, watermarks; no votes, no
+#                 guardrails, no marked lane; journal-only keys).
+#   --export      journal only: print the versioned TSV export seam
+#                 (# zamm-journal-export v1, a column-name row, one row per
+#                 unretired record, newest first). Read-only.
 #   --check       validate ledger records (naming, schema, references) and exit
 #                 non-zero on violations; writes no digest.
 #   --list-live   print "id<TAB>primary-scope<TAB>all-tags<TAB>headline" for
@@ -29,6 +36,7 @@ LIST_INERT=0
 LIST_LIVE=0
 LIST_VOTES=0
 LIST_GRAPH=0
+EXPORT=0
 CANDIDATE=""
 TREE="knowledge"
 while [ $# -gt 0 ]; do
@@ -43,9 +51,9 @@ while [ $# -gt 0 ]; do
       ;;
     --tree)
       case "${2-}" in
-        knowledge|backlog) TREE="$2" ;;
+        knowledge|backlog|journal) TREE="$2" ;;
         *)
-          echo "ERROR: --tree must be knowledge or backlog" >&2
+          echo "ERROR: --tree must be knowledge, backlog or journal" >&2
           exit 1
           ;;
       esac
@@ -79,8 +87,12 @@ while [ $# -gt 0 ]; do
       LIST_VOTES=1
       shift
       ;;
+    --export)
+      EXPORT=1
+      shift
+      ;;
     -h|--help)
-      echo "Usage: zamm-compile.sh [--project-root <path>] [--tree knowledge|backlog] [--check [--with-candidate <draft>]] [--list-live] [--list-inert] [--list-votes] [--list-graph]"
+      echo "Usage: zamm-compile.sh [--project-root <path>] [--tree knowledge|backlog|journal] [--check [--with-candidate <draft>]] [--list-live] [--list-inert] [--list-votes] [--list-graph] [--export]"
       echo "  --with-candidate validates the ledger AS IF the named .md.draft were"
       echo "  published, without renaming anything into the live namespace."
       exit 0
@@ -101,6 +113,8 @@ KNOWLEDGE_DIR="$PROJECT_ROOT/zamm-memory/$TREE"
 OUT_DIR="$PROJECT_ROOT/zamm-memory/.compiled"
 if [ "$TREE" = "backlog" ]; then
   OUT_FILE="$OUT_DIR/backlog.md"
+elif [ "$TREE" = "journal" ]; then
+  OUT_FILE="$OUT_DIR/journal.md"
 else
   OUT_FILE="$OUT_DIR/memory.md"
 fi
@@ -122,6 +136,8 @@ zamm_verify_roots "$PROJECT_ROOT" || exit 4
 if [ ! -d "$KNOWLEDGE_DIR" ]; then
   if [ "$TREE" = "backlog" ]; then
     echo "ERROR: missing $KNOWLEDGE_DIR (backlog add creates it, or re-run zamm-scaffold.sh)" >&2
+  elif [ "$TREE" = "journal" ]; then
+    echo "ERROR: missing $KNOWLEDGE_DIR (journal add creates it, or re-run zamm-scaffold.sh)" >&2
   else
     echo "ERROR: missing $KNOWLEDGE_DIR (run zamm-scaffold.sh first)" >&2
   fi
@@ -130,6 +146,10 @@ fi
 
 if [ -n "$CANDIDATE" ] && [ "$CHECK" -ne 1 ]; then
   echo "ERROR: --with-candidate is only meaningful with --check" >&2
+  exit 1
+fi
+if [ "$EXPORT" -eq 1 ] && [ "$TREE" != "journal" ]; then
+  echo "ERROR: --export is a journal surface (pass --tree journal)" >&2
   exit 1
 fi
 
@@ -189,6 +209,8 @@ MANIFEST="$TMP_FILE.manifest"
 # for a selected record.
 if [ "$TREE" = "backlog" ]; then
   STATE_FILE="$OUT_DIR/backlog-state.tsv"
+elif [ "$TREE" = "journal" ]; then
+  STATE_FILE="$OUT_DIR/journal-state.tsv"
 else
   STATE_FILE="$OUT_DIR/state.tsv"
 fi
@@ -282,7 +304,7 @@ fi
 
 set +e
 awk \
-  -v today="$TODAY" -v check="$CHECK" -v listinert="$LIST_INERT" -v listlive="$LIST_LIVE" -v listvotes="$LIST_VOTES" -v listgraph="$LIST_GRAPH" -v root="$PROJECT_ROOT/" -v statefile="$STATE_TMP" -v lens="$TREE" '
+  -v today="$TODAY" -v check="$CHECK" -v listinert="$LIST_INERT" -v listlive="$LIST_LIVE" -v listvotes="$LIST_VOTES" -v listgraph="$LIST_GRAPH" -v export="$EXPORT" -v root="$PROJECT_ROOT/" -v statefile="$STATE_TMP" -v lens="$TREE" '
 BEGIN {
   DIGEST_MAX = 75       # full digest blocks (actionable: headline + elaboration)
   HEADLINE_MAX = 150    # headline-only reminders (topic exists; open if relevant)
@@ -315,6 +337,15 @@ BEGIN {
                         # never decays, so inflation must nag — warn, do not
                         # fail, the guardrail-cap rationale. Deliberately
                         # tighter than GUARDRAIL_MAX.
+  JOURNAL_REVIEW_COUNT = 25   # journal only: triage is due at this many
+                              # undigested entries ...
+  JOURNAL_REVIEW_AGE = 60     # ... or when the oldest undigested entry is
+                              # older than this many days
+  JOURNAL_LAPSE = 3           # journal only: an elevation practice lapses
+                              # when the due period is more than this many
+                              # grains (of the kind: months, years) beyond
+                              # the newest elevated one - the line goes
+                              # silent instead of nagging a dropped habit
 
   VALID_AREAS = " domain contracts conventions internals quality tooling ops meta "
   # every key the compiler acts on; anything else is a typo until proven
@@ -322,7 +353,11 @@ BEGIN {
   # meaningful only in the backlog tree, but it belongs in this list for BOTH
   # trees: its knowledge-side rejection below is a policy error naming the
   # remedy, not an unknown-key typo warning.
-  KNOWN_KEYS = " type scope supersedes erases created schema plan up down importance durability seed-up seed-dn migrated-from marked "
+  KNOWN_KEYS = " type scope supersedes erases created schema plan up down importance durability seed-up seed-dn migrated-from marked cue salience time agent user reviewed-through pass digest covers covered "
+  # the journal-only keys (plus the axis- prefix family): refused in every
+  # other tree as a policy error, validated per class inside the journal
+  JOURNAL_KEYS = " cue salience time agent user reviewed-through pass digest covers covered "
+  nelev = 0; nwm = 0; nwmpass = 0; nkinds = 0; nundig = 0; ndue = 0; jnm = 0; jng = 0
   nrec = 0; nerr = 0; nsort = 0; nother = 0
   nfiles = 0; nbad = 0; ndup = 0; nwarn = 0
 }
@@ -395,7 +430,7 @@ function read_archived_header(path, aid,   line, state, firstline, pos, key, val
   close(path)
 }
 
-function read_record(path, base,   id, line, state, firstline, fmclosed, pos, key, val, lc, q, n2, ydir, t, a, hasother, fdate, frest, fsuf, fslug) {
+function read_record(path, base,   id, line, state, firstline, fmclosed, pos, key, val, lc, q, n2, ydir, t, a, hasother, fdate, frest, fsuf, fslug, axn) {
   id = base
   sub(/\.md$/, "", id)
   nfiles++
@@ -479,8 +514,13 @@ function read_record(path, base,   id, line, state, firstline, fmclosed, pos, ke
         # (two importance: lines = two different rankings, one invisible)
         if (key in seenkey) rerr(id, path ": duplicate frontmatter key \"" key "\"")
         seenkey[key] = 1
-        if (index(KNOWN_KEYS, " " key " ") == 0 && key !~ /^x-/)
+        if (index(KNOWN_KEYS, " " key " ") == 0 && key !~ /^x-/ && key !~ /^axis-/)
           warn(path ": unknown frontmatter key \"" key "\" (ignored; use x- prefix for extensions)")
+        # jkeys doubles as the set membership test and the first-seen key
+        # named in the misfile diagnostic
+        if (index(JOURNAL_KEYS, " " key " ") > 0 || key ~ /^axis-/) {
+          if (!(id in jkeys)) jkeys[id] = key
+        }
         if      (key == "type")       rtype[id] = val
         else if (key == "scope")      rscope[id] = val
         else if (key == "supersedes") rsup[id] = val
@@ -496,6 +536,22 @@ function read_record(path, base,   id, line, state, firstline, fmclosed, pos, ke
         else if (key == "seed-dn")    rseeddn[id] = val
         else if (key == "migrated-from") rmigfrom[id] = val
         else if (key == "marked")     { rmarked[id] = val; hasmark[id] = 1 }
+        else if (key == "cue")        rcue[id] = val
+        else if (key == "salience")   rsal[id] = val
+        else if (key == "time")       rtime[id] = val
+        else if (key == "agent")      ragent[id] = val
+        else if (key == "user")       ruser[id] = val
+        else if (key == "reviewed-through") { rrt[id] = val; haswm[id] = 1 }
+        else if (key == "pass")       rpass[id] = val
+        else if (key == "covered")    { rcovd[id] = val; hascovd[id] = 1 }
+        else if (key == "digest")     rdig[id] = val
+        else if (key == "covers")     rcov[id] = val
+        else if (key ~ /^axis-/) {
+          axn = substr(key, 6)
+          naxis[id]++
+          axlist[id, naxis[id]] = axn
+          raxis[id, axn] = val
+        }
         # unknown keys are ignored on purpose
       }
       continue
@@ -525,10 +581,16 @@ function read_record(path, base,   id, line, state, firstline, fmclosed, pos, ke
     rerr(id, path ": missing schema:")
   else if (rschema[id] != "3")
     rerr(id, path ": unsupported schema: " rschema[id])
-  if (rtype[id] != "memory" && rtype[id] != "tombstone" && rtype[id] != "votes" &&
-      rtype[id] != "erasure")
+  # type: digest is the journal elevation record: a stored digest of a
+  # period. It is legal ONLY in the journal tree - older toolchains never
+  # enumerate that tree, so the new-type quarantine hazard (which is about
+  # trees they SCAN) does not arise there; every other tree refuses it.
+  if (rtype[id] == "digest" && lens != "journal")
+    rerr(id, path ": type: digest is the journal elevation record type; the " lens " tree has no elevations")
+  else if (rtype[id] != "memory" && rtype[id] != "tombstone" && rtype[id] != "votes" &&
+      rtype[id] != "erasure" && rtype[id] != "digest")
     rerr(id, path ": unknown type \"" rtype[id] "\"")
-  if (rtype[id] == "memory") {
+  if (rtype[id] == "memory" || rtype[id] == "digest") {
     parsetags(id)
     if (rscope[id] == "") rerr(id, path ": memory record missing scope:")
     else if (tagn[id] == 0)
@@ -562,6 +624,11 @@ function read_record(path, base,   id, line, state, firstline, fmclosed, pos, ke
     # session digest.
     if (lens == "backlog" && rimp[id] == "guardrail")
       rerr(id, path ": guardrail importance is not allowed in the backlog (mark the idea instead: backlog mark)")
+    # Journal policy: no guardrails either - there is no pushed surface to
+    # guard; an episode that turned out to be a standing rule is distilled
+    # into a knowledge record at triage.
+    if (lens == "journal" && rimp[id] == "guardrail")
+      rerr(id, path ": guardrail importance is not allowed in the journal (distill the rule into a knowledge record instead)")
     if (rbody[id] !~ /[^ \t\n]/) rerr(id, path ": memory record has empty body")
     else if (headline(id) == "")
       rerr(id, path ": missing headline (body starts with a heading)")
@@ -602,6 +669,9 @@ function read_record(path, base,   id, line, state, firstline, fmclosed, pos, ke
     }
   }
   if (rtype[id] == "votes") {
+    # Journal policy: no votes at all. A timeline has no hot-to-cold order
+    # to vote on; digestion is the only consumer of an episode.
+    if (lens == "journal") rerr(id, path ": votes records are not allowed in the journal (a timeline has no ranking to vote on)")
     # plan: is a per-tree policy. Knowledge votes come from plan close-outs,
     # so a plan-less votes record there is an orphan minting rank for nothing.
     # Backlog votes are TRIAGE — they rate ideas, no plan exists — so the
@@ -635,12 +705,21 @@ function read_record(path, base,   id, line, state, firstline, fmclosed, pos, ke
   # silent-loss the lane exists to prevent).
   if (id in hasmark) {
     if (lens != "backlog")
-      rerr(id, path ": marked: is a backlog key; a knowledge record cannot sit in the marked lane")
+      rerr(id, path ": marked: is a backlog key; a " lens " record cannot sit in the marked lane")
     else if (rtype[id] != "memory")
       rerr(id, path ": marked: is only meaningful on a memory record (this is a " rtype[id] ")")
     else if (rmarked[id] != "no" && !validdate(rmarked[id]))
       rerr(id, path ": marked: must be a real YYYY-MM-DD date or \"no\" (got \"" rmarked[id] "\")")
   }
+  # Journal keys are refused outside the journal whatever the record type
+  # (a journal-only key on a knowledge record is a misfile, not a typo).
+  if ((id in jkeys) && lens != "journal")
+    rerr(id, path ": " jkeys[id] ": is a journal key; the " lens " tree has no journal classes (write it with journal add)")
+  # Inside the journal every record is validated as a class, whether or not
+  # it carries a journal key: a bare type: digest carries none at all, and
+  # gating on the keys let it pass the contract and reach the export as an
+  # elevation with no kind and no period.
+  if (lens == "journal") check_journal(id, path)
   # seed-up/seed-dn carry pre-migration vote counts and feed the ranking
   # directly; they are meaningful ONLY on a migration record. Requiring
   # migrated-from: closes a hand-authored forge (a record with seed-up: 50 but
@@ -674,7 +753,7 @@ function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
 # digest. select rows are the record ids the digest actually surfaced (Digest
 # blocks + Headlines), i.e. what memory list should show by default. Guardrail
 # and contested counts come from the graph, not from counting rendered lines.
-function emit_state(   i, id) {
+function emit_state(   i, j, id, k, pm, cu, mk, mp, g, gp, n, nm2, fs) {
   if (statefile == "") return
   printf "files\t%d\n", nfiles > statefile
   printf "parsed\t%d\n", nrec - nbad > statefile
@@ -683,6 +762,7 @@ function emit_state(   i, id) {
   printf "dangling\t%d\n", ndangling > statefile
   printf "dupvotes\t%d\n", ndupvote > statefile
   printf "badvoterefs\t%d\n", nbadvoteref > statefile
+  printf "badcover\t%d\n", nbadcover > statefile
   printf "guardrails\t%d\n", nguard > statefile
   printf "contested\t%d\n", ngroups > statefile
   printf "other\t%d\n", nother > statefile
@@ -698,6 +778,69 @@ function emit_state(   i, id) {
   for (i = 1; i <= nrec; i++) {
     id = order[i]
     if (id in printed) print "select\t" id > statefile
+  }
+  # Journal rows: coverage (the effective watermark per pass), the
+  # effective elevations, what is due (consumed by the digest compile for
+  # its one Journal: line, in FIXED order: triage first, then the built-in
+  # kinds in ship order), and the instrument - per calendar month x cue
+  # entry counts and per month x cue x axis nearest-rank quartiles, over
+  # ENTRIES only (a digest of a month must not double-count its month) and
+  # over created: dates, never liveness (decay must not rewrite what a
+  # finished month says). Row kinds are tagged and additive; readers skip
+  # unknown kinds.
+  if (lens == "journal") {
+    printf "entries\t%d\n", nlive > statefile
+    printf "undigested\t%d\n", nundig > statefile
+    printf "oldest_undigested\t%s\n", dv(oldest) > statefile
+    printf "clearable\t%d\n", nclear > statefile
+    printf "elevations\t%d\n", nelev > statefile
+    printf "watermarks\t%d\n", nwm > statefile
+    for (i = 1; i <= nwmpass; i++)
+      printf "watermark\t%s\t%s\t%s\n", wmpass[i], wmmax[wmpass[i]], wmid[wmpass[i]] > statefile
+    for (i = 1; i <= nrec; i++) {
+      id = order[i]
+      if ((id in elive) && effel[rdig[id] SUBSEP rcov[id]] == id)
+        printf "elev\t%s\t%s\t%s\n", rdig[id], rcov[id], id > statefile
+    }
+    if (duetri) printf "due_triage\t%d\t%s\n", nundig, oldest > statefile
+    for (i = 1; i <= ndue; i++) printf "due_elev\t%s\t%s\n", duekind[i], dueper[i] > statefile
+    for (i = 1; i <= nek; i++) {
+      if (ecount[eorder[i]] < 2) continue
+      printf "elev_competing\t%s\t%s\t%d\t%s\n", ekind[eorder[i]], eper[eorder[i]], ecount[eorder[i]], effel[eorder[i]] > statefile
+    }
+    for (i = 1; i <= nek; i++) {
+      if (!(eorder[i] in stale)) continue
+      printf "elev_stale\t%s\t%s\t%d\t%s\n", ekind[eorder[i]], eper[eorder[i]], stale[eorder[i]], effel[eorder[i]] > statefile
+      # the entries that elevation never saw, by id: the renderer must not
+      # re-derive coverage from the record - two parsers disagreeing about
+      # one frontmatter line is how an uncovered entry goes missing again
+      for (j = 1; j <= uncn[eorder[i]]; j++)
+        printf "elev_uncovered\t%s\t%s\t%s\n", ekind[eorder[i]], eper[eorder[i]], unc[eorder[i], j] > statefile
+    }
+    for (i = 1; i <= nsort; i++) {
+      id = sorted[i]
+      pm = substr(rcreated[id], 1, 7); cu = (rcue[id] == "") ? "-" : rcue[id]
+      mk = pm SUBSEP cu
+      if (!(mk in mcount)) morder[++jnm] = mk
+      mcount[mk]++
+      if (rsal[id] != "") jgadd(pm, cu, "salience", "unipolar", rsal[id] + 0)
+      for (k = 1; k <= naxis[id]; k++) {
+        nm2 = axlist[id, k]
+        if ((id SUBSEP nm2) in axtype) jgadd(pm, cu, nm2, axtype[id, nm2], raxis[id, nm2] + 0)
+      }
+    }
+    for (i = 1; i <= jnm; i++) {
+      split(morder[i], mp, SUBSEP)
+      printf "month\t%s\t%s\t%d\n", mp[1], mp[2], mcount[morder[i]] > statefile
+    }
+    for (i = 1; i <= jng; i++) {
+      g = gorder[i]; n = gn[g]
+      jsortvals(g, n)
+      split(g, gp, SUBSEP)
+      fs = (gp[4] == "bipolar") ? "%+d" : "%d"
+      fs = "axis\t%s\t%s\t%s\t%s\t%d\t" fs "\t" fs "\t" fs "\n"
+      printf(fs, gp[1], gp[2], gp[3], gp[4], n, gv[g, nrank(n, 0.25)], gv[g, nrank(n, 0.5)], gv[g, nrank(n, 0.75)]) > statefile
+    }
   }
   # The marked rows feed the digest compile, which renders the ## Marked
   # backlog section from this sidecar. mark-date first so a plain sort
@@ -722,7 +865,7 @@ function emit_state(   i, id) {
 # votes record with a ghost target must still read as degraded, not as a
 # clean uninitialized ledger.
 function emit_degraded(   i, id) {
-  if (nquar == 0 && ndangling == 0 && ndupvote == 0 && nbadvoteref == 0) return
+  if (nquar == 0 && ndangling == 0 && ndupvote == 0 && nbadvoteref == 0 && nbadcover == 0) return
   print "## Degraded (ledger integrity problems - see below)"
   print ""
   if (nquar > 0) {
@@ -757,6 +900,14 @@ function emit_degraded(   i, id) {
     print ""
     for (i = 1; i <= ndupvote; i++)
       print "- " dupvoteplan[i] ": " nplanvotes[dupvoteplan[i]] " active votes records (counted: " canonvote[dupvoteplan[i]] ")"
+    print ""
+  }
+  if (nbadcover > 0) {
+    print "Void coverage claims - a watermark or elevation names records it could"
+    print "not have reviewed, so it covers NOTHING and its entries stay undigested."
+    print ""
+    for (i = 1; i <= nbadcover; i++)
+      print "- " badcover[i]
     print ""
   }
   if (nbadvoteref > 0) {
@@ -814,6 +965,283 @@ function check_vote_lists(id, path,   m, av, t, tgt, vu, vd) {
   }
 }
 
+# ---- journal class rules ----
+# Three record classes share the journal tree: an ENTRY (type: memory), an
+# ELEVATION (type: digest + digest:/covers:) and a WATERMARK (type: memory +
+# reviewed-through: [+ pass:]). A record is exactly one class, and every
+# journal key resolves by VALUE, never by graph, so validation is per
+# record with no registry anywhere.
+function jslug(v) { return (v ~ /^[a-z0-9][a-z0-9-]*$/) }
+# the journal class of a record, for diagnostics
+function jclass(x) {
+  if (rtype[x] == "digest") return "an elevation"
+  if (x in haswm) return "a watermark"
+  return "an entry"
+}
+# a calendar period: YYYY or YYYY-MM with a real month
+function jperiod(v,   m) {
+  if (v ~ /^[0-9][0-9][0-9][0-9]$/) return 1
+  if (v !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]$/) return 0
+  m = substr(v, 6, 2) + 0
+  return (m >= 1 && m <= 12)
+}
+# An axis value is self-describing by its spelling: a sign makes it
+# bipolar (-5..+5, +0 included, -0 refused), no sign makes it unipolar
+# (0..10). Two types, no registry, so validation stays per record.
+function jaxtype(v) {
+  if (v ~ /^[+-][0-5]$/) return (v == "-0") ? "" : "bipolar"
+  if (v ~ /^([0-9]|10)$/) return "unipolar"
+  return ""
+}
+function check_journal(id, path,   isel, iswm, k, nm2, v, ty, cn, ci, cvg, cvt, pstart) {
+  isel = (rtype[id] == "digest")
+  iswm = (id in haswm)
+  if (rtype[id] != "memory" && rtype[id] != "digest") {
+    # a tombstone or erasure may carry provenance (time/agent/user), nothing else
+    if (rcue[id] != "" || rsal[id] != "" || naxis[id] > 0 || rdig[id] != "" || rcov[id] != "" || iswm || rpass[id] != "")
+      rerr(id, path ": cue/salience/axis-*/digest/covers/reviewed-through/pass are only meaningful on memory or digest records (this is a " rtype[id] ")")
+  }
+  if (isel) {
+    if (rdig[id] == "" || rcov[id] == "")
+      rerr(id, path ": an elevation (type: digest) needs both digest: <kind> and covers: <YYYY[-MM]>")
+    if (rcue[id] != "" || rsal[id] != "")
+      rerr(id, path ": cue:/salience: are entry keys; an elevation carries digest: instead")
+    if (iswm || rpass[id] != "")
+      rerr(id, path ": reviewed-through:/pass: are watermark keys; a record is exactly one class")
+  } else if (rdig[id] != "" || rcov[id] != "") {
+    rerr(id, path ": digest:/covers: belong to type: digest (an elevation record)")
+  }
+  if (rdig[id] != "" && !jslug(rdig[id])) rerr(id, path ": digest: must be a kind slug [a-z0-9-] (got \"" rdig[id] "\")")
+  if (rcov[id] != "" && !jperiod(rcov[id])) rerr(id, path ": covers: must be a calendar period YYYY or YYYY-MM (got \"" rcov[id] "\")")
+  # ... and an elevation cannot summarize a period that has not begun. The
+  # runner is stricter (the period must be COMPLETE); this is the floor a
+  # hand-written record cannot fall through.
+  else if (rcov[id] != "" && validdate(rcreated[id])) {
+    pstart = (length(rcov[id]) == 4) ? rcov[id] "-01-01" : rcov[id] "-01"
+    if (pstart > rcreated[id])
+      rerr(id, path ": covers: " rcov[id] " begins after the record date " rcreated[id] " (an elevation cannot summarize a period that has not started)")
+  }
+  if (iswm) {
+    if (!validdate(rrt[id])) rerr(id, path ": reviewed-through: must be a real YYYY-MM-DD date (got \"" rrt[id] "\")")
+    # A claim cannot reach past the day it was written. settle refuses a
+    # future date at the CLI; this is the deep lock for a hand-written or
+    # merged record, which is committed repository content like any other -
+    # without it, one line claims coverage of every entry there will ever be.
+    else if (validdate(rcreated[id]) && rrt[id] > rcreated[id])
+      rerr(id, path ": reviewed-through: " rrt[id] " is later than the record date " rcreated[id] " (a claim cannot cover what did not exist when it was made)")
+    if (rcue[id] != "" || rsal[id] != "" || naxis[id] > 0)
+      rerr(id, path ": cue:/salience:/axis-* are entry keys; a watermark claims coverage only")
+    if (rpass[id] == "triage") rerr(id, path ": pass: triage is the default pass; omit the key (one spelling per kind)")
+    else if (rpass[id] != "" && !jslug(rpass[id])) rerr(id, path ": pass: must be a kind slug [a-z0-9-] (got \"" rpass[id] "\")")
+  } else if (rpass[id] != "") {
+    rerr(id, path ": pass: scopes a watermark and needs reviewed-through:")
+  }
+  # covered: is the claim IDENTITY - the entries a watermark actually saw.
+  # A date alone cannot say that: an entry written or merged later, dated
+  # before the boundary, was never reviewed by it (see the coverage pass).
+  if (id in hascovd) {
+    if (!iswm && !isel) rerr(id, path ": covered: names what a coverage record saw and belongs on a watermark or an elevation")
+    else {
+      cn = split(rcovd[id], cvg, ",")
+      for (ci = 1; ci <= cn; ci++) {
+        cvt = trim(cvg[ci])
+        if (cvt == "") continue
+        if (cvt !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[a-z0-9][a-z0-9-]*$/)
+          rerr(id, path ": covered: \"" cvt "\" is not a record id")
+        else if (cvt == id)
+          rerr(id, path ": covered: names the watermark itself")
+      }
+    }
+  }
+  if (rcue[id] != "" && !jslug(rcue[id])) rerr(id, path ": cue: must be a slug [a-z0-9-] (got \"" rcue[id] "\")")
+  if (rsal[id] != "" && rsal[id] !~ /^([1-9]|10)$/) rerr(id, path ": salience: must be an integer 1..10 (got \"" rsal[id] "\")")
+  for (k = 1; k <= naxis[id]; k++) {
+    nm2 = axlist[id, k]; v = raxis[id, nm2]
+    if (nm2 == "salience") rerr(id, path ": axis-salience: is spelled salience: (one name per axis)")
+    else if (!jslug(nm2)) rerr(id, path ": axis name must be a slug [a-z0-9-] (got \"axis-" nm2 "\")")
+    ty = jaxtype(v)
+    if (ty == "") rerr(id, path ": axis-" nm2 ": must be unipolar 0..10 (unsigned) or bipolar -5..+5 (always signed, +0 not -0); got \"" v "\"")
+    else axtype[id, nm2] = ty
+  }
+  if (rtime[id] != "" && rtime[id] !~ /^([01][0-9]|2[0-3]):[0-5][0-9]$/) rerr(id, path ": time: must be HH:MM (got \"" rtime[id] "\")")
+  if (ragent[id] != "" && ragent[id] !~ /^[A-Za-z0-9][A-Za-z0-9._@+-]*$/) rerr(id, path ": agent: must be one token [A-Za-z0-9._@+-] (got \"" ragent[id] "\")")
+  if (ruser[id] != "" && ruser[id] !~ /^[A-Za-z0-9][A-Za-z0-9._@+-]*$/) rerr(id, path ": user: must be one token [A-Za-z0-9._@+-] (got \"" ruser[id] "\")")
+}
+
+# The "<period> (<kinds>)" list a journal lens header renders, newest
+# period first. skip[] holds periods already shown elsewhere (pass the empty
+# noskip array when nothing is skipped); arrays are by reference in awk, so
+# one definition serves both header lines.
+function jlabels(map, skip,   k, n, i, j, arr, s) {
+  n = 0
+  for (k in map) {
+    if (k in skip) continue
+    j = ++n
+    while (j > 1 && arr[j - 1] < k) { arr[j] = arr[j - 1]; j-- }
+    arr[j] = k
+  }
+  if (n == 0) return ""
+  s = ""
+  for (i = 1; i <= n; i++) s = s ((i > 1) ? ", " : "") arr[i] " (" map[arr[i]] ")"
+  return s
+}
+
+# A covered id has to name a real journal ENTRY of this tree that the claim
+# could actually have seen. Syntax alone let a claim name a QUARANTINED
+# record - one nobody could read, so one nobody reviewed - and absorb it
+# silently the moment it was repaired, with no rerun to recover it. An
+# erased or archived id is a known-inert node and still counts: it existed.
+# Archived ONLY when no live copy exists, though - the condition every other
+# pass uses. An interrupted archive leaves both, and taking the archived
+# exemption first meant a claim could name a live entry dated after its own
+# boundary and pass: the entry was retired unread, check was clean, and
+# review reported nothing outstanding.
+function cover_ok(claim, cvt, period, bound,   c) {
+  if ((cvt in erased) || ((cvt in archived) && !(cvt in filepath))) return 1
+  if (!(cvt in filepath)) {
+    bad_cover(claim ": covered: names " cvt ", which is not in this journal")
+    return 0
+  }
+  if (cvt in bad) {
+    bad_cover(claim ": covered: names " cvt ", which is quarantined - nobody could have reviewed it")
+    return 0
+  }
+  if (rtype[cvt] != "memory" || (cvt in haswm)) {
+    bad_cover(claim ": covered: names " cvt ", which is not an entry")
+    return 0
+  }
+  c = rcreated[cvt]
+  if (period != "" && substr(c, 1, length(period)) != period) {
+    bad_cover(claim ": covered: names " cvt " (" c "), outside the period " period)
+    return 0
+  }
+  if (bound != "" && c >= bound) {
+    bad_cover(claim ": covered: names " cvt " (" c "), which is not before the claim boundary " bound)
+    return 0
+  }
+  return 1
+}
+
+# A claim whose coverage list does not hold up carries NO coverage at all -
+# fail closed on authority, which here means fail open on the entries: they
+# stay undigested until someone reviews them for real.
+function cover_list_ok(claim, list, period, bound,   n, g, i, t, ok) {
+  ok = 1
+  n = split(list, g, ",")
+  for (i = 1; i <= n; i++) {
+    t = trim(g[i])
+    if (t == "") continue
+    if (!cover_ok(claim, t, period, bound)) ok = 0
+  }
+  return ok
+}
+
+function bad_cover(msg) {
+  err(msg)
+  badcover[++nbadcover] = msg
+}
+
+# Every coverage pass that covers this entry, space separated: named by a
+# claim of that pass, or falling under a date-only claim of it.
+function jpasses(id,   s, i2, p) {
+  s = ""
+  for (i2 = 1; i2 <= nwmpass; i2++) {
+    p = wmpass[i2]
+    if (((p SUBSEP id) in cov) || ((p in dateonly) && rcreated[id] < dateonly[p]))
+      s = s ((s == "") ? "" : " ") p
+  }
+  return s
+}
+
+# grains between two periods of one kind: months for YYYY-MM, years for YYYY
+function grain_dist(a, b,   ya, yb, ma, mb) {
+  ya = substr(a, 1, 4) + 0; yb = substr(b, 1, 4) + 0
+  if (length(a) == 7 && length(b) == 7) {
+    ma = substr(a, 6, 2) + 0; mb = substr(b, 6, 2) + 0
+    return (yb * 12 + mb) - (ya * 12 + ma)
+  }
+  return yb - ya
+}
+
+# nearest-rank percentile index over n sorted values: deterministic,
+# awk-portable, no interpolation, so goldens stay byte-stable across awks
+function nrank(n, p,   r) {
+  r = int(p * n)
+  if (r < p * n) r++
+  if (r < 1) r = 1
+  return r
+}
+
+# month x cue x axis groups for the sidecar aggregates (entries only)
+function jgadd(pm, cu, nm2, ty, v,   g) {
+  g = pm SUBSEP cu SUBSEP nm2 SUBSEP ty
+  if (!(g in gn)) { gorder[++jng] = g; gn[g] = 0 }
+  gv[g, ++gn[g]] = v
+}
+# insertion sort of one group: a group is one month, one cue, one axis
+function jsortvals(g, n,   i, j, t) {
+  for (i = 2; i <= n; i++) {
+    t = gv[g, i]; j = i - 1
+    while (j >= 1 && gv[g, j] > t) { gv[g, j + 1] = gv[g, j]; j-- }
+    gv[g, j + 1] = t
+  }
+}
+
+# timeline order: created desc, then time desc (an entry without time: sorts
+# last within its day), then id desc - the ONLY place time: is consulted
+function jcmp(a, b) {
+  if (jkey[a] != jkey[b]) return (jkey[a] > jkey[b]) ? -1 : 1
+  return 0
+}
+function jsift(lo, hi,   root, child, tmp) {
+  root = lo
+  while (root * 2 <= hi) {
+    child = root * 2
+    if (child < hi && jcmp(jarr[child], jarr[child + 1]) < 0) child++
+    if (jcmp(jarr[root], jarr[child]) < 0) {
+      tmp = jarr[root]; jarr[root] = jarr[child]; jarr[child] = tmp
+      root = child
+    } else return
+  }
+}
+function jheapsort(n,   i, tmp) {
+  for (i = int(n / 2); i >= 1; i--) jsift(i, n)
+  for (i = n; i > 1; i--) {
+    tmp = jarr[1]; jarr[1] = jarr[i]; jarr[i] = tmp
+    jsift(1, i - 1)
+  }
+}
+function dv(v) { return (v == "") ? "-" : v }
+
+# The export seam: the sanctioned read API for applications. A version line,
+# a column-name row (readers map by NAME and ignore unknown columns; within
+# v1 columns only append), then one TAB row per unretired record, newest
+# first. Same enumeration every other read sees (G3).
+function jexport(   i, id, n, cls, ax, k, hl, st, rv, sc2) {
+  print "# zamm-journal-export v1"
+  print "id\tclass\tcreated\ttime\tagent\tuser\tcue\tkind\tcovers\tpass\treviewed-through\tscope\tsalience\tstate\treviewed\tbg\taxes\theadline\tpasses"
+  n = 0
+  for (i = 1; i <= nrec; i++) {
+    id = order[i]
+    if ((id in live) || (id in elive) || (id in wmlive)) {
+      jarr[++n] = id
+      jkey[id] = rcreated[id] "\t" rtime[id] "\t" id
+    }
+  }
+  jheapsort(n)
+  for (i = 1; i <= n; i++) {
+    id = jarr[i]
+    cls = (id in elive) ? "elevation" : ((id in wmlive) ? "watermark" : "entry")
+    ax = ""
+    for (k = 1; k <= naxis[id]; k++) ax = ax ((ax == "") ? "" : " ") axlist[id, k] "=" raxis[id, axlist[id, k]]
+    hl = headline(id); gsub(/\t/, " ", hl)
+    sc2 = rscope[id]; gsub(/\t/, " ", sc2)
+    st = (cls == "entry" && (id in dormant)) ? "dormant" : "live"
+    rv = (cls == "entry") ? ((id in reviewed) ? "yes" : "no") : "-"
+    printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", id, cls, rcreated[id], dv(rtime[id]), dv(ragent[id]), dv(ruser[id]), dv(rcue[id]), dv(rdig[id]), dv(rcov[id]), (cls == "watermark" ? (rpass[id] == "" ? "triage" : rpass[id]) : "-"), dv(rrt[id]), dv(sc2), dv(rsal[id]), st, rv, ((id in hasbg) ? "yes" : "no"), dv(ax), hl, ((cls == "entry") ? dv(passesof[id]) : "-")
+  }
+}
+
 # absolute paths cost context in an always-on surface; show them repo-relative
 function relpath(s) { if (root != "" && index(s, root) == 1) return substr(s, length(root) + 1); return s }
 
@@ -855,6 +1283,22 @@ function rerr(id, msg) {
 function daynum(d) {
   if (d !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/) return 0
   return substr(d, 1, 4) * 372 + substr(d, 6, 2) * 31 + substr(d, 9, 2) + 0
+}
+
+# EXACT days between two calendar dates (the standard days-from-civil
+# algorithm). daynum() above is a deliberate approximation feeding a decay
+# WEIGHT, where a few days near a month boundary are invisible; a policy
+# BOUNDARY cannot use it. Under daynum, "older than 60 days" fired on day 60
+# for a 31st-of-January entry and would wait past day 62 for a March one.
+function civildays(d,   y, m, dd, era, yoe, doy, doe) {
+  if (d !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/) return 0
+  y = substr(d, 1, 4) + 0; m = substr(d, 6, 2) + 0; dd = substr(d, 9, 2) + 0
+  if (m <= 2) y--
+  era = int(y / 400)
+  yoe = y - era * 400
+  doy = int((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5) + dd - 1
+  doe = yoe * 365 + int(yoe / 4) - int(yoe / 100) + doy
+  return era * 146097 + doe - 719468
 }
 
 # recency weight, half-life ~90 days
@@ -1088,8 +1532,10 @@ function addvotes(voter, list, sign, w,   m, t, tgt, av) {
   for (t = 1; t <= m; t++) {
     tgt = trim(av[t])
     if (tgt == "") continue
-    # erased or archived target = known inert node: no vote, no error
-    if ((tgt in erased) || (tgt in archived)) continue
+    # erased or archived target = known inert node: no vote, no error -
+    # archived only when no live copy exists, or a vote on a record caught
+    # mid-archive silently vanished from the ranking instead of counting
+    if ((tgt in erased) || ((tgt in archived) && !(tgt in filepath))) continue
     if (!(tgt in filepath)) { bad_voteref(voter ": vote target not found: " tgt); continue }
     if (tgt in bad) continue
     # votes rate knowledge, so only memory records can be voted on: a vote on
@@ -1430,12 +1876,23 @@ END {
       # its id resolvable. Its type (parsed from the archived header) still
       # participates in compatibility checks; the edge itself is applied as
       # grouping-only in the apply pass.
-      if (tgt in archived) {
+      #
+      # ONLY when there is no live copy, though - the same condition the
+      # apply pass uses. An interrupted archive leaves both, and judging the
+      # edge by the archived header while applying it to the live record
+      # meant validating one thing and killing another: the header carries a
+      # type but not a journal class, so a watermark could supersede an
+      # entry and retire it, with check none the wiser.
+      if ((tgt in archived) && !(tgt in filepath)) {
         if (atype[tgt] != "") {
           if (rtype[id] == "memory" && atype[tgt] == "votes")
             rerr(id, filepath[id] ": memory record cannot supersede a votes record (" tgt ", archived)")
           else if (rtype[id] == "votes" && atype[tgt] != "votes")
             rerr(id, filepath[id] ": votes record may only supersede another votes record (" tgt " is archived " atype[tgt] ")")
+          else if (rtype[id] == "digest" && atype[tgt] != "digest")
+            rerr(id, filepath[id] ": an elevation (type: digest) may only supersede another elevation (" tgt " is archived " atype[tgt] ")")
+          else if (rtype[id] == "memory" && atype[tgt] == "digest")
+            rerr(id, filepath[id] ": an entry cannot supersede an elevation (" tgt ", archived)")
         }
         continue
       }
@@ -1455,6 +1912,20 @@ END {
         rerr(id, filepath[id] ": memory record cannot supersede a votes record (" tgt ")")
       else if (rtype[id] == "votes" && rtype[tgt] != "votes")
         rerr(id, filepath[id] ": votes record may only supersede another votes record (" tgt " is " rtype[tgt] ")")
+      # a record is exactly one class: an elevation is corrected by another
+      # elevation (or retired by a tombstone), never silently by an entry
+      else if (rtype[id] == "digest" && rtype[tgt] != "digest")
+        rerr(id, filepath[id] ": an elevation (type: digest) may only supersede another elevation (" tgt " is " rtype[tgt] ")")
+      else if (rtype[id] == "memory" && rtype[tgt] == "digest")
+        rerr(id, filepath[id] ": an entry cannot supersede an elevation (" tgt "); write a newer elevation or a tombstone")
+      # Entries and watermarks share type: memory, so type compatibility
+      # alone let a coverage claim supersede an episode - which retired it
+      # outright, out of the timeline and out of the export, against the
+      # rule that digestion never retires what it summarizes. Only a
+      # tombstone retires across classes.
+      else if (lens == "journal" && rtype[id] == "memory" && rtype[tgt] == "memory" &&
+               ((id in haswm) != (tgt in haswm)))
+        rerr(id, filepath[id] ": " jclass(id) " may not supersede " jclass(tgt) " (" tgt "); digestion never retires an entry - correct a wrong record with a tombstone")
     }
   }
 
@@ -1581,7 +2052,15 @@ END {
     id = order[i]
     if (id in erased) continue
     if (id in bad) continue
-    if (rtype[id] != "memory" || (id in dead)) continue
+    if (id in dead) continue
+    # Journal classes: an elevation and a watermark are never dormant -
+    # decay is an entry concept. They are retired only by supersede,
+    # tombstone or erasure (all of which land them in dead/erased above),
+    # so a stored digest cannot silently vanish from the views and a
+    # coverage claim cannot silently expire.
+    if (lens == "journal" && rtype[id] == "digest") { elive[id] = 1; nelev++; continue }
+    if (rtype[id] != "memory") continue
+    if (lens == "journal" && (id in haswm)) { wmlive[id] = 1; nwm++; continue }
     live[id] = 1; nlive++
     if (area(id) == "other") nother++
     if (rimp[id] == "guardrail") nguard++
@@ -1604,7 +2083,7 @@ END {
   # knowledge into real areas. Backlog capture legitimately defaults to
   # other, and because candidate validation is an error-line diff, keeping
   # the cap here would make the sixth context-free backlog add refuse.
-  if (lens != "backlog" && nother > OTHER_MAX)
+  if (lens == "knowledge" && nother > OTHER_MAX)
     err("other holds " nother " live records (max " OTHER_MAX "); refile each via supersession into a real area")
   if (lens == "backlog" && nmarked > MARKED_MAX)
     warn(nmarked " marked ideas (soft max " MARKED_MAX "). The marked lane is pushed into every session digest and never decays — promote what is starting, unmark what is not.")
@@ -1613,9 +2092,175 @@ END {
   if (nguard > GUARDRAIL_MAX)
     warn(nguard " live guardrails (soft max " GUARDRAIL_MAX "). Guardrails bypass the digest budget and never decay, so inflation silently grows every session. Reclassify the weakest to useful, or supersede/tombstone what no longer applies.")
 
+  # ---- journal: watermarks, elevations, the undigested set, due-logic ----
+  # Every class resolves by VALUE: the effective watermark per pass is the
+  # MAX reviewed-through among unretired claims (two concurrent claims are
+  # both true and the larger simply covers more - merge-safe, and never id
+  # order, which is not chronology); the effective elevation per kind and
+  # period is the newest unretired one.
+  if (lens == "journal") {
+    # What a claim covers is the entries it NAMED (covered:), not everything
+    # older than its date: an entry written or merged later, dated before
+    # the boundary, existed for nobody to review when the claim was made,
+    # and absorbing it would retire it unread with no rerun to bring it
+    # back. A claim carrying no covered: list is the blunt hand-written
+    # form and keeps date coverage - it is a human asserting the range.
+    for (i = 1; i <= nrec; i++) {
+      id = order[i]
+      if (!(id in wmlive)) continue
+      p = (rpass[id] == "") ? "triage" : rpass[id]
+      if (!(p in wmmax) || rrt[id] > wmmax[p]) { wmmax[p] = rrt[id]; wmid[p] = id }
+      if (!(p in wmseen)) { wmseen[p] = 1; wmpass[++nwmpass] = p }
+      # An EXACT claim is one that carries the key at all, empty included:
+      # "I reviewed these" and "I reviewed nothing new" are both statements
+      # of identity. Only a claim with no covered: key is the blunt
+      # hand-written date form, and settle always writes the key - a settle
+      # that covered nothing must not silently degrade into a date claim
+      # that absorbs whatever merges in later.
+      if (id in hascovd) {
+        if (cover_list_ok(id, rcovd[id], "", rrt[id])) {
+          cn = split(rcovd[id], cvg, ",")
+          for (ci = 1; ci <= cn; ci++) {
+            cvt = trim(cvg[ci])
+            if (cvt != "") cov[p SUBSEP cvt] = 1
+          }
+        }
+      } else if (!(p in dateonly) || rrt[id] > dateonly[p]) dateonly[p] = rrt[id]
+    }
+    for (i = 1; i <= nrec; i++) {
+      id = order[i]
+      if (!(id in elive)) continue
+      ek = rdig[id] SUBSEP rcov[id]
+      # A correction supersedes, which kills the predecessor outright - so
+      # two elevations BOTH live for one kind and period are competing
+      # claims, not a revision. Ids lead with the creation date, so the pick
+      # is newest-day-wins and deterministic; within one day it comes down
+      # to the random suffix, which is not chronology. That case is
+      # surfaced (below and in the lens) instead of being decided quietly.
+      if (!(ek in eseen)) {
+        eseen[ek] = 1; eorder[++nek] = ek
+        ekind[ek] = rdig[id]; eper[ek] = rcov[id]
+      }
+      ecount[ek]++
+      if (!(ek in effel) || id > effel[ek]) effel[ek] = id
+      if (!(rdig[id] in kindseen)) { kindseen[rdig[id]] = 1; kinds[++nkinds] = rdig[id] }
+      if (!(rdig[id] in kmax) || rcov[id] > kmax[rdig[id]]) kmax[rdig[id]] = rcov[id]
+    }
+    for (i = 1; i <= nrec; i++) {
+      id = order[i]
+      if (!(id in elive)) continue
+      if (effel[rdig[id] SUBSEP rcov[id]] != id) continue
+      if (length(rcov[id]) == 7) elevmonth[rcov[id]] = elevmonth[rcov[id]] ((elevmonth[rcov[id]] == "") ? "" : ", ") rdig[id]
+      else elevyear[rcov[id]] = elevyear[rcov[id]] ((elevyear[rcov[id]] == "") ? "" : ", ") rdig[id]
+      # An elevation is a snapshot of a period, and the year view renders
+      # it INSTEAD of that period - so an entry the snapshot never saw
+      # would be invisible there for good. It names what it saw (covered:),
+      # exactly as a watermark does; an entry of the period outside that
+      # list makes the elevation stale, and stale means due again. A
+      # hand-written elevation naming nothing falls back to the only
+      # evidence left, its own date.
+      # Three states, not two: an EXACT list (applied), an exact list that
+      # does not hold up (exact and EMPTY - a void claim covers nothing,
+      # so every entry of the period is uncovered), and no list at all
+      # (the hand-written form, judged by the elevation date instead).
+      delete ecov
+      ecovok = (id in hascovd) ? 1 : 0
+      if (ecovok && cover_list_ok(id, rcovd[id], rcov[id], "")) {
+        cn = split(rcovd[id], cvg, ",")
+        for (ci = 1; ci <= cn; ci++) {
+          cvt = trim(cvg[ci])
+          if (cvt != "") ecov[cvt] = 1
+        }
+      }
+      for (j = 1; j <= nsort; j++) {
+        jd = sorted[j]
+        if (substr(rcreated[jd], 1, length(rcov[id])) != rcov[id]) continue
+        if (ecovok) {
+          if (!(jd in ecov)) {
+            stale[rdig[id] SUBSEP rcov[id]]++
+            unc[rdig[id] SUBSEP rcov[id], ++uncn[rdig[id] SUBSEP rcov[id]]] = jd
+          }
+        } else if (rcreated[jd] > rcreated[id]) {
+          stale[rdig[id] SUBSEP rcov[id]]++
+          unc[rdig[id] SUBSEP rcov[id], ++uncn[rdig[id] SUBSEP rcov[id]]] = jd
+        }
+      }
+    }
+    # undigested = created >= watermark, INCLUSIVE: fail-open, because
+    # rereading a handful twice is harmless and an exclusive boundary would
+    # skip same-day entries forever. Dormancy is irrelevant - the watermark,
+    # not liveness, defines the review set; with no claim, everything is.
+    nundig = 0; oldest = ""
+    for (i = 1; i <= nsort; i++) {
+      id = sorted[i]
+      pseen[substr(rcreated[id], 1, 7)] = 1
+      pseen[substr(rcreated[id], 1, 4)] = 1
+      passesof[id] = jpasses(id)
+      if (index(" " passesof[id] " ", " triage ") > 0) { reviewed[id] = 1; continue }
+      nundig++
+      if (oldest == "" || rcreated[id] < oldest) oldest = rcreated[id]
+      # An entry created TODAY cannot be cleared by a claim made today: the
+      # boundary is inclusive (fail-open), so a claim dated D leaves the
+      # entries of D in the set until a later claim covers them. The due
+      # decision counts only what a settle WOULD clear - nudging about
+      # material no claim can cover asks for an action settle then refuses
+      # ("not beyond the current watermark"), and the line never clears.
+      if (rcreated[id] < today) {
+        nclear++
+        if (oldestclear == "" || rcreated[id] < oldestclear) oldestclear = rcreated[id]
+      }
+    }
+    # Due-logic. Triage is due by count or by age. Elevation nudges are
+    # OPT-IN BY PRACTICE per built-in kind: the first elevation of a kind
+    # is the opt-in switch, due = the most recent completed period with
+    # entries beyond the newest elevated one, and a due period more than
+    # JOURNAL_LAPSE grains beyond it means the practice lapsed - silent.
+    # Nudges serve an active practice; they never enforce one.
+    duetri = (nclear >= JOURNAL_REVIEW_COUNT || (oldestclear != "" && civildays(today) - civildays(oldestclear) > JOURNAL_REVIEW_AGE))
+    for (kk = 1; kk <= 2; kk++) {
+      kind = (kk == 1) ? "monthly" : "yearly"
+      if (!(kind in kindseen)) continue
+      glen = (kind == "monthly") ? 7 : 4
+      cur = substr(today, 1, glen)
+      best = ""
+      for (pm in pseen) {
+        if (length(pm) != glen) continue
+        if (pm >= cur) continue
+        if (pm <= kmax[kind]) continue
+        if (pm > best) best = pm
+      }
+      # a stale elevation is a period that needs elevating AGAIN, so it
+      # counts as due even though it already has one
+      if (best == "") {
+        for (i = 1; i <= nek; i++) {
+          if (ekind[eorder[i]] != kind) continue
+          if (!((kind SUBSEP eper[eorder[i]]) in stale)) continue
+          if (length(eper[eorder[i]]) != glen) continue
+          if (eper[eorder[i]] >= cur) continue
+          if (eper[eorder[i]] > best) best = eper[eorder[i]]
+        }
+        if (best == "") continue
+        duekind[++ndue] = kind; dueper[ndue] = best
+        continue
+      }
+      if (grain_dist(kmax[kind], best) > JOURNAL_LAPSE) continue
+      duekind[++ndue] = kind; dueper[ndue] = best
+    }
+  }
+
   if (check == 1) {
     close("cat 1>&2")
     exit (nerr > 0 ? 1 : 0)
+  }
+
+  if (export == 1) {
+    jexport()
+    close("cat 1>&2")
+    # The seam carries the same verdict the lens would: a quarantined or
+    # dangling record means these rows are SHORT, and an application reading
+    # them cannot see the ## Degraded section that would say so. (nquar is
+    # computed further down, on the rendering path this exit precedes.)
+    exit ((nbad + ndup > 0 || ndangling > 0 || ndupvote > 0 || nbadvoteref > 0 || nbadcover > 0) ? 2 : 0)
   }
 
   if (listlive == 1) {
@@ -1628,7 +2273,13 @@ END {
       for (t = 1; t <= tagn[id]; t++)
         alltags = alltags (alltags == "" ? "" : ",") tagsc[id, t]
       if (alltags == "") alltags = "-"
-      printf "%s\t%s\t%s\t%s\n", id, (pscope[id] == "" ? "-" : pscope[id]), alltags, headline(id)
+      # TAB-sanitized like every other machine surface here: a headline may
+      # legally contain one, and a consumer splitting on TAB would lose
+      # everything after it (or read a scope into the wrong column).
+      lvs = (pscope[id] == "" ? "-" : pscope[id]); gsub(/\t/, " ", lvs)
+      gsub(/\t/, " ", alltags)
+      lvh = headline(id); gsub(/\t/, " ", lvh)
+      printf "%s\t%s\t%s\t%s\n", id, lvs, alltags, lvh
     }
     close("cat 1>&2")
     exit 0
@@ -1687,6 +2338,8 @@ END {
       g = group(id)
       if (rtype[id] == "memory" && (id in live)) keepgrp[g] = 1
       else if (rtype[id] == "votes" && !(id in dead)) keepgrp[g] = 1
+      # journal: an unretired elevation or watermark is load-bearing
+      else if ((id in elive) || (id in wmlive)) keepgrp[g] = 1
       # An erasure record is load-bearing forever: it is the only thing
       # keeping redacted content out of the digest, and the archive tree is
       # read for names and edges, never for erases:. Moving one therefore
@@ -1712,10 +2365,104 @@ END {
   # from an uninitialized ledger once written to disk — and the session-start
   # ritual answers an empty digest by offering initialization. Refuse to
   # publish instead (exit 3); the caller keeps the previous digest.
-  if (nlive == 0 && nquar > 0) {
+  # In the journal, entries are only one of three live classes: a tree
+  # holding coverage records and one malformed file is not an unreadable
+  # ledger, and refusing to publish it left every read printing nothing at
+  # all while export happily returned the survivors.
+  nlivecls = nlive + ((lens == "journal") ? nelev + nwm : 0)
+  if (nlivecls == 0 && nquar > 0) {
     err("0 live records but " nquar " quarantined: refusing to publish (ledger is unreadable, not empty)")
     close("cat 1>&2")
     exit 3
+  }
+
+  # ---- journal lens rendering ----
+  # A TIMELINE, not a ranking: months newest first, entries newest first
+  # within a month (time: is the intra-day key), headline-only with +bg.
+  # Dormant entries collapse to per-month counts (--all expands them);
+  # elevations and watermarks stay out of the entry listing - the month
+  # headings mark elevations and the header line carries the coverage.
+  if (lens == "journal") {
+    printf "# ZAMM Journal (%s: files=%d parsed=%d entries=%d undigested=%d elevations=%d watermarks=%d quarantined=%d; generated file - do not edit)\n", today, nfiles, nrec - nbad, nlive, nundig, nelev, nwm, nquar
+    print ""
+    if (nlive == 0 && nelev == 0 && nwm == 0) {
+      print "(no journal entries)"
+      if (ndangling > 0 || ndupvote > 0 || nbadvoteref > 0 || nbadcover > 0) {
+        print ""
+        emit_degraded()
+      }
+      emit_state()
+      close("cat 1>&2")
+      exit ((ndangling > 0 || ndupvote > 0 || nbadvoteref > 0 || nbadcover > 0) ? 2 : 0)
+    }
+    print "Entry format: - DD  headline [record-id +bg]; newest first, one section per month."
+    print "Episodes, not facts: open the record (+bg) for depth. Digestion: journal review"
+    print "(triage), journal digest <YYYY[-MM]> (compiled view), journal elevate <kind> <period>."
+    print ""
+    emit_degraded()
+    if ("triage" in wmmax) printf "Reviewed through %s; %d undigested.\n", wmmax["triage"], nundig
+    else printf "Never reviewed; %d undigested.\n", nundig
+    for (i = 1; i <= nwmpass; i++)
+      if (wmpass[i] != "triage") printf "Pass %s: reviewed through %s.\n", wmpass[i], wmmax[wmpass[i]]
+    s = jlabels(elevyear, noskip)
+    if (s != "") print "Elevated years: " s
+    s = ""
+    for (i = 1; i <= nek; i++) {
+      if (ecount[eorder[i]] < 2) continue
+      s = s ((s == "") ? "" : ", ") ekind[eorder[i]] " " eper[eorder[i]] " (" ecount[eorder[i]] " live, showing " effel[eorder[i]] ")"
+    }
+    if (s != "")
+      print "Competing elevations - supersede one to decide it: " s
+    s = ""
+    for (i = 1; i <= nek; i++) {
+      if (!(eorder[i] in stale)) continue
+      s = s ((s == "") ? "" : ", ") ekind[eorder[i]] " " eper[eorder[i]] " (" stale[eorder[i]] " uncovered)"
+    }
+    if (s != "")
+      print "Stale elevations - entries they never saw, elevate again: " s
+    n = 0
+    for (i = 1; i <= nsort; i++) {
+      id = sorted[i]
+      jarr[++n] = id
+      jkey[id] = rcreated[id] "\t" rtime[id] "\t" id
+    }
+    jheapsort(n)
+    curm = ""; ndorm = 0; nda = 0
+    for (i = 1; i <= n; i++) {
+      id = jarr[i]
+      pm = substr(rcreated[id], 1, 7)
+      if (id in dormant) {
+        if (!(pm in dcount)) dareas[++nda] = pm
+        dcount[pm]++; ndorm++
+        continue
+      }
+      if (pm != curm) {
+        curm = pm
+        shownmonth[pm] = 1
+        print ""
+        if (pm in elevmonth) print "## " pm " - elevated: " elevmonth[pm]
+        else print "## " pm
+      }
+      print "- " substr(rcreated[id], 9, 2) "  " headline(id) " " pointer(id)
+      printed[id] = 1
+    }
+    nunlist = 0
+    # an elevated month whose entries have all gone dormant has no section
+    # to carry its marker; the elevation is still the coverage, so say so
+    s = jlabels(elevmonth, shownmonth)
+    if (s != "") {
+      print ""
+      print "Elevated months with no listed entries: " s
+    }
+    if (ndorm > 0) {
+      s = ""
+      for (i = 1; i <= nda; i++) s = s ((i > 1) ? ", " : "") dareas[i] " x" dcount[dareas[i]]
+      print ""
+      print "(" ndorm " entries dormant: " s " - journal list --all)"
+    }
+    emit_state()
+    close("cat 1>&2")
+    exit ((nquar > 0 || ndangling > 0 || ndupvote > 0 || nbadvoteref > 0 || nbadcover > 0) ? 2 : 0)
   }
 
   # ---- backlog lens rendering ----
@@ -1729,13 +2476,13 @@ END {
     print ""
     if (nlive == 0) {
       print "(no ideas in the backlog)"
-      if (ndangling > 0 || ndupvote > 0 || nbadvoteref > 0) {
+      if (ndangling > 0 || ndupvote > 0 || nbadvoteref > 0 || nbadcover > 0) {
         print ""
         emit_degraded()
       }
       emit_state()
       close("cat 1>&2")
-      exit ((ndangling > 0 || ndupvote > 0 || nbadvoteref > 0) ? 2 : 0)
+      exit ((ndangling > 0 || ndupvote > 0 || nbadvoteref > 0 || nbadcover > 0) ? 2 : 0)
     }
     print "Entry format: - headline [record-id votes +bg]; ~ = variants (parallel forks)."
     print "Hot-to-cold within each area; hot = recently added or voted up. Read the"
@@ -1840,27 +2587,27 @@ END {
     }
     emit_state()
     close("cat 1>&2")
-    exit ((nquar > 0 || ndangling > 0 || ndupvote > 0 || nbadvoteref > 0) ? 2 : 0)
+    exit ((nquar > 0 || ndangling > 0 || ndupvote > 0 || nbadvoteref > 0 || nbadcover > 0) ? 2 : 0)
   }
 
   printf "# ZAMM Memory Digest (%s: files=%d parsed=%d live=%d quarantined=%d; generated file - do not edit)\n", today, nfiles, nrec - nbad, nlive, nquar
   print ""
 
   if (nlive == 0) {
-    print "(no live memory records - active memory has not been initialized)"
+    print "(no live memory records - active memory has not been initialized; ask the human before initializing, never write placeholder records)"
     # Zero live records does NOT mean zero problems: a ledger holding only a
     # votes record with a ghost target, or duplicate votes records, reaches
     # here (such records are not "live memory", and with nquar == 0 the
     # refuse-to-publish branch above did not fire). Exiting 0 with a clean
     # "not initialized" digest would hide known graph defects and invite
     # re-seeding, so render ## Degraded and exit 2 like the normal path.
-    if (ndangling > 0 || ndupvote > 0 || nbadvoteref > 0) {
+    if (ndangling > 0 || ndupvote > 0 || nbadvoteref > 0 || nbadcover > 0) {
       print ""
       emit_degraded()
     }
     emit_state()
     close("cat 1>&2")
-    exit ((ndangling > 0 || ndupvote > 0 || nbadvoteref > 0) ? 2 : 0)
+    exit ((ndangling > 0 || ndupvote > 0 || nbadvoteref > 0 || nbadcover > 0) ? 2 : 0)
   }
 
   print "Entry format: - headline [record-id votes +bg]; indented lines = elaboration."
@@ -2009,7 +2756,7 @@ END {
   # (quarantined records, dangling references, duplicate vote records, or
   # invalid vote references). A caller can tell a clean digest from a degraded
   # one by the code alone, without parsing the Markdown.
-  exit ((nquar > 0 || ndangling > 0 || ndupvote > 0 || nbadvoteref > 0) ? 2 : 0)
+  exit ((nquar > 0 || ndangling > 0 || ndupvote > 0 || nbadvoteref > 0 || nbadcover > 0) ? 2 : 0)
 }
 ' "$MANIFEST" > "$TMP_FILE"
 rc=$?
@@ -2086,6 +2833,10 @@ append_plans_section() {
     fi
     awk -v slug="$slug" '
       function trimv(s) { sub(/\r$/, "", s); sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+      # normalize the LINE too, not just the values read out of it: the
+      # section headings below are compared exactly, so a CRLF plan silently
+      # counted no Done-when items at all
+      { sub(/\r$/, "") }
       st == "" && /^Status:/              { st = $0; sub(/^Status:/, "", st); st = trimv(st) }
       cf == "" && /^Complexity-forecast:/ { cf = $0; sub(/^Complexity-forecast:/, "", cf); cf = trimv(cf) }
       lu == "" && /^Last updated:/        { lu = $0; sub(/^Last updated:/, "", lu); lu = trimv(lu) }
@@ -2231,11 +2982,54 @@ append_backlog_summary() {
   } >> "$TMP_FILE"
 }
 
+# ---- Journal line: the knowledge digest's ENTIRE standing exposure to the
+#      journal is one line, present only when digestion is due (triage by
+#      count or age; a practiced elevation kind with a completed period
+#      unelevated) or when the journal pass is degraded. Absent or quiet
+#      tree: no line at all, byte-identical digest. Segments join in the
+#      sidecar's fixed order and the line never wraps.
+append_journal_line() {
+  [ -d "$PROJECT_ROOT/zamm-memory/journal" ] || return 0
+  jrc=0
+  sh "$0" --project-root "$PROJECT_ROOT" --tree journal >/dev/null || jrc=$?
+  if [ "$jrc" -eq 2 ] || [ "$jrc" -eq 3 ]; then
+    {
+      echo ""
+      echo "Journal: DEGRADED - run: zamm-run.sh journal check"
+    } >> "$TMP_FILE"
+    JOURNAL_DEGRADED=1
+    return 0
+  fi
+  if [ "$jrc" -ne 0 ]; then
+    echo "ERROR: the journal tree did not compile (rc=$jrc); previous digest left untouched." >&2
+    exit 4
+  fi
+  jstate="$OUT_DIR/journal-state.tsv"
+  if [ ! -f "$jstate" ]; then
+    echo "ERROR: the journal pass reported success but left no journal-state.tsv; previous digest left untouched." >&2
+    exit 4
+  fi
+  tab=$(printf '\t')
+  jline=$(awk -F"$tab" '
+    $1 == "due_triage" { seg = "triage due (" $2 " undigested, oldest " $3 ")"; segs = segs ((segs == "") ? "" : "; ") seg }
+    $1 == "due_elev"   { seg = $2 " due (" $3 ")"; segs = segs ((segs == "") ? "" : "; ") seg }
+    END { if (segs != "") print "Journal: " segs " - zamm-run.sh journal review" }
+  ' "$jstate")
+  if [ -n "$jline" ]; then
+    {
+      echo ""
+      echo "$jline"
+    } >> "$TMP_FILE"
+  fi
+}
+
 if [ "$CHECK" -eq 1 ]; then
   # name the tree in the verdict: `check` runs this once per record tree,
   # and two identical pass lines would leave the reader guessing which is which
   if [ "$TREE" = "backlog" ]; then
     checkname="ZAMM backlog check"
+  elif [ "$TREE" = "journal" ]; then
+    checkname="ZAMM journal check"
   else
     checkname="ZAMM check"
   fi
@@ -2244,6 +3038,18 @@ if [ "$CHECK" -eq 1 ]; then
     exit "$rc"
   fi
   echo "$checkname passed."
+elif [ "$EXPORT" -eq 1 ]; then
+  # The export seam is an APPLICATION contract, so unlike the internal list
+  # modes below it propagates a degraded tree (exit 2): its consumer is a
+  # program that cannot see the ## Degraded section, and rows silently
+  # missing whatever was quarantined are exactly what it must not mistake
+  # for the whole journal. Anything worse than degraded refuses outright.
+  if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
+    echo "ERROR: the journal did not compile; refusing to export." >&2
+    exit "$rc"
+  fi
+  cat "$TMP_FILE"
+  exit "$rc"
 elif [ "$LIST_INERT" -eq 1 ] || [ "$LIST_LIVE" -eq 1 ] || [ "$LIST_VOTES" -eq 1 ] || [ "$LIST_GRAPH" -eq 1 ]; then
   # read-only: the awk wrote the list rows to the private temp file, so
   # emit them and publish nothing. Exit 2 (a degraded but valid ledger) is not
@@ -2279,6 +3085,7 @@ else
   if [ "$TREE" = "knowledge" ]; then
     append_plans_section
     append_backlog_summary
+    append_journal_line
   fi
   # The digest and the sidecar are two separate renames that cannot be one
   # atomic step, and rename ORDER alone only chooses which mismatched pairing
@@ -2303,8 +3110,14 @@ else
     rc=2
     degnote="degraded backlog - see the Backlog line"
   fi
+  if [ "$rc" -eq 0 ] && [ "${JOURNAL_DEGRADED:-0}" -eq 1 ]; then
+    rc=2
+    degnote="degraded journal - see the Journal line"
+  fi
   if [ "$TREE" = "backlog" ]; then
     outname="ZAMM backlog lens"
+  elif [ "$TREE" = "journal" ]; then
+    outname="ZAMM journal lens"
   else
     outname="ZAMM digest"
   fi

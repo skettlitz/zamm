@@ -9,19 +9,30 @@
 # draft state: a record is either absent or complete and valid. See
 # references/invariants.md.
 #
-# Usage: zamm-new-memory.sh [--project-root <path>] [--type memory|tombstone|votes|erasure]
-#                           [--tree knowledge|backlog]
+# Usage: zamm-new-memory.sh [--project-root <path>] [--type memory|tombstone|votes|erasure|digest]
+#                           [--tree knowledge|backlog|journal]
 #                           [--scope <tag[, tag2[, tag3]]>] [--supersedes <id[,id...]>]
 #                           [--erases <id[,id...]>] [--up <id[,id...]>] [--down <id[,id...]>]
 #                           [--importance guardrail|useful|minor]
 #                           [--durability days|weeks|months|years|permanent]
 #                           [--plan <plan-dir-slug>] [--marked YYYY-MM-DD|no]
-#                           [--date YYYY-MM-DD]
+#                           [--date YYYY-MM-DD] [--x <key=value>]...
+#                           journal only: [--cue <slug>] [--salience 1..10]
+#                           [--axis <name=value>]... [--agent <token>] [--user <token>]
+#                           [--time HH:MM] [--digest <kind> --covers <YYYY[-MM]>]
+#                           [--reviewed-through YYYY-MM-DD [--pass <kind>]]
+#                           [--covered <id[,id...]>]
 #                           [--edit] [--no-validate] <topic-slug> < body.md
 #
 # --tree backlog writes an idea into the backlog ledger (validated against
 # the backlog tree, no guardrail importance, no --plan); --marked puts a
 # backlog idea into (a date) or out of (no) the marked lane.
+# --tree journal writes an episode (type memory), an elevation (--type
+# digest with --digest/--covers) or a watermark (--reviewed-through) into
+# the journal; no guardrails, no votes, no --plan; durability defaults to
+# weeks. --x key=value writes an x-key: line (auto-prefixed, so it can never
+# write a policy key); axis values are unipolar 0..10 or bipolar -5..+5
+# (always signed).
 #
 # --scope takes 1-3 comma-separated area tags from the fixed set (domain,
 # contracts, conventions, internals, quality, tooling, ops, meta; or other
@@ -55,6 +66,20 @@ UP=""
 DOWN=""
 EDIT=0
 VALIDATE=1
+DUR_SET=0
+CUE=""
+SALIENCE=""
+AXES=""
+XKEYS=""
+AGENT=""
+USERTOKEN=""
+RTIME=""
+DIGEST=""
+COVERS=""
+RTHROUGH=""
+PASS=""
+COVERED=""
+COVERED_SET=0
 
 # need_val <all remaining args>: the option is $1, its value $2. Called before
 # consuming a value so a missing one is a controlled error, not a set -u crash.
@@ -87,13 +112,27 @@ while [ $# -gt 0 ]; do
     --up)         need_val "$@"; UP="$2"; shift 2 ;;
     --down)       need_val "$@"; DOWN="$2"; shift 2 ;;
     --importance) need_val "$@"; IMPORTANCE="$2"; shift 2 ;;
-    --durability) need_val "$@"; DURABILITY="$2"; shift 2 ;;
+    --durability) need_val "$@"; DURABILITY="$2"; DUR_SET=1; shift 2 ;;
+    --cue)        need_val "$@"; CUE="$2"; shift 2 ;;
+    --salience)   need_val "$@"; SALIENCE="$2"; shift 2 ;;
+    --axis)       need_val "$@"; AXES="$AXES$2
+"; shift 2 ;;
+    --x)          need_val "$@"; XKEYS="$XKEYS$2
+"; shift 2 ;;
+    --agent)      need_val "$@"; AGENT="$2"; shift 2 ;;
+    --user)       need_val "$@"; USERTOKEN="$2"; shift 2 ;;
+    --time)       need_val "$@"; RTIME="$2"; shift 2 ;;
+    --digest)     need_val "$@"; DIGEST="$2"; shift 2 ;;
+    --covers)     need_val "$@"; COVERS="$2"; shift 2 ;;
+    --reviewed-through) need_val "$@"; RTHROUGH="$2"; shift 2 ;;
+    --covered)    need_val "$@"; COVERED="$2"; COVERED_SET=1; shift 2 ;;
+    --pass)       need_val "$@"; PASS="$2"; shift 2 ;;
     --plan)       need_val "$@"; PLAN="$2"; shift 2 ;;
     --date)       need_val "$@"; RDATE="$2"; shift 2 ;;
     --edit)        EDIT=1; shift ;;
     --no-validate) VALIDATE=0; shift ;;
     -h|--help)
-      sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     -*)
@@ -137,19 +176,228 @@ if [ "${#SLUG}" -gt 40 ]; then
   exit 1
 fi
 case "$RTYPE" in
-  memory|tombstone|votes|erasure) ;;
+  memory|tombstone|votes|erasure|digest) ;;
   *)
-    echo "ERROR: --type must be memory, tombstone, votes, or erasure" >&2
+    echo "ERROR: --type must be memory, tombstone, votes, erasure, or (journal only) digest" >&2
     exit 1
     ;;
 esac
 case "$TREE" in
-  knowledge|backlog) ;;
+  knowledge|backlog|journal) ;;
   *)
-    echo "ERROR: --tree must be knowledge or backlog" >&2
+    echo "ERROR: --tree must be knowledge, backlog or journal" >&2
     exit 1
     ;;
 esac
+# Journal policy at the CLI, with the compile-side errors as the deep lock:
+# type digest (an elevation) exists only there; no guardrails, no votes, no
+# plan; durability defaults to weeks (episodes age fast).
+if [ "$RTYPE" = "digest" ] && [ "$TREE" != "journal" ]; then
+  echo "ERROR: type digest is the journal elevation record; pass --tree journal" >&2
+  exit 1
+fi
+if [ "$TREE" = "journal" ]; then
+  if [ "$IMPORTANCE" = "guardrail" ]; then
+    echo "ERROR: guardrail importance is not allowed in the journal (distill the rule into a knowledge record instead)" >&2
+    exit 1
+  fi
+  if [ "$RTYPE" = "votes" ]; then
+    echo "ERROR: votes records are not allowed in the journal (a timeline has no ranking to vote on)" >&2
+    exit 1
+  fi
+  if [ -n "$PLAN" ]; then
+    echo "ERROR: journal records carry no --plan" >&2
+    exit 1
+  fi
+  [ "$DUR_SET" -eq 1 ] || DURABILITY="weeks"
+else
+  if [ -n "$CUE$SALIENCE$AXES$AGENT$USERTOKEN$RTIME$DIGEST$COVERS$RTHROUGH$PASS" ]; then
+    echo "ERROR: --cue/--salience/--axis/--agent/--user/--time/--digest/--covers/--reviewed-through/--pass are journal keys (--tree journal)" >&2
+    exit 1
+  fi
+fi
+# Journal class rules: an ENTRY (memory), an ELEVATION (digest + --digest
+# --covers) or a WATERMARK (memory + --reviewed-through); one class per
+# record. Every value here becomes a frontmatter line, so each is
+# charset-limited: no whitespace or control characters can reach the file.
+jslug_ok() { case "$1" in ''|*[!a-z0-9-]*|-*) return 1 ;; esac; return 0; }
+jtoken_ok() { case "$1" in ''|*[!A-Za-z0-9._@+-]*|[._@+-]*) return 1 ;; esac; return 0; }
+if [ "$RTYPE" = "digest" ]; then
+  if [ -z "$DIGEST" ] || [ -z "$COVERS" ]; then
+    echo "ERROR: an elevation (type digest) needs both --digest <kind> and --covers <YYYY[-MM]>" >&2
+    exit 1
+  fi
+  if [ -n "$CUE$SALIENCE" ]; then
+    echo "ERROR: --cue/--salience are entry keys; an elevation carries --digest instead" >&2
+    exit 1
+  fi
+  if [ -n "$RTHROUGH$PASS" ]; then
+    echo "ERROR: --reviewed-through/--pass are watermark keys; a record is exactly one class" >&2
+    exit 1
+  fi
+elif [ -n "$DIGEST$COVERS" ]; then
+  echo "ERROR: --digest/--covers belong to --type digest (an elevation record)" >&2
+  exit 1
+fi
+if [ -n "$DIGEST" ] && ! jslug_ok "$DIGEST"; then
+  echo "ERROR: --digest must be a kind slug [a-z0-9-]: $DIGEST" >&2
+  exit 1
+fi
+if [ -n "$COVERS" ]; then
+  case "$COVERS" in
+    [0-9][0-9][0-9][0-9]) ;;
+    [0-9][0-9][0-9][0-9]-0[1-9]|[0-9][0-9][0-9][0-9]-1[0-2]) ;;
+    *)
+      echo "ERROR: --covers must be a calendar period YYYY or YYYY-MM: $COVERS" >&2
+      exit 1
+      ;;
+  esac
+fi
+if [ -n "$RTHROUGH" ]; then
+  if [ "$RTYPE" != "memory" ]; then
+    echo "ERROR: --reviewed-through is a watermark key and needs a memory record" >&2
+    exit 1
+  fi
+  if [ -n "$CUE$SALIENCE$AXES" ]; then
+    echo "ERROR: --cue/--salience/--axis are entry keys; a watermark claims coverage only" >&2
+    exit 1
+  fi
+  if [ "$PASS" = "triage" ]; then
+    echo "ERROR: --pass triage is the default pass; omit it (one spelling per kind)" >&2
+    exit 1
+  fi
+  if [ -n "$PASS" ] && ! jslug_ok "$PASS"; then
+    echo "ERROR: --pass must be a kind slug [a-z0-9-]: $PASS" >&2
+    exit 1
+  fi
+elif [ -n "$PASS" ]; then
+  echo "ERROR: --pass scopes a watermark and needs --reviewed-through" >&2
+  exit 1
+fi
+# --covered names the entries a watermark actually reviewed: the claim
+# identity a date alone cannot carry (an entry merged in later, dated before
+# the boundary, was never seen by it).
+if [ "$COVERED_SET" -eq 1 ]; then
+  if [ -z "$RTHROUGH" ] && [ "$RTYPE" != "digest" ]; then
+    echo "ERROR: --covered names what a coverage record saw: it belongs on a watermark (--reviewed-through) or an elevation (--type digest)" >&2
+    exit 1
+  fi
+  case "$COVERED" in
+    *[!a-z0-9,-]*)
+      echo "ERROR: --covered must be comma-separated record ids [a-z0-9-]" >&2
+      exit 1
+      ;;
+  esac
+fi
+if [ "$RTYPE" != "memory" ] && [ "$RTYPE" != "digest" ] && [ -n "$CUE$SALIENCE$AXES" ]; then
+  echo "ERROR: --cue/--salience/--axis are only meaningful on memory or digest records" >&2
+  exit 1
+fi
+if [ -n "$CUE" ] && ! jslug_ok "$CUE"; then
+  echo "ERROR: --cue must be a slug [a-z0-9-]: $CUE" >&2
+  exit 1
+fi
+if [ -n "$SALIENCE" ]; then
+  case "$SALIENCE" in
+    [1-9]|10) ;;
+    *)
+      echo "ERROR: --salience must be an integer 1..10: $SALIENCE" >&2
+      exit 1
+      ;;
+  esac
+fi
+if [ -n "$AGENT" ] && ! jtoken_ok "$AGENT"; then
+  echo "ERROR: --agent must be one token [A-Za-z0-9._@+-]: $AGENT" >&2
+  exit 1
+fi
+if [ -n "$USERTOKEN" ] && ! jtoken_ok "$USERTOKEN"; then
+  echo "ERROR: --user must be one token [A-Za-z0-9._@+-]: $USERTOKEN" >&2
+  exit 1
+fi
+if [ -n "$RTIME" ]; then
+  case "$RTIME" in
+    [01][0-9]:[0-5][0-9]|2[0-3]:[0-5][0-9]) ;;
+    *)
+      echo "ERROR: --time must be HH:MM: $RTIME" >&2
+      exit 1
+      ;;
+  esac
+fi
+# --axis name=value: the value spelling IS the type (a sign makes it
+# bipolar -5..+5, no sign unipolar 0..10); one name per axis, and salience
+# keeps its short spelling
+AXSEEN=" "
+if [ -n "$AXES" ]; then
+  while IFS= read -r _ax; do
+    [ -n "$_ax" ] || continue
+    case "$_ax" in
+      *=*) _axn=${_ax%%=*}; _axv=${_ax#*=} ;;
+      *)
+        echo "ERROR: --axis takes name=value (got: $_ax)" >&2
+        exit 1
+        ;;
+    esac
+    if [ "$_axn" = "salience" ]; then
+      echo "ERROR: --axis salience is spelled --salience (one name per axis)" >&2
+      exit 1
+    fi
+    if ! jslug_ok "$_axn"; then
+      echo "ERROR: axis name must be a slug [a-z0-9-]: $_axn" >&2
+      exit 1
+    fi
+    case "$_axv" in
+      [+-][0-5]) [ "$_axv" != "-0" ] || { echo "ERROR: axis $_axn: write +0, not -0" >&2; exit 1; } ;;
+      [0-9]|10) ;;
+      *)
+        echo "ERROR: axis $_axn: value must be unipolar 0..10 (unsigned) or bipolar -5..+5 (always signed): $_axv" >&2
+        exit 1
+        ;;
+    esac
+    case "$AXSEEN" in
+      *" $_axn "*)
+        echo "ERROR: duplicate axis: $_axn" >&2
+        exit 1
+        ;;
+    esac
+    AXSEEN="$AXSEEN$_axn "
+  done <<EOF
+$AXES
+EOF
+fi
+# --x key=value: the experimental namespace, auto-prefixed into x- so the
+# escape hatch can never write a policy key; the value is one line
+XSEEN=" "
+if [ -n "$XKEYS" ]; then
+  while IFS= read -r _xk; do
+    [ -n "$_xk" ] || continue
+    case "$_xk" in
+      *=*) _xn=${_xk%%=*}; _xv=${_xk#*=} ;;
+      *)
+        echo "ERROR: --x takes key=value (got: $_xk)" >&2
+        exit 1
+        ;;
+    esac
+    if ! jslug_ok "$_xn"; then
+      echo "ERROR: --x key must be a slug [a-z0-9-]: $_xn" >&2
+      exit 1
+    fi
+    case "$_xv" in
+      *[![:print:]]*)
+        echo "ERROR: --x $_xn: value must be one printable line" >&2
+        exit 1
+        ;;
+    esac
+    case "$XSEEN" in
+      *" $_xn "*)
+        echo "ERROR: duplicate --x key: $_xn" >&2
+        exit 1
+        ;;
+    esac
+    XSEEN="$XSEEN$_xn "
+  done <<EOF
+$XKEYS
+EOF
+fi
 # Per-tree policy, refused at the CLI so the author hears it before composing
 # anything; the compile-side errors are the deep lock for hand-written files.
 if [ "$TREE" = "backlog" ]; then
@@ -320,18 +568,15 @@ if [ -n "$SCOPE" ]; then
   esac
 fi
 
-RECDATE=$(date +%Y-%m-%d)
-if [ -n "$RDATE" ]; then
-  case "$RDATE" in
-    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) RECDATE="$RDATE" ;;
-    *)
-      echo "ERROR: --date must be YYYY-MM-DD: $RDATE" >&2
-      exit 1
-      ;;
+# 0 if $1 is a real Gregorian date; digit shape is not enough, the compiler
+# requires a real calendar date, so a backdated record must not be able to
+# create 2026-02-30 and a watermark cannot claim one
+real_date() {
+  case "$1" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+    *) return 1 ;;
   esac
-  # digit shape is not enough: the compiler requires a real calendar date, so
-  # a backdated migration record must not be able to create 2026-02-30
-  Y=${RECDATE%%-*}; MD=${RECDATE#*-}; M=${MD%%-*}; D=${MD#*-}
+  Y=${1%%-*}; MD=${1#*-}; M=${MD%%-*}; D=${MD#*-}
   # strip ONE leading zero for base-10 arithmetic (fields are 2-digit, so a
   # single strip is enough); "00" -> "0", not "" — stripping twice emptied a
   # zero field and the `[` error below did not abort under set -e, so a
@@ -349,9 +594,23 @@ if [ -n "$RDATE" ]; then
       ;;
   esac
   if [ "$M" -lt 1 ] || [ "$M" -gt 12 ] || [ "$D" -lt 1 ] || [ "$D" -gt "$DIM" ]; then
-    echo "ERROR: --date is not a real calendar date: $RDATE" >&2
-    exit 1
+    return 1
   fi
+  return 0
+}
+RECDATE=$(date +%Y-%m-%d)
+if [ -n "$RDATE" ]; then
+  real_date "$RDATE" || {
+    echo "ERROR: --date must be a real YYYY-MM-DD calendar date: $RDATE" >&2
+    exit 1
+  }
+  RECDATE="$RDATE"
+fi
+if [ -n "$RTHROUGH" ]; then
+  real_date "$RTHROUGH" || {
+    echo "ERROR: --reviewed-through must be a real YYYY-MM-DD calendar date: $RTHROUGH" >&2
+    exit 1
+  }
 fi
 YEAR=${RECDATE%%-*}
 DIR="$PROJECT_ROOT/zamm-memory/$TREE/$YEAR"
@@ -412,24 +671,53 @@ else
 fi
 
 emit_frontmatter() {
-  echo "---"
-  echo "type: $RTYPE"
-  if [ -n "$SCOPE" ]; then echo "scope: $SCOPE"; fi
-  if [ -n "$SUPERSEDES" ]; then echo "supersedes: $SUPERSEDES"; fi
-  if [ -n "$ERASES" ]; then echo "erases: $ERASES"; fi
-  if [ "$RTYPE" = "memory" ]; then
-    echo "importance: $IMPORTANCE"
-    echo "durability: $DURABILITY"
+  # printf, never echo: a POSIX /bin/sh (dash, which is what CI runs) makes
+  # `echo` expand backslash escapes, so a value holding \n breaks out of its
+  # own `key: value` line and forges further frontmatter. That turned the
+  # deliberately unrefusable capture path into a way to write a coverage
+  # claim - the x- namespace exists precisely so an escape hatch can never
+  # write a policy key. The format string is fixed here; values are data.
+  fm() { printf '%s\n' "$*"; }
+  fm "---"
+  fm "type: $RTYPE"
+  if [ -n "$SCOPE" ]; then fm "scope: $SCOPE"; fi
+  if [ -n "$SUPERSEDES" ]; then fm "supersedes: $SUPERSEDES"; fi
+  if [ -n "$ERASES" ]; then fm "erases: $ERASES"; fi
+  if [ "$RTYPE" = "memory" ] || [ "$RTYPE" = "digest" ]; then
+    fm "importance: $IMPORTANCE"
+    fm "durability: $DURABILITY"
   fi
-  if [ -n "$MARKED" ]; then echo "marked: $MARKED"; fi
-  if [ -n "$PLAN" ]; then echo "plan: $PLAN"; fi
+  if [ -n "$MARKED" ]; then fm "marked: $MARKED"; fi
+  if [ -n "$PLAN" ]; then fm "plan: $PLAN"; fi
   if [ "$RTYPE" = "votes" ]; then
-    echo "up:${UP:+ $UP}"
-    echo "down:${DOWN:+ $DOWN}"
+    fm "up:${UP:+ $UP}"
+    fm "down:${DOWN:+ $DOWN}"
   fi
-  echo "created: $RECDATE"
-  echo "schema: 3"
-  echo "---"
+  fm "created: $RECDATE"
+  if [ -n "$RTIME" ]; then fm "time: $RTIME"; fi
+  if [ -n "$AGENT" ]; then fm "agent: $AGENT"; fi
+  if [ -n "$USERTOKEN" ]; then fm "user: $USERTOKEN"; fi
+  if [ -n "$CUE" ]; then fm "cue: $CUE"; fi
+  if [ -n "$SALIENCE" ]; then fm "salience: $SALIENCE"; fi
+  if [ -n "$AXES" ]; then
+    printf '%s' "$AXES" | while IFS= read -r _ax; do
+      [ -n "$_ax" ] && fm "axis-${_ax%%=*}: ${_ax#*=}"
+    done
+  fi
+  if [ -n "$DIGEST" ]; then fm "digest: $DIGEST"; fi
+  if [ -n "$COVERS" ]; then fm "covers: $COVERS"; fi
+  if [ -n "$RTHROUGH" ]; then fm "reviewed-through: $RTHROUGH"; fi
+  if [ -n "$PASS" ]; then fm "pass: $PASS"; fi
+  # present-but-empty is meaningful: a claim that named NOTHING is still an
+  # exact claim, and must not read as the blunt date-only form
+  if [ "$COVERED_SET" -eq 1 ]; then fm "covered:${COVERED:+ $COVERED}"; fi
+  if [ -n "$XKEYS" ]; then
+    printf '%s' "$XKEYS" | while IFS= read -r _xk; do
+      [ -n "$_xk" ] && fm "x-${_xk%%=*}: ${_xk#*=}"
+    done
+  fi
+  fm "schema: 3"
+  fm "---"
 }
 
 # mktemp creates 0600; this file BECOMES the record, so give it the mode a

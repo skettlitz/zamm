@@ -26,9 +26,11 @@ zamm_verify_roots() {
     zamm-memory \
     zamm-memory/knowledge \
     zamm-memory/backlog \
+    zamm-memory/journal \
     zamm-memory/archive \
     zamm-memory/archive/knowledge \
     zamm-memory/archive/backlog \
+    zamm-memory/archive/journal \
     zamm-memory/archive/plans \
     zamm-memory/active \
     zamm-memory/active/plans \
@@ -66,7 +68,7 @@ zamm_verify_roots() {
 
 # zamm_verify_no_symlinks <project-root>
 # The ledger holds real files and real directories, nothing else
-# (references/invariants.md, G5). Any symlink under either knowledge tree is
+# (references/invariants.md, G5). Any symlink under any record tree is
 # refused, at any position, whatever it points at.
 #
 # The reason is self-containment: a ledger has to travel with its repository,
@@ -86,7 +88,9 @@ zamm_verify_no_symlinks() {
   for _zvl_tree in "$_zvl_root/zamm-memory/knowledge" \
                    "$_zvl_root/zamm-memory/archive/knowledge" \
                    "$_zvl_root/zamm-memory/backlog" \
-                   "$_zvl_root/zamm-memory/archive/backlog"; do
+                   "$_zvl_root/zamm-memory/archive/backlog" \
+                   "$_zvl_root/zamm-memory/journal" \
+                   "$_zvl_root/zamm-memory/archive/journal"; do
     [ -d "$_zvl_tree" ] || continue
     if ! _zvl_links=$(find "$_zvl_tree" -type l); then
       echo "ERROR: could not enumerate ${_zvl_tree#"$_zvl_root/"} (unreadable, not empty)." >&2

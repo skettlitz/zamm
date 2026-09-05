@@ -933,3 +933,470 @@ Dogfood note: this pass went through its own machinery — the feedback was
 captured as three scoped backlog ideas, one was promoted (`backlog
 promote`, Origin-idea recorded), and the siblings were tombstoned into the
 plan. 482 tests green.
+
+## Locked 2026-09-04 (the journal: episodes as a fourth tree)
+
+ZAMM had boxes for facts (knowledge), active intentions (plans) and latent
+intentions (backlog) and none for EPISODES — things that happened, worth a
+trace, implying no action and asserting no durable claim — so they either
+evaporated at session end or were forced into the knowledge ledger at `days`
+durability, taxing the pushed digest. The journal is the fourth box:
+ordinary immutable schema-3 records in `zamm-memory/journal/<YYYY>/`,
+compiled by the same compiler behind `--tree journal` into a TIMELINE lens
+(`.compiled/journal.md`, months newest first, dormant collapsed to per-month
+counts) instead of a ranking. Three record classes share the tree and
+resolve by VALUE, never by graph: entries (`type: memory`), elevations
+(`type: digest` + `digest: <kind>` + `covers: <YYYY[-MM]>`, the newest
+unretired one per kind and period is effective) and watermarks (`type:
+memory` + `reviewed-through:` [+ `pass:`], the MAX date among unretired
+claims is the effective watermark; undigested = created on or after it,
+inclusive). `type: digest` is the first tree-local record type: the
+new-type quarantine hazard is about trees older toolchains SCAN, and no
+older toolchain enumerates `journal/` — ledger record 9ehf5 (superseding
+apxr4) states the sharpened rule and landed BEFORE the code, as the external
+review asked. Every other tree refuses the type and every journal-only key
+(`cue`, `salience`, `axis-*`, `time`, `agent`, `user`, `digest`, `covers`,
+`reviewed-through`, `pass`); `x-` stays warning-free everywhere.
+
+Capture is cue-driven, never ritual — the 2026-02 no-daily-diary rule is
+superseded by name with the sharpened form: episodes go to the journal on
+a cue, durable points are distilled out at triage, and no session-end
+obligation exists. `journal add 'One sentence.'` is complete (scope other,
+durability weeks, stdin under `## Background`); optional `--cue` (open slug
+set seeded with side-quest, exceptional-occurrence, non-action,
+cross-plan-context, blind-spot), `--salience 1..10`, numeric axes
+`--axis name=value` with exactly two self-describing types (unipolar 0..10
+unsigned, bipolar -5..+5 always signed — no registry), and `--x key=value`
+auto-prefixed into the experimental namespace. `time:`, `agent:`
+(`ZAMM_AGENT`) and `user:` (the git identity) are stamped as provenance,
+never a scoreboard. The capture contract — validation never rate-limits or
+refuses a well-formed capture — lives in the protocol body and a test lock,
+deliberately not in invariants.md.
+
+Digestion is a trichotomy. COMPILE is the primary digest and is never
+stored: `journal digest <YYYY[-MM]>` prints a month view (stats +
+elevations + entries) or the year view (the digest of digests: per-month
+rows, monthly elevations with headline fallback, the yearly elevation),
+composable through `--detail`, `--stats`, `--elevations` and the shared
+predicates — a skill's style is a saved invocation. TRIAGE extracts into
+the other trees behind a claim: `journal review` (oldest first, headlines
+above 50; `--cue`/`--scope` are reading aids, `--period` reads a calendar
+span, `--pass` a custom pass) and `journal settle [--through <date>]`
+(refuses a non-advancing or future date). ELEVATE stores judgment:
+`journal elevate <kind> <period>` writes the record that IS the coverage.
+Elevations and watermarks never go dormant (the second read-through caught
+that a weeks-durability claim would otherwise have expired after ~130 days
+and silently reopened everything behind it). One predicate grammar
+(`--class --scope --cue --kind --covers --agent --user --axis --since
+--until`, each negatable) drives `search`, `stats`, `export` and `digest`;
+`journal export` is the versioned TSV seam (`# zamm-journal-export v1`, a
+column-name row, readers map by name, columns only append) through which
+other skills — the journal's main operators — read; they write only via
+`add` and `elevate`.
+
+Session-start exposure is one line, present only when due: `Journal: triage
+due (N undigested, oldest D); monthly due (P)` — triage at 25 undigested or
+60 days, elevation nudges opt-in by practice per built-in kind (first
+elevation opts in; a lapse of more than three grains of the kind's own
+period goes silent). Absent or quiet tree: byte-identical digest; degraded
+pass: `Journal: DEGRADED` with exit 2; unreadable tree: exit 4, previous
+digest untouched. The sidecar carries the effective watermarks and
+elevations, what is due, and per month x cue x axis nearest-rank quartiles
+over entries and `created:` dates (the instrument for the bar-slips risk;
+the status drift flag over it is deferred on calibration grounds).
+
+## Locked 2026-09-04 (journal review rounds: what the design named, the code now measures)
+
+Two passes over the shipped journal - a probe of the running toolchain and a
+line-by-line read - found seven defects, every one an edge the design had
+named while the code measured something adjacent to it.
+
+The inclusive triage boundary means a claim dated D cannot cover the entries
+of D (fail-open: same-day work is never silently skipped). Nothing measured
+that, so a day of entries nagged `triage due` in every digest while the
+settle the line asked for was refused as non-advancing, and `settle` both
+printed and RECORDED, in an immutable body, a covered-count that included
+the very entries the next read listed as undigested. Due-logic now counts
+only what a settle would clear, so the nudge is always actionable; a claim
+counts as covered what a later read treats as covered (created strictly
+before its date) and names the boundary-day entries separately, in the
+record as well as on screen.
+
+Journal reads handed back a degraded tree under exit 0 - the export seam
+included, whose consumer is a program that cannot see the `## Degraded`
+section and would take a short dataset for the whole journal. Every journal
+read now exits 2 with the explanation on stderr and the data still on
+stdout. The shared internal list modes (`--list-live` and friends) keep
+their exit-0 behaviour: `backlog promote` treats a non-zero list as an
+unreadable tree, and coupling those would refuse promotion over an unrelated
+quarantined record.
+
+Class validation ran only for records carrying a journal KEY, so a bare
+`type: digest` - which carries none - passed the contract and reached the
+export as an elevation with no kind and no period; journal records are now
+validated as classes unconditionally. An axis predicate checked only its
+first character while awk coerces the operand with `+ 0`, so
+`--axis mood=garbage` quietly became `mood == 0`; the name, operator and
+integer operand are now a real grammar. `journal digest` selected elevations
+straight from the state sidecar, so predicates narrowed the entries and left
+every elevation in - effectiveness stays the sidecar, but WHICH elevations
+to render is the shared grammar, and `--elevations only` now renders them at
+whatever grain they sit.
+
+Two elevations left live for one kind and period were resolved by the
+greater record id, which within one day is the random suffix - the backlog
+learned the same lesson about same-day ids in its round 2. A correction
+supersedes (retiring its predecessor outright), so two live ones are
+competing claims: the lens, the compiled views and the sidecar now name
+them, and `journal elevate` prints the id to supersede instead of quietly
+adding a second. Deliberately NOT fixed by comparing `time:` - that is
+display metadata, never causality, and a clock skew between two machines
+must not decide which digest a period has.
+
+A third pass found five more, and one was the sharpest of the series:
+`settle` and `elevate` wrote coverage while records sat quarantined. Nobody
+could review an unreadable record, and the claim covers it by DATE the
+moment it is repaired - it lands behind the watermark, or inside an elevated
+period, never having been read, and no rerun takes that back (guarantee 2).
+Both verbs now require a clean journal; capture is untouched, because a
+quarantined neighbour is no reason to refuse an episode.
+
+The rest were the same species as the round before. `journal digest`
+suppressed its entry default whenever any `--class` was given, so
+`--class watermark` listed watermarks under Entries; each section now ANDs
+its own class onto the caller predicate through a separate key, which also
+fixes repeated and negated classes. `--stats full` read its detailed table
+from the unfiltered sidecar, printing statistics for the very records the
+view had excluded; it is derived from the selected rows now. The 60-day
+review-age boundary ran on daynum(), the deliberate approximation that
+models every month as 31 days (and is documented as unfit where exactness
+matters), so a 31 January entry was "older than 60 days" on 1 April, when it
+is exactly 60; policy boundaries use exact Gregorian day arithmetic, decay
+keeps its approximation. And `journal search --text` swallowed grep exit 2 -
+a pattern that cannot compile, or a file that cannot be read - as "no
+matches"; the pattern is validated once up front, and an unreadable record
+now exits 4 (G3), which also meant moving the row loop out of the pipeline
+subshell that had been discarding its exit.
+
+A fourth pass found the model itself wanting, in the one place it had been
+taken on faith: coverage was a DATE. An entry written or merged in after a
+claim, dated before its boundary, counted as reviewed by a claim that never
+saw it - `journal add --date`, or any teammate's older entry arriving in a
+merge - and no rerun brought it back. Coverage is now by RECORD IDENTITY:
+`settle` writes `covered:` naming the entries it reviewed, and undigested
+means named by no claim of that pass rather than older than some date. A
+hand-written claim with no `covered:` keeps the blunt date meaning, which is
+a human asserting a range on their own authority. The compiler also refuses
+a claim reaching past the day it was written - the CLI had refused future
+dates all along, but a committed record is content like any other, and one
+hand-written line claiming the year 9999 had marked every entry reviewed.
+
+Elevations carry the same identity, for the same reason: the year view
+renders an elevation INSTEAD of its period's entries, so an entry the
+elevation never saw was invisible there for good. An elevation now names
+what it saw; an entry of the period outside that list makes it stale, which
+the lens reports, the year view lists under the month, and the due-logic
+treats as needing elevation again. And a period still running can no longer
+be elevated at all - freezing a period mid-flight was the same bug with a
+narrower door, and for a running period the compiled view is the live
+answer.
+
+A fifth pass read the diff line by line and found eleven more, including
+the first security-shaped defect of the series. Frontmatter was emitted with
+`echo`, which expands backslash escapes on a POSIX /bin/sh - the shell CI
+runs - so `journal add --x 'note=x\nreviewed-through: <date>'` broke out of
+its own line and wrote a real coverage claim. The x- namespace exists
+precisely so an escape hatch can never write a policy key, and capture is
+the one path that never refuses. The emitter uses printf now, with a
+source-level lock beside the behavioural one.
+
+Two more ways a claim silently degraded to the date-only form it was built
+to replace: `settle` and `elevate` omitted `covered:` when they covered
+nothing, and the compiler read a missing key as "a human asserting the
+range". Naming nothing is an exact statement, so the key is always written
+and EXACTNESS IS PRESENCE - an empty `covered:` covers nothing, only a
+record without the key is the blunt form. Settling twice on different days,
+and elevating a quiet month, are both ordinary.
+
+`journal review` crashed on any entry rated salience 1 or 2: the sort key
+was printed %02d and the metadata line evaluated $((10 - 09)), an invalid
+octal literal, aborting the default full-detail read mid-record. The
+salience travels as its own field now. The refuse-to-publish gate counted
+entries only, so a journal holding coverage records and one malformed file
+refused outright while export returned the survivors - it counts every live
+class, and the lens header reports all three. The same-day notice (and the
+sentence settle wrote into an immutable body) explained the exclusion by a
+date comparison that identity coverage had made false. `journal search` and
+`journal stats` each parsed the whole tree twice, compiling a lens neither
+of them reads. A failed `journal show` pointed at `memory list --all`. And
+three smaller ones: dead status variables in `journal list`, a no-op
+self-assignment in `journal digest`, and hardcoded plurals where the file
+already had a helper.
+
+A sixth pass found three more, all of them the identity model being trusted
+where it was not yet enforced. `covered:` ids were checked for SYNTAX only,
+so a claim could name a QUARANTINED record - one nobody could read, hence
+one nobody reviewed - and absorb it the moment it was repaired; ids must now
+resolve to a readable entry of this journal that the claim could have seen
+(before its boundary, inside its period), and a claim whose list does not
+hold up carries no coverage at all. Fail closed on authority means fail open
+on the entries: they stay undigested, and the void claim is surfaced in the
+lens like any other degradation.
+
+The three provenance stamps were joined into ONE string that every caller
+expanded unquoted, so `ZAMM_TIME='12:00 --reviewed-through <date>'` injected
+flags and turned an ordinary `journal add` - the verb that never refuses -
+into a valid date-only watermark, hiding every backdated episode written
+afterwards. The clock stamp is validated and the three values are passed as
+separate quoted arguments.
+
+And because entries and watermarks share `type: memory`, type compatibility
+alone let a coverage claim SUPERSEDE an episode: `journal check` passed on a
+tree whose export no longer held the entry at all. Supersession inside the
+journal now joins compatible classes; only a tombstone retires across them.
+
+A seventh pass found four more, two of them about who owns an answer. The
+year renderer RE-DERIVED coverage by parsing the elevation record itself,
+with stricter rules than the compiler: it rejected `covered :` and a CRLF
+file, both of which the compiler accepts, so the compiler reported an
+elevation stale while the view silently dropped the entry it had missed.
+Which entries an elevation missed is one answer and the compiler owns it -
+it now emits them by id in the sidecar and the renderer reads that. The two
+frontmatter helpers in the runner were also taught the compiler rules
+(trim the key, strip a carriage return), so no third parser drifts either.
+
+An invalid `covered:` list was treated like an absent one, falling back to
+date coverage: a claim that did not hold up went on suppressing exactly the
+entries it named. Exact-and-broken means EMPTY, not blunt, so every entry of
+the period reads as uncovered and the elevation is stale until it is
+written again.
+
+The digest added its period bounds under the caller predicate keys, whose
+repeated values OR together - so `digest 2026-06 --since 2026-06-15` widened
+back to all of June and `--until 2026-07` pulled July into June. The bounds
+are section-scoped keys now, as `--class` already was, and they intersect.
+And the digest summary grouped axis values by NAME, taking the type from
+whichever value arrived first, so one name carrying both spellings reported
+a bipolar median under a unipolar label; a name and a type together are the
+axis, which is how the detailed table had always read it.
+
+The eighth pass found the one reader the seventh had missed: `fm_body`
+still located the end of the frontmatter by matching a bare `---`, so a CRLF
+record never matched its own closing fence and its body read as EMPTY. A
+valid CRLF elevation passed `journal check` and then rendered as a heading
+with nothing under it, in the month view and the year view alike - and since
+the entries it covers are suppressed in favour of that summary, the period
+ended up described by nothing at all. The same reader feeds `backlog mark`,
+where an empty body is not a missing line of output but a refused write. All
+three frontmatter readers in the runner now normalize line endings exactly
+as the compiler does, and a body copied forward lands as LF, which is what
+.gitattributes asks of the tree.
+
+A ninth pass moved into the shared surfaces, where two of the three defects
+predate the journal entirely. Supersede validation consulted the ARCHIVED
+header whenever one existed, while the apply pass acted on the live copy -
+so with the live-and-archived duplicate an interrupted archive leaves
+behind, an edge was judged by a header that carries a type but no journal
+class, and a watermark could retire an entry with check none the wiser.
+Validation now reads the copy the edge will actually kill, which is the
+condition the apply pass already used.
+
+`--list-live` wrote raw scopes and headlines into TSV, and it is what
+`memory list` and `backlog list --scope` read: a headline containing a TAB
+lost everything after it (in the reproduction, the half of the sentence that
+said ONLY AFTER APPROVAL), and a tab inside a scope shifted the columns so
+the record vanished from a scoped listing. It is TAB-sanitized now, like
+every other machine surface here.
+
+And the plans tail normalized field VALUES while matching section headings
+against raw lines, so a plan converted to CRLF compiled with no Done-when
+census at all - the digest, `plan show` and the plan checker each read that
+section by an exact heading. All three normalize the line first.
+
+580 tests green under dash with ZAMM_SLOW=1 on a case-sensitive volume;
+each new lock fails against the pre-fix scripts.
+
+
+## Locked 2026-09-05 (startup surfaces: say less at session start)
+
+A pass over what an agent reads before doing anything, with a small-context
+agent in mind. Three principles: the router carries triggers and one command
+each, never mechanics; a rule the toolchain states at the moment it matters
+(the valid scope set on a bad `--scope`, the empty-body refusal, the digest
+header's "do not open the compiled file") leaves the router; and a document
+says which deeper document to load, not what it contains.
+
+Router (every session, AGENTS.md and the Cursor rule): 506 -> 432 words while
+ADDING four rules it had never carried - no secrets and paraphrase-never-quote
+(the two permanence rules for writers), records are advisory so verify before
+a high-impact action, and two more load-the-body triggers (session end, an
+IDE-generated plan file). The backlog paragraph lost its mechanics (127 -> 64;
+clustering, decay and lane precedence live in the body's Backlog section), the
+journal paragraph names the one file to read before a first entry instead of
+enumerating layers, and the session-start paragraph dropped the version-check
+and do-not-open-the-file caveats the toolchain and the digest header now state
+themselves.
+
+SKILL.md: 1245 -> 855 words. Its Authority section claimed the scaffold
+renders the protocol body into AGENTS.md and told the agent to read the
+template only when no rendered copy is in context - wrong since the router
+split: the scaffold renders the router, and an agent believing AGENTS.md was
+the full protocol would never load the body. README carried the same claim in
+its runtime-files table and its Learn more list; both corrected. Commands is
+now a verb map per tree with `help [<topic>]` as the reference instead of a
+paraphrase of it; the write transaction lost its redundant post-write
+`memory check` (create already validates against the whole ledger) and gained
+the brevity rule. Two dispatch rows were added: an IDE-written offsite plan
+file (a MUST in the body with no trigger anywhere at startup) and the
+read-only "what happened" question.
+
+The empty-ledger digest line now says what to do at the moment it matters:
+"ask the human before initializing, never write placeholder records". The
+router had never carried that rule; the body and SKILL.md did, but an agent
+reading only the digest saw "not initialized" and nothing else.
+
+Brevity is written down as part of the record contract - in the body's
+record-body convention, the record template, SKILL.md's write steps, the
+router's memory paragraph and journal-writing.md: limits are ceilings, not
+space to fill; one sentence that says the thing is a complete record; every
+word in a digest block is reread at every session start by every agent, so
+every word saved saves context and money for every reader after. The "2-10
+lines" guidance, which read as a target, became "most records need two or
+three".
+
+Protocol body: Session Start dropped from 620 to 459 words by folding three
+defensive bullets (recompile is the read; do not reread; do not open the file)
+into two sentences and by describing the attention layers once, since the
+digest header describes them again at read time.
+
+580 tests green under dash with ZAMM_SLOW=1; no test pinned the reworded text,
+and the one that reads the dispatcher against `help` still passes.
+
+Same day, the write layers learned who READS what they write. The maintenance
+file had said when an elevation may be written and what coverage it claims,
+and nothing about what a good one is; measured against the renderer, the
+facts were sharp enough to teach: the year view shows an elevated month as
+the elevation's first PHYSICAL line and nothing else (a wrapped headline is
+cut mid-sentence), the yearly elevation is written from twelve of those
+lines, the month view shows the block (validated to 12 lines / 1200 chars
+like any record), Background is read on demand, and `search --text` matches
+bodies. So: line one is the period in one sentence written to be summarized;
+the block is the few episodes that mattered with outcomes and ids, not an
+inventory (`covered:` already names every entry); two tests before writing -
+can a reader of line one decide whether to open the month, can a reader of
+the block skip every entry without losing a decision. The settle headline
+got the same treatment: its reader is the next reviewer, who needs to know
+what was already extracted. journal-writing.md gained "who reads it, and
+when" - a scanner sees the headline alone, the triage reviewer weeks later
+sees the whole record and decides fact-or-action, the elevation author
+summarizes from headlines - and the knowledge-record convention, SKILL.md and
+the record template now name the headline's reader: an agent mid-task,
+scanning the digest for the block that applies to what it is doing now.
+
+## Locked 2026-09-05 (every tree in layers: reading, writing, maintenance)
+
+The journal's four-layer shape - an index over a reading, a writing and a
+maintenance file, each written for the agent about to do that one thing -
+now applies to every tree. The protocol body, 5,221 words of MUSTs, schema,
+mechanics and transitions that every deeper question loaded whole, is a
+1,386-word SPINE: session start and end, the boundary test between the four
+trees with a table of their layers, the rules every tree shares, the
+distillation cues, reconciliation in three sentences, precedence and key
+constraints. Everything else moved to `references/<tree>[-layer].md`:
+memory (index 228, reading 484, writing 1,603, maintenance 931), backlog
+(187 / 178 / 422 / 296), plans (158 / 159 / 562 / 467), beside the journal
+files. The router's last paragraph maps actions to layers directly; SKILL.md's
+dispatch table points its Read column at the file for each situation.
+
+Every writing layer opens with WHO READS what you write and at what zoom,
+measured against the renderer rather than asserted: a knowledge headline is
+matched, not read, by an agent mid-task scanning ~75 blocks, so its first
+words name the situation; the digest joins a wrapped headline into one line;
+`memory list` shows the first ~70 characters and the slug is how a record
+is opened; `+bg` is read as "verify here before a high-impact action"; the
+reconciler needs to know where a claim can be checked; the closing agent
+votes only on records precise enough to have helped or misled. A backlog
+headline is read dozens at a time under counted area headings, its
+Background by the one who does the work, and a marked headline by every
+session as a commitment. A plan is its title to everyone who has not opened
+it; Done-when is a checklist written as checkable outcomes; Learnings are
+read by the distiller as candidate records. Each writing file ends with two
+tests to apply before writing.
+
+Duplication across files is deliberate where it makes the hot path
+self-sufficient: the schema, the areas, the write command and the brevity
+contract appear in memory-writing.md and are summarized in the spine; the
+close-out steps appear in plans-maintenance.md and Session End points at
+them. A rule-bearing-phrase probe over the old body (108 phrases) finds
+every one in the new layout; the single dropped detail is the internal
+note that a multi-tag record competes through its least-crowded area.
+
+580 tests green under dash with ZAMM_SLOW=1; the scaffold stamp moved
+(references/ is hashed), and the rendered router still expands its one
+path token on the definition sentence.
+
+## Locked 2026-09-05 (tenth review round: the archived exemption, and echo)
+
+Two findings against `70b0afd`, both in families already met. The coverage
+validator took the archived exemption before looking for a live copy - the
+mirror image of the supersede check fixed two rounds earlier - so a claim
+could name a live entry dated AFTER its own boundary and pass: the entry was
+retired unread, `journal check` was clean, and `journal review` reported
+nothing outstanding. Auditing every `in archived` site for the same shape
+found one more: a vote whose target had an archived copy was dropped
+silently instead of landing on the live record. Both now apply the
+exemption only when no live copy exists, which is the condition the apply
+pass and the supersede check already used.
+
+The read verbs printed stored headlines with `echo`, which under dash - and
+under macOS /bin/sh, whose bash runs with xpg_echo on - interprets backslash
+escapes: a literal `\t` became a tab, and `\c` discarded the rest of the
+line, headline and record pointer alike, in search, headline review and both
+month-digest details. Export kept the text. Every site printing record text
+goes through fixed-format `printf` now. Locked with one test per view as
+subtests; because the harness runs the runner with `sh`, the lock falsifies
+on macOS as well as under dash.
+
+583 tests green under dash with ZAMM_SLOW=1; all three new locks fail
+against the pre-fix tree (`7b39661`).
+
+## Locked 2026-09-05 (layering review: the erasure route, list semantics, routing tests)
+
+A colleague reviewed the layering and kept the structure; four gaps closed.
+The shared erasure route sent every secret to the knowledge command, and
+each tree compiles on its own, so an erasure record written into
+`knowledge/` left a journal or backlog record visible - and deleting the
+original afterwards left a returning copy unprotected. Every maintenance
+file now carries its own tree's command (`memory create` / `backlog add` /
+`journal add --type erasure --erases <id>`), the SKILL.md row says "into the
+tree the record lives in", and a journal test proves the knowledge erasure
+does nothing there while the journal one redacts.
+
+`memory list` was described as every live record; by default it lists only
+what the digest selected (the help said so all along), and `--all` is every
+live record. The dedupe instruction before adding knowledge now says
+`memory list --all --scope <area>`, since the record you would duplicate
+may be an unlisted or dormant one.
+
+Two routing corrections: the session-start row of SKILL.md no longer
+requires the spine and memory-reading.md - the router's paragraph is the
+whole rule, and the extra files are conditional on an unclear marker or an
+empty ledger - so the startup cost is what the router says it is; and a
+request to summarize a period routes to `journal digest` (a read) first,
+with storing an elevation or claiming coverage as a separate, explicitly
+requested write. The journal index, the writing file's triggers and the
+spine's table say the same.
+
+Decisions on the rationale's open questions: `memory-*` stays aligned with
+the CLI; the compact distillation cues stay in the spine; 532 router words
+is acceptable; the spine is renamed `references/protocol.md` since nothing
+renders it (the scaffold still requires it, under its new path; the
+template-naming convention is untouched because the file is no longer a
+template); the tiny reading layers stay; the least-crowded-area mechanism
+went into memory-maintenance.md, not the writing path.
+
+New: scenario routing tests in test_surfaces.py - from the router alone,
+every action reaches a named, existing layer file that carries its command,
+no surface points at a missing file, and each maintenance file names its own
+tree's erasure command. A dangling pointer in a doc is a routing defect the
+suite never saw before.

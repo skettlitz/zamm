@@ -64,7 +64,7 @@ require() {
 }
 
 # The animal complexity scale and the delta enum, kept in step with the
-# protocol (references/scaffold/protocol-body.template.md) and the plan
+# protocol spine (references/protocol.md) and the plan
 # template comment.
 COMPLEXITY_ANIMALS="ant gecko raccoon capybara badger octopus manatee shark godzilla kraken"
 COMPLEXITY_DELTAS="lighter as-expected heavier"
@@ -140,6 +140,7 @@ section_body() {
   # prefix: `## Done-when-not` and `## Learnings-extra` are different sections
   # and must not pose as `## Done-when` / `## Learnings`.
   awk -v h="## $2" '
+    { sub(/\r$/, "") }
     $0 == h || substr($0, 1, length(h) + 1) == h " " || substr($0, 1, length(h) + 1) == h "\t" { inb = 1; next }
     inb && /^## / { inb = 0 }
     inb { print }

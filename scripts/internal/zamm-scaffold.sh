@@ -465,6 +465,7 @@ write_current_zamm_version() {
 # --- Ledger + plan roots ---
 ensure_dir "$PROJECT_ROOT/zamm-memory/knowledge"
 ensure_dir "$PROJECT_ROOT/zamm-memory/backlog"
+ensure_dir "$PROJECT_ROOT/zamm-memory/journal"
 ensure_dir "$PROJECT_ROOT/zamm-memory/active/plans"
 ensure_dir "$PROJECT_ROOT/zamm-memory/archive/plans"
 ensure_dir "$PROJECT_ROOT/zamm-memory/archive/knowledge/initializations"
@@ -520,10 +521,11 @@ done
 # ~54KB of manual on two alwaysApply surfaces taxed every session for text
 # that is only needed at decision points. The router states what ZAMM is,
 # how to compile context, who owns memory and plans, and when to load the
-# full protocol body (which stays in this skill, read on demand).
+# protocol spine (references/protocol.md, which stays in this skill and is
+# read on demand; it is not a template, so it carries no template suffix).
 AGENTS_HEADER="$SCAFFOLD_DIR/agents-header.template.md"
 RULE_HEADER="$SCAFFOLD_DIR/rule-header.mdc"
-PROTOCOL_BODY="$SCAFFOLD_DIR/protocol-body.template.md"
+PROTOCOL_BODY="$(dirname "$SCAFFOLD_DIR")/protocol.md"
 PROTOCOL_ROUTER="$SCAFFOLD_DIR/protocol-router.template.md"
 
 if [ -f "$AGENTS_HEADER" ] && [ -f "$RULE_HEADER" ] && [ -f "$PROTOCOL_ROUTER" ] && [ -f "$PROTOCOL_BODY" ]; then
@@ -547,7 +549,7 @@ else
   [ -f "$AGENTS_HEADER" ] || echo "ERROR: missing template fragment: $AGENTS_HEADER"
   [ -f "$RULE_HEADER" ] || echo "ERROR: missing template fragment: $RULE_HEADER"
   [ -f "$PROTOCOL_ROUTER" ] || echo "ERROR: missing template fragment: $PROTOCOL_ROUTER"
-  [ -f "$PROTOCOL_BODY" ] || echo "ERROR: missing template fragment: $PROTOCOL_BODY"
+  [ -f "$PROTOCOL_BODY" ] || echo "ERROR: missing protocol spine: $PROTOCOL_BODY"
   echo "       The skill install is incomplete; VERSION was not written."
   exit 1
 fi

@@ -53,6 +53,7 @@ rules that are not gates:
 | `test_graph.py` | supersession, votes and erasure semantics |
 | `test_plan_validation.py` | `plan check` and plan/ledger cross-check rules |
 | `test_cli_safety.py` | help, argument handling, version and migration gates |
+| `test_journal.py` | the journal tree: classes, policy, watermarks, capture, the read seams, the digestion trichotomy, the digest line |
 
 | `fixtures/golden_digest.md` | committed expected output |
 

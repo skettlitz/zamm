@@ -9,14 +9,15 @@ schema: 3
 ---
 
 <Headline — first paragraph: ONE imperative, actionable or guardrail
-statement, standalone-readable. Aim ~300 chars as a soft guide (not a hard
-cap); prefer a complete trigger over mid-thought truncation. Leads a ## Digest
-entry (with elaboration) and is the only line under ## Headlines.>
+statement an agent mid-task can recognize as its situation and act on
+alone. One short sentence is the norm; ~300 chars is a ceiling, not a
+target. Leads a ## Digest entry (with elaboration) and
+is the only line under ## Headlines.>
 
-<Optional elaboration paragraphs: digest-worthy caveats, key parameters, the
-load-bearing why. Headline + elaboration form the digest block — keep it
-2-10 lines (hard limits 12 lines / 1200 chars); top-ranked entries show all
-of it at session start.>
+<Optional elaboration: a digest-worthy caveat, a key parameter, the
+load-bearing why. Headline + elaboration form the digest block — hard limits
+12 lines / 1200 chars; most records need two or three lines. The block is
+reread at every session start by every agent, so say it once and stop.>
 
 ## Background
 

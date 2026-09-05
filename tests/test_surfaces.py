@@ -301,7 +301,7 @@ class TestHelpCoversEveryRoutedVerb(ZammTest):
     # Aliases and catch-alls: routed, but not verbs a user looks up.
     NOT_VERBS = {"*", "help", "--help", "-h"}
 
-    GROUPS = ("memory", "plan", "backlog")
+    GROUPS = ("memory", "plan", "backlog", "journal")
 
     def setUp(self):
         super().setUp()
@@ -367,6 +367,70 @@ class TestHelpCoversEveryRoutedVerb(ZammTest):
                         verb, group_text,
                         f"`{group} {verb}` is missing from `{group} --help`",
                     )
+
+
+
+class TestRoutingFromTheRouter(ZammTest):
+    """Scenario routing: an agent that has read ONLY the always-on router must
+    reach the instructions for each action in one hop, and every file any
+    surface points at must exist.
+
+    Added 2026-09-05 after a review found the erasure route sending a
+    journal secret to a command that writes into knowledge/ (which redacts
+    nothing there), and a rename of the protocol spine: a dangling pointer
+    in a doc is a routing defect the suite never saw.
+    """
+
+    ROUTER = SKILL_DIR / "references" / "scaffold" / "protocol-router.template.md"
+    SPINE = SKILL_DIR / "references" / "protocol.md"
+    SURFACES = ["SKILL.md", "references/protocol.md",
+                "references/scaffold/protocol-router.template.md",
+                "references/memory.md", "references/backlog.md",
+                "references/plans.md", "references/journal.md"]
+
+    # action -> (file the router must name, a command or rule that file must carry)
+    ROUTES = {
+        "write a record": ("memory-writing.md", "memory create"),
+        "reconcile after a merge": ("memory-maintenance.md", "Needs reconciliation"),
+        "erase a secret from knowledge": ("memory-maintenance.md", "memory create --type erasure"),
+        "erase a secret from the backlog": ("backlog-maintenance.md", "backlog add --type erasure"),
+        "erase a secret from the journal": ("journal-maintenance.md", "journal add --type erasure"),
+        "capture an idea": ("backlog-writing.md", "backlog add"),
+        "promote an idea": ("backlog-maintenance.md", "backlog promote"),
+        "create a plan": ("plans-writing.md", "plan create"),
+        "close out a plan": ("plans-maintenance.md", "Review -> Done"),
+        "record an episode": ("journal-writing.md", "journal add"),
+        "act on a Journal: line": ("journal-maintenance.md", "journal settle"),
+        "answer what happened": ("journal-reading.md", "journal digest"),
+    }
+
+    def test_the_router_names_the_layer_for_every_action(self):
+        router = self.ROUTER.read_text()
+        for action, (fname, needle) in self.ROUTES.items():
+            with self.subTest(action=action):
+                self.assertIn_(fname, router, f"the router does not route `{action}`")
+                layer = SKILL_DIR / "references" / fname
+                self.assertTrue(layer.exists(), f"{fname} is named but missing")
+                self.assertIn_(needle, layer.read_text(),
+                               f"{fname} does not carry `{needle}` for `{action}`")
+
+    def test_no_surface_points_at_a_missing_file(self):
+        for rel in self.SURFACES:
+            text = (SKILL_DIR / rel).read_text()
+            for m in re.finditer(r"`(?:<zamm-skill>/)?references/([A-Za-z0-9_./-]+\.md)`", text):
+                with self.subTest(surface=rel, target=m.group(1)):
+                    self.assertTrue((SKILL_DIR / "references" / m.group(1)).exists(),
+                                    f"{rel} points at references/{m.group(1)}, which does not exist")
+            # bare layer names inside the references tree resolve too
+            if rel.startswith("references/"):
+                for m in re.finditer(r"`([a-z]+-(?:reading|writing|maintenance)\.md)`", text):
+                    with self.subTest(surface=rel, target=m.group(1)):
+                        self.assertTrue((SKILL_DIR / "references" / m.group(1)).exists())
+
+    def test_the_spine_the_scaffold_requires_is_the_one_the_router_names(self):
+        self.assertTrue(self.SPINE.exists())
+        self.assertIn_("references/protocol.md", self.ROUTER.read_text())
+        self.assertIn_("references/protocol.md", (SKILL_DIR / "SKILL.md").read_text())
 
 
 class TestDigestReportsSkillDrift(ZammTest):

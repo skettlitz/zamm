@@ -55,8 +55,8 @@ Usage: zamm-run.sh [--project-root <path>] <command> [args...]
 
 Project
   scaffold             install ZAMM here, or refresh the rendered surfaces
-  status               health overview: ledger, backlog, plans, drift
-  check                validate everything (memory + backlog + plans)
+  status               health overview: ledger, backlog, journal, plans, drift
+  check                validate everything (memory + backlog + journal + plans)
   help [<topic>]       this text, or help for one command
 
 Memory
@@ -85,6 +85,30 @@ Backlog
   backlog promote <slug> ['<plan title>']
                        turn an idea into a plan and retire it
   backlog check        validate the backlog ledger
+
+Journal
+  journal add '<sentence>'
+                       record an episode; one sentence is enough
+  journal list [--all] [--scope <tag>] [--cue <slug>] [--since <date>]
+                       the timeline lens, newest first (--all: dormant too;
+                       filters print a row listing)
+  journal show <slug>  one record in full
+  journal search <predicates> [--text <pattern>] [--files]
+                       structured query: --class --scope --cue --kind
+                       --covers --agent --user --axis --since --until
+  journal stats [--axis <name>] [<predicates>]
+                       coverage-honest aggregates for the human
+  journal export [<predicates>]
+                       the versioned TSV seam for applications
+  journal digest <YYYY[-MM]> [--detail ...] [--stats ...] [--elevations ...]
+                       the compiled period view (never stored)
+  journal elevate <kind> <YYYY[-MM]>
+                       summarize a completed period; body on stdin
+  journal review [--headlines] [--cue <slug>] [--scope <tag>] [--period <p>] [--pass <kind>]
+                       read what triage has not covered yet
+  journal settle [--through <date>] [--pass <kind>]
+                       claim triage coverage with a watermark record
+  journal check        validate the journal ledger
 
 Plans
   plan list            active plans grouped by status
@@ -125,6 +149,76 @@ Usage: zamm-run.sh plan <command> [args...]
   check                validate active plans
   create <title>       new plan directory and file
   archive [--list]     move terminal plans to the archive (--list previews)
+EOF
+      ;;
+    journal) cat <<'EOF'
+Usage: zamm-run.sh journal <command> [args...]
+
+  add '<sentence>'     record an episode: the sentence is the headline, the
+                       slug is derived, scope defaults to other, durability
+                       to weeks; time/agent/user are stamped (ZAMM_AGENT,
+                       the git identity). Pipe any depth on stdin (plain
+                       prose parks under ## Background). Optional: --scope
+                       <tag>, --cue <slug> (shipped cues: side-quest,
+                       exceptional-occurrence, non-action, cross-plan-
+                       context, blind-spot), --salience 1..10, --axis
+                       name=value (repeatable; 0..10 unsigned or -5..+5
+                       always signed), --x key=value (repeatable, lands as
+                       x-key:), --agent/--user, --slug, --supersedes <id>,
+                       --importance useful|minor, --durability. For --type
+                       tombstone|erasure the positional is the SLUG.
+  list [--all] [--scope <tag>] [--cue <slug>] [--since <date>]
+                       recompile and print the timeline lens: months newest
+                       first, dormant entries collapsed to counts (--all
+                       lists them). A filter prints a row listing instead.
+  show <slug|id>       one record in full
+  search <predicates> [--text <pattern>] [--files]
+                       rows matching every predicate, newest first (--files
+                       prints paths for piping). Predicates: --class
+                       entry|elevation|watermark, --scope, --cue, --kind,
+                       --covers <period> (prefix), --agent, --user, --axis
+                       name[(=|<|>)value], --since/--until; a leading !
+                       negates. The same grammar drives export, stats and
+                       digest.
+  stats [--axis <name>] [<predicates>]
+                       overview: every axis with type and coverage, per-cue
+                       and per-agent/user counts; --axis <name> drills into
+                       per-month nearest-rank quartiles (plus neg/zero/pos
+                       for a bipolar axis). Entries only unless --class.
+  export [<predicates>]
+                       the read API for applications: a version line, a
+                       column-name row, one TSV row per record (readers map
+                       by name; columns only append within v1).
+  digest <YYYY[-MM]> [--detail headlines|blocks|full] [--stats none|summary|full]
+         [--elevations all|only|none] [<predicates>]
+                       the compiled period view on stdout, never stored: a
+                       month = stats + elevations + entries; a year = the
+                       digest of digests (per-month rows, monthly
+                       elevations with headline fallback, the yearly one).
+                       A skill style is a saved flag combination.
+  elevate <kind> <YYYY[-MM]>
+                       summarize a COMPLETED period into a stored record
+                       (type: digest), body on stdin: line one is all the
+                       year view shows of the period, the block is what
+                       the month view shows. Kinds monthly and yearly ship,
+                       the set is open. The record names the entries it
+                       saw and is its own coverage. Optional --scope,
+                       --slug, --axis, --x.
+  review [--headlines] [--cue <slug>] [--scope <tag>] [--period <p>] [--pass <kind>]
+                       the reading surface for judgment digestion:
+                       undigested entries oldest first (headlines only above
+                       50); --period reads a whole calendar span; --cue and
+                       --scope are reading aids, never coverage units.
+  settle [--through <date>] [--pass <kind>]
+                       claim triage coverage: writes a watermark naming the
+                       entries it covers (today, or a partial boundary with
+                       --through; refuses a non-advancing or future date,
+                       and refuses while the journal is degraded). Headline
+                       on stdin says what came of the review.
+  check                validate the journal ledger, write nothing
+
+Episodes, not facts: a durable rule found here is distilled into a knowledge
+record, an implied action into a backlog idea; the journal keeps the trace.
 EOF
       ;;
     backlog) cat <<'EOF'
@@ -586,6 +680,48 @@ print_status() {
     echo
   fi
 
+  # ---- journal (optional tree; absence is data, not a gap to report) ----
+  if [ -d "$ROOT/zamm-memory/journal" ]; then
+    _jlens="$ROOT/zamm-memory/.compiled/journal.md"
+    _jstate="$ROOT/zamm-memory/.compiled/journal-state.tsv"
+    if [ ! -f "$_jlens" ]; then
+      printf 'Journal   lens not yet compiled\n'
+      printf '          run: zamm-run.sh memory digest\n'
+    elif ! pair_coherent "$_jlens" "$_jstate" ||
+         ! _jvals=$(awk -F"$(printf '\t')" '
+             $1 == "entries"    { e = $2 }
+             $1 == "undigested" { u = $2 }
+             $1 == "elevations" { l = $2 }
+             $1 == "watermark" && $2 == "triage" { w = $3 }
+             END { print e "\t" u "\t" l "\t" w }
+           ' "$_jstate" 2>/dev/null); then
+      printf 'Journal   lens/state pair incoherent (interrupted compile, or a deleted sidecar)\n'
+      printf '          run: zamm-run.sh memory digest\n'
+    else
+      _jtab=$(printf '\t')
+      _jent=${_jvals%%"$_jtab"*}; _jrest=${_jvals#*"$_jtab"}
+      _jund=${_jrest%%"$_jtab"*}; _jrest=${_jrest#*"$_jtab"}
+      _jelv=${_jrest%%"$_jtab"*}; _jwm=${_jrest#*"$_jtab"}
+      if [ -n "$_jwm" ]; then _jcov="reviewed through $_jwm"; else _jcov="never reviewed"; fi
+      printf 'Journal   %s entries, %s undigested (%s), %s elevations\n' \
+        "${_jent:-?}" "${_jund:-?}" "$_jcov" "${_jelv:-?}"
+      awk -F"$_jtab" '
+        $1 == "due_triage" { printf "          triage due: %s undigested, oldest %s (zamm-run.sh journal review)\n", $2, $3 }
+        $1 == "due_elev"   { printf "          %s elevation due for %s (zamm-run.sh journal elevate %s %s)\n", $2, $3, $2, $3 }
+      ' "$_jstate"
+      if ! _jnw=$(find "$ROOT/zamm-memory/journal" -type f -name '*.md' -newer "$_jlens"); then
+        echo 'zamm: cannot enumerate the journal tree (unreadable, not empty).' >&2
+        exit 4
+      fi
+      _jnewer=$(printf '%s\n' "$_jnw" | grep -c . || true)
+      if [ "${_jnewer:-0}" -gt 0 ]; then
+        printf '          STALE: %s file(s) newer than the lens\n' "$_jnewer"
+        echo '          run: zamm-run.sh memory digest'
+      fi
+    fi
+    echo
+  fi
+
   # Plans enumerate through the checked manifest, never a glob: a status that
   # reported "none active" over an unreadable tree would hide the failure.
   pmf=$(mktemp "${TMPDIR:-/tmp}/zamm-status-pmf.XXXXXX")
@@ -751,6 +887,8 @@ find_recovery_files() {
   _rftrees="$ROOT/zamm-memory/knowledge"
   [ -d "$ROOT/zamm-memory/backlog" ] &&
     _rftrees="$_rftrees $ROOT/zamm-memory/backlog"
+  [ -d "$ROOT/zamm-memory/journal" ] &&
+    _rftrees="$_rftrees $ROOT/zamm-memory/journal"
   # shellcheck disable=SC2086 -- deliberate word splitting over fixed paths
   find $_rftrees -type f -name '.*.md.pending.*' || {
     echo "zamm: cannot enumerate the record trees (unreadable, not empty)." >&2
@@ -924,11 +1062,11 @@ resolve_record() {
   n=$(printf '%s\n' "$matches" | grep -c . || true)
   if [ "${n:-0}" -eq 0 ]; then
     echo "zamm: no record matches \"$needle\"" >&2
-    if [ "$rtree" = "backlog" ]; then
-      echo "  try: zamm-run.sh backlog list --all" >&2
-    else
-      echo "  try: zamm-run.sh memory list --all" >&2
-    fi
+    case "$rtree" in
+      backlog) echo "  try: zamm-run.sh backlog list --all" >&2 ;;
+      journal) echo "  try: zamm-run.sh journal list --all" >&2 ;;
+      *)       echo "  try: zamm-run.sh memory list --all" >&2 ;;
+    esac
     exit 1
   fi
   if [ "$n" -gt 1 ]; then
@@ -1020,6 +1158,7 @@ plan_show() {
   # prefix), and only valid markers — a checkbox under ## Approach must not
   # inflate the total, and `[?]` is not a done item.
   progress=$(awk '
+    { sub(/\r$/, "") }
     $0 == "## Done-when" || substr($0,1,13) == "## Done-when " || substr($0,1,13) == "## Done-when\t" { dw = 1; next }
     dw && /^## / { dw = 0 }
     dw && /^- \[[xX]\]/ { done++ }
@@ -1318,22 +1457,60 @@ resolve_live_idea() {
 
 # one frontmatter value, read from the frontmatter block ONLY — a body line
 # that happens to start with "scope:" must not be mistaken for the key
-fm_field() {
+# is the frontmatter key PRESENT (even with an empty value)? An exact claim
+# that named nothing is not the same as a record carrying no claim at all.
+fm_has() {
   awk -v k="$2" '
+    { sub(/\r$/, "") }
     NR == 1 { if ($0 == "---") { infm = 1; next } else exit }
     infm && $0 == "---" { exit }
-    infm && index($0, k ":") == 1 {
-      v = substr($0, length(k) + 2)
-      sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v)
-      print v
-      exit
+    infm {
+      p = index($0, ":")
+      if (p > 1) {
+        key = substr($0, 1, p - 1)
+        gsub(/^[ \t]+|[ \t]+$/, "", key)
+        if (key == k) { found = 1; exit }
+      }
+    }
+    END { exit found ? 0 : 1 }
+  ' "$1"
+}
+
+# The compiler trims the key and strips a carriage return before deciding
+# what a frontmatter line says; these read the same files, so they follow
+# the same rules. Two parsers with different ideas of `covered :` or of a
+# CRLF file is a divergence that only shows up as missing output.
+fm_field() {
+  awk -v k="$2" '
+    { sub(/\r$/, "") }
+    NR == 1 { if ($0 == "---") { infm = 1; next } else exit }
+    infm && $0 == "---" { exit }
+    infm {
+      p = index($0, ":")
+      if (p > 1) {
+        key = substr($0, 1, p - 1)
+        gsub(/^[ \t]+|[ \t]+$/, "", key)
+        if (key == k) {
+          v = substr($0, p + 1)
+          sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v)
+          print v
+          exit
+        }
+      }
     }
   ' "$1"
 }
 
-# the record body: everything after the closing ---, leading blanks dropped
+# The record body: everything after the closing ---, leading blanks dropped.
+# Line endings are normalized first, like the two key readers above and like
+# the compiler: without it a CRLF record never matched its own closing fence,
+# so the body read as EMPTY - a digest rendered an elevation heading with no
+# summary under it, and `backlog mark` refused to copy a body it could not
+# find. Records are written LF (.gitattributes says so), but one arriving
+# from a Windows checkout still has to read.
 fm_body() {
   awk '
+    { sub(/\r$/, "") }
     c >= 2 { if (!started && $0 == "") next; started = 1; print; next }
     $0 == "---" { c++ }
   ' "$1"
@@ -1715,13 +1892,1215 @@ $_ba_extra"
     --scope "${_ba_scope:-other}" $_ba_fwd "$_ba_slug"
 }
 
+# ---------------- journal ----------------
+# Episodes are ordinary records in zamm-memory/journal/ — same schema, same
+# immutability, compiled by the same compiler into the timeline lens
+# .compiled/journal.md. Three record classes share the tree: ENTRIES
+# (type: memory), ELEVATIONS (type: digest — stored digests of a period)
+# and WATERMARKS (type: memory + reviewed-through: — triage coverage
+# claims). Digestion is a trichotomy: compiled views (`journal digest`,
+# never stored), triage (`review`/`settle` behind a max-of-dates
+# watermark) and elevation (`journal elevate`). Capture is as cheap as
+# `backlog add`; the session digest carries one Journal: line only when
+# digestion is due. Every read below is pulled.
+
+JOURNAL_REVIEW_MAX=50   # review switches to headlines above this many entries
+JOURNAL_RC=0
+JOURNAL_TIME=""
+JOURNAL_AGENT=""
+JOURNAL_USER=""
+JOURNAL_EXPORT_HEADER="# zamm-journal-export v1"
+# the treeless answer to `journal export`: an empty seam is still a
+# well-formed one. Must match the compiler row byte for byte (the suite
+# compares both against one constant).
+JOURNAL_EXPORT_COLUMNS="id	class	created	time	agent	user	cue	kind	covers	pass	reviewed-through	scope	salience	state	reviewed	bg	axes	headline	passes"
+# Nearest-rank quartiles over a gv[group, i] array, spliced into every awk
+# program here that reports them. Nearest rank is a golden-stability
+# contract (deterministic, awk-portable, no interpolation), and the sidecar
+# rows, journal stats and journal digest must never disagree about the same
+# data - so the definition lives here once, matching the compiler side.
+JOURNAL_AWK_QUARTILES='
+    function nrank(n, p,   r) { r = int(p * n); if (r < p * n) r++; if (r < 1) r = 1; return r }
+    function isort(g, n,   i, j, t) {
+      for (i = 2; i <= n; i++) { t = gv[g, i]; j = i - 1
+        while (j >= 1 && gv[g, j] > t) { gv[g, j + 1] = gv[g, j]; j-- }
+        gv[g, j + 1] = t }
+    }
+'
+
+require_journal_tree() {
+  [ -d "$ROOT/zamm-memory/journal" ] ||
+    die "no journal tree at zamm-memory/journal ('journal add' creates it)"
+}
+
+# Coverage-writing verbs (settle, elevate) refuse while the journal is
+# degraded. A quarantined record is one NOBODY could review, and a claim
+# written now covers it by date the moment it is repaired - it drops behind
+# the watermark, or inside an elevated period, having never been read, and
+# no rerun takes that back (guarantee 2). Capture is untouched: `journal
+# add` never refuses, and reads only report the degradation.
+require_clean_journal() {
+  [ "$JOURNAL_RC" -eq 2 ] || return 0
+  echo "zamm: journal $1: the journal is degraded - some records could not be read." >&2
+  echo "      Refusing to write coverage over them: once they are repaired they would" >&2
+  echo "      fall behind this claim by date, unreviewed, and no rerun can undo that." >&2
+  echo "      Fix them first:  zamm-run.sh journal check" >&2
+  exit 2
+}
+
+journal_today() { printf '%s\n' "${ZAMM_TODAY:-$(date +%Y-%m-%d)}"; }
+
+# string comparison without relying on a non-POSIX `[ a \> b ]`
+str_gt() { awk -v a="$1" -v b="$2" 'BEGIN { exit !(a "" > b "") }'; }
+
+# a calendar period: YYYY or YYYY-MM with a real month
+valid_period() {
+  case "$1" in
+    [0-9][0-9][0-9][0-9]) return 0 ;;
+    [0-9][0-9][0-9][0-9]-0[1-9]|[0-9][0-9][0-9][0-9]-1[0-2]) return 0 ;;
+  esac
+  return 1
+}
+
+# recompile the lens; a degraded lens (2) is still published and read,
+# anything else non-zero refuses (unreadable tree, nothing survived)
+journal_compile() {
+  JOURNAL_RC=0
+  sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" --tree journal >/dev/null || JOURNAL_RC=$?
+  if [ "$JOURNAL_RC" -ne 0 ] && [ "$JOURNAL_RC" -ne 2 ]; then
+    exit "$JOURNAL_RC"
+  fi
+}
+
+# The export stream into a scratch file (a pipeline would mask an unreadable
+# tree as an empty stream, G3). Prints "<rc><TAB><path>": the compile status
+# travels WITH the data, so a read can propagate a degraded tree (exit 2)
+# instead of handing an application a silently short dataset under exit 0.
+# Runs inside $(...): callers MUST `|| exit $?`.
+journal_export_tmp() {
+  _je_tmp=$(mktemp "${TMPDIR:-/tmp}/zamm-journal-export.XXXXXX") ||
+    { echo "zamm: journal: could not create a scratch file" >&2; return 1; }
+  _je_rc=0
+  sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" --tree journal --export > "$_je_tmp" 2>/dev/null || _je_rc=$?
+  if [ "$_je_rc" -ne 0 ] && [ "$_je_rc" -ne 2 ]; then
+    rm -f "$_je_tmp"
+    echo "zamm: the journal did not compile (rc=$_je_rc); run: zamm-run.sh journal check" >&2
+    return "$_je_rc"
+  fi
+  printf '%s\t%s\n' "$_je_rc" "$_je_tmp"
+}
+
+# Exit a journal read, carrying the compile status. Exit 2 must always pair
+# with a visible notice (the taxonomy contract), and for a read that notice
+# is what tells a consumer its rows are missing whatever was quarantined.
+journal_exit() {
+  if [ "${1:-0}" -eq 2 ]; then
+    echo "zamm: the journal tree is degraded: the rows above omit quarantined records." >&2
+    echo "      Run: zamm-run.sh journal check" >&2
+  fi
+  exit "${1:-0}"
+}
+
+# a record path from its id (year directory = the id's year); archived
+# records resolve through the slower checked lookup
+journal_record_path() {
+  _jrp="$ROOT/zamm-memory/journal/${1%%-*}/$1.md"
+  if [ -f "$_jrp" ]; then printf '%s\n' "$_jrp"; else resolve_record "$1" journal; fi
+}
+
+# an identity token: lowercase, [a-z0-9.@+-], leading punctuation dropped
+journal_token() {
+  printf '%s' "$1" | tr 'A-Z' 'a-z' | tr -cs 'a-z0-9.@+' '-' | sed 's/^[-.@+]*//; s/-*$//'
+}
+
+# Provenance stamps for every journal write: time from the clock (ZAMM_TIME
+# pins it, test-only), agent from --agent/ZAMM_AGENT, user from
+# --user/ZAMM_USER, else the git identity commits already carry (user.name,
+# then the email local part) — nothing new is disclosed. Omitted with a
+# notice when underivable; validation never refuses an unstamped record.
+journal_stamps() {
+  # Validated here and passed as SEPARATE quoted arguments below: these
+  # values used to be joined into one string that every caller expanded
+  # unquoted, so a ZAMM_TIME carrying spaces injected flags of its own and
+  # turned an ordinary `journal add` into a coverage claim.
+  JOURNAL_TIME=${ZAMM_TIME:-$(date +%H:%M)}
+  case "$JOURNAL_TIME" in
+    [01][0-9]:[0-5][0-9]|2[0-3]:[0-5][0-9]) ;;
+    *) die "journal: ZAMM_TIME must be HH:MM (got: $JOURNAL_TIME)" ;;
+  esac
+  _js_time=$JOURNAL_TIME
+  _js_agent=$(journal_token "${1:-${ZAMM_AGENT:-}}")
+  _js_user=${2:-${ZAMM_USER:-}}
+  if [ -z "$_js_user" ]; then
+    _js_user=$(git config user.name 2>/dev/null || true)
+    if [ -z "$_js_user" ]; then
+      _js_user=$(git config user.email 2>/dev/null | sed 's/@.*//' || true)
+    fi
+  fi
+  _js_user=$(journal_token "$_js_user")
+  if [ -z "$_js_agent" ]; then
+    echo "zamm: agent: omitted (pass --agent or set ZAMM_AGENT so the record self-identifies)" >&2
+  fi
+  if [ -z "$_js_user" ]; then
+    echo "zamm: user: omitted (no git identity; pass --user or set ZAMM_USER)" >&2
+  fi
+  JOURNAL_AGENT=$_js_agent
+  JOURNAL_USER=$_js_user
+}
+
+# ---- one predicate grammar, shared by search, export, stats and digest ----
+# --class entry|elevation|watermark, --scope <tag> (prefix match, any tag),
+# --cue, --kind, --covers <period> (prefix on the calendar grammar, so
+# --covers 2026 finds the monthlies and the yearly), --agent, --user,
+# --axis name[(=|>|<)value], --since/--until YYYY[-MM[-DD]]. A leading !
+# negates one value; a repeated key ORs its positive values. Accumulated as
+# key<TAB>value lines and handed to awk through the environment (a -v value
+# must not carry a newline on BSD awk).
+JP=""
+JP_TAB=$(printf '\t')
+JP_NL='
+'
+# An axis predicate is `name` (rated at all) or `name(=|<|>)<integer>`. The
+# operand must be a real integer: awk coerces anything else to 0, so an
+# unvalidated `--axis mood=garbage` silently became `mood == 0` and returned
+# rows nobody asked for. One operator only, and it splits where jp_filter
+# splits (the first of = < >).
+jp_axis_ok() {
+  case "$1" in
+    *=*)   _jan=${1%%=*};   _jav=${1#*=} ;;
+    *'<'*) _jan=${1%%'<'*}; _jav=${1#*'<'} ;;
+    *'>'*) _jan=${1%%'>'*}; _jav=${1#*'>'} ;;
+    *)     _jan=$1;         _jav="" ;;
+  esac
+  case "$_jan" in ''|*[!a-z0-9-]*|-*|*-) return 1 ;; esac
+  case "$1" in
+    *=*|*'<'*|*'>'*)
+      case "${_jav#[+-]}" in ''|*[!0-9]*) return 1 ;; esac
+      ;;
+  esac
+  return 0
+}
+
+jp_add() {
+  _jpk="$1"; _jpv="$2"; _jpwho="$3"
+  case "$_jpv" in
+    ''|*[![:print:]]*|*"$JP_TAB"*) die "$_jpwho: --$_jpk requires one printable value" ;;
+  esac
+  _jpbare=${_jpv#!}
+  case "$_jpk" in
+    coveredby)
+      case "$_jpbare" in ''|*[!a-z0-9-]*|-*) die "$_jpwho: --pass must be a kind slug [a-z0-9-] (got: $_jpbare)" ;; esac ;;
+    class|sectionclass)
+      case "$_jpbare" in entry|elevation|watermark) ;;
+        *) die "$_jpwho: --class must be entry, elevation or watermark (got: $_jpbare)" ;;
+      esac ;;
+    since|until|sectionsince|sectionuntil)
+      case "$_jpbare" in
+        [0-9][0-9][0-9][0-9]|[0-9][0-9][0-9][0-9]-[0-9][0-9]|[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+        *) die "$_jpwho: --$_jpk takes YYYY, YYYY-MM or YYYY-MM-DD (got: $_jpbare)" ;;
+      esac ;;
+    covers|sectioncovers)
+      valid_period "$_jpbare" || die "$_jpwho: --covers takes YYYY or YYYY-MM (got: $_jpbare)" ;;
+    axis)
+      jp_axis_ok "$_jpbare" ||
+        die "$_jpwho: --axis takes <name> or <name>(=|<|>)<integer> (got: $_jpbare)" ;;
+  esac
+  JP="$JP$_jpk$JP_TAB$_jpv$JP_NL"
+}
+
+# 0 when $1 is a predicate flag (consumes $1 $2 into JP), 1 otherwise
+jp_flag() {
+  case "$1" in
+    --class|--scope|--cue|--kind|--covers|--agent|--user|--axis|--since|--until)
+      jp_add "${1#--}" "$2" "$3"
+      return 0 ;;
+  esac
+  return 1
+}
+
+# filter export rows on stdin by the accumulated predicates; keep=1 passes
+# the two header lines through (export), else they are dropped
+jp_filter() {
+  ZAMM_JP="$JP" awk -F"$JP_TAB" -v keep="${1:-0}" '
+    BEGIN {
+      np = split(ENVIRON["ZAMM_JP"], pl, "\n")
+      for (i = 1; i <= np; i++) {
+        if (pl[i] == "") continue
+        t = index(pl[i], "\t"); k = substr(pl[i], 1, t - 1); v = substr(pl[i], t + 1)
+        if (substr(v, 1, 1) == "!") { v = substr(v, 2); nn[k]++; nv[k, nn[k]] = v }
+        else { pn[k]++; pv[k, pn[k]] = v }
+        keys[k] = 1
+      }
+    }
+    function trimv(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
+    function axval(name,   n, a, i, p) {
+      if (name == "salience") return ($13 == "-") ? "" : $13
+      if ($17 == "-") return ""
+      n = split($17, a, " ")
+      for (i = 1; i <= n; i++) {
+        p = index(a[i], "=")
+        if (substr(a[i], 1, p - 1) == name) return substr(a[i], p + 1)
+      }
+      return ""
+    }
+    function one(k, v,   n, tg, i, t, p, op, name, want, have) {
+      # sectionclass is the internal constraint a digest section adds for
+      # itself. A separate KEY, because repeated values of one key OR
+      # together: adding another `class` would widen the caller predicate
+      # instead of narrowing it, and `--class watermark` would list
+      # watermarks under Entries.
+      if (k == "class" || k == "sectionclass") return ($2 == v)
+      if (k == "cue")    return ($7 == v)
+      if (k == "kind")   return ($8 == v)
+      if (k == "agent")  return ($5 == v)
+      if (k == "user")   return ($6 == v)
+      # section* keys are the bounds the digest adds for itself, as a
+      # separate KEY because
+      # repeated values of one key OR together: adding another `since`
+      # widened the caller selection instead of narrowing it, so
+      # `digest 2026-06 --since 2026-06-15` showed all of June.
+      if (k == "since" || k == "sectionsince") return ($3 >= v)
+      if (k == "until" || k == "sectionuntil") return (substr($3, 1, length(v)) <= v)
+      if (k == "covers" || k == "sectioncovers") return ($9 != "-" && substr($9, 1, length(v)) == v)
+      if (k == "coveredby") {
+        if ($19 == "-" || $19 == "") return 0
+        n = split($19, tg, " ")
+        for (i = 1; i <= n; i++) if (tg[i] == v) return 1
+        return 0
+      }
+      if (k == "scope") {
+        n = split($12, tg, ",")
+        for (i = 1; i <= n; i++) {
+          t = trimv(tg[i])
+          if (t == v || substr(t, 1, length(v) + 1) == v "/") return 1
+        }
+        return 0
+      }
+      if (k == "axis") {
+        p = match(v, /[=<>]/)
+        if (p == 0) return (axval(v) != "")
+        name = substr(v, 1, p - 1); op = substr(v, p, 1); want = substr(v, p + 1) + 0
+        have = axval(name)
+        if (have == "") return 0
+        have = have + 0
+        if (op == "=") return (have == want)
+        if (op == "<") return (have < want)
+        return (have > want)
+      }
+      return 0
+    }
+    NR <= 2 { if (keep) print; next }
+    {
+      ok = 1
+      for (k in keys) {
+        if (pn[k] > 0) {
+          hit = 0
+          for (i = 1; i <= pn[k]; i++) if (one(k, pv[k, i])) { hit = 1; break }
+          if (!hit) { ok = 0; break }
+        }
+        for (i = 1; i <= nn[k]; i++) if (one(k, nv[k, i])) { ok = 0; break }
+        if (!ok) break
+      }
+      if (ok) print
+    }
+  '
+}
+
+# the digest block of a record on stdout: mode block (everything above the
+# first heading), rest (the block minus its headline paragraph, indented) or
+# full (the whole body)
+journal_block() {
+  fm_body "$1" | awk -v mode="$2" '
+    mode == "full" { print; next }
+    /^#/ { exit }
+    mode == "block" { print; next }
+    {
+      ln = $0; sub(/^[ \t]+/, "", ln); sub(/[ \t]+$/, "", ln)
+      if (!started) { if (ln == "") next; started = 1 }
+      if (!paradone) { if (ln == "") paradone = 1; next }
+      if (ln != "") print "  " ln
+    }
+  '
+}
+
+# "1 entry" / "2 entries": counts in prose, not bare numbers with a plural
+plural() { if [ "$1" -eq 1 ]; then printf '%s %s' "$1" "$2"; else printf '%s %s' "$1" "$3"; fi; }
+
+journal_check() {
+  case "${1-}" in -h|--help) group_usage journal 0 ;; esac
+  [ $# -eq 0 ] || die "journal check takes no arguments (got: $*)"
+  if [ ! -d "$ROOT/zamm-memory/journal" ]; then
+    echo "ZAMM journal: no journal tree; nothing to check. ('journal add' creates it.)"
+    exit 0
+  fi
+  exec sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" --tree journal --check
+}
+
+journal_add() {
+  case "${1-}" in -h|--help) group_usage journal 0 ;; esac
+  _ja_scope=""; _ja_slug=""; _ja_type="memory"; _ja_pos=""; _ja_agent=""; _ja_user=""
+  # Rotation: each original argument is consumed once; flags that go to
+  # the writer are re-appended as REAL arguments, so a --x value may hold
+  # spaces without any word-splitting hazard. After the loop "$@" is
+  # exactly the forwarded flag list.
+  _ja_n=$#
+  while [ "$_ja_n" -gt 0 ]; do
+    case "$1" in
+      --scope) [ $# -ge 2 ] || die "journal add: --scope requires a value"; _ja_scope="$2"; shift 2; _ja_n=$((_ja_n - 2)) ;;
+      --slug)  [ $# -ge 2 ] || die "journal add: --slug requires a value"; _ja_slug="$2"; shift 2; _ja_n=$((_ja_n - 2)) ;;
+      --type)  [ $# -ge 2 ] || die "journal add: --type requires a value"; _ja_type="$2"; shift 2; _ja_n=$((_ja_n - 2)) ;;
+      --agent) [ $# -ge 2 ] || die "journal add: --agent requires a value"; _ja_agent="$2"; shift 2; _ja_n=$((_ja_n - 2)) ;;
+      --user)  [ $# -ge 2 ] || die "journal add: --user requires a value"; _ja_user="$2"; shift 2; _ja_n=$((_ja_n - 2)) ;;
+      --cue|--salience|--supersedes|--importance|--durability|--erases|--date|--axis|--x)
+        [ $# -ge 2 ] || die "journal add: $1 requires a value"
+        set -- "$@" "$1" "$2"; shift 2; _ja_n=$((_ja_n - 2)) ;;
+      --no-validate) set -- "$@" "$1"; shift; _ja_n=$((_ja_n - 1)) ;;
+      -*) die "journal add: unknown option: $1" ;;
+      *)
+        [ -z "$_ja_pos" ] || die "journal add: more than one positional argument (quote the sentence)"
+        _ja_pos="$1"; shift; _ja_n=$((_ja_n - 1)) ;;
+    esac
+  done
+  _ja_today=$(journal_today)
+  if [ "$_ja_type" != "memory" ]; then
+    # tombstone/erasure mirror memory create: the positional is the SLUG
+    [ -n "$_ja_pos" ] || die "journal add: --type $_ja_type needs a <topic-slug>"
+    journal_stamps "$_ja_agent" "$_ja_user"
+    # shellcheck disable=SC2086 -- each stamp is one validated word
+    sh "$INTERNAL/zamm-new-memory.sh" --project-root "$ROOT" --tree journal \
+      --type "$_ja_type" ${_ja_scope:+--scope "$_ja_scope"} --date "$_ja_today" \
+      --time "$JOURNAL_TIME" ${JOURNAL_AGENT:+--agent "$JOURNAL_AGENT"} ${JOURNAL_USER:+--user "$JOURNAL_USER"} \
+      "$@" "$_ja_pos"
+    return
+  fi
+  # the capture contract: one quoted sentence is a complete invocation
+  [ -n "$_ja_pos" ] || die "journal add: need the episode as one quoted sentence (e.g. journal add 'CI was red four hours; upstream outage, nothing local.')"
+  if [ -z "$_ja_slug" ]; then
+    _ja_slug=$(printf '%s' "$_ja_pos" | tr 'A-Z' 'a-z' | tr -cs 'a-z0-9' '-' |
+      sed 's/^-*//; s/-*$//' | cut -c1-40 | sed 's/-*$//')
+    [ -n "$_ja_slug" ] || die "journal add: the sentence produced an empty slug; pass --slug"
+  fi
+  _ja_body="$_ja_pos"
+  if [ ! -t 0 ]; then
+    # progressive disclosure, exactly as backlog add: the sentence is the
+    # headline, piped depth parks under ## Background unless it carries
+    # its own headings
+    _ja_extra=$(cat)
+    if [ -n "$(printf '%s' "$_ja_extra" | tr -d '[:space:]')" ]; then
+      if printf '%s\n' "$_ja_extra" | grep -q '^#'; then
+        _ja_body="$_ja_body
+
+$_ja_extra"
+      else
+        _ja_body="$_ja_body
+
+## Background
+
+$_ja_extra"
+      fi
+    fi
+  fi
+  journal_stamps "$_ja_agent" "$_ja_user"
+  # shellcheck disable=SC2086 -- each stamp is one validated word
+  printf '%s\n' "$_ja_body" | sh "$INTERNAL/zamm-new-memory.sh" \
+    --project-root "$ROOT" --tree journal \
+    --scope "${_ja_scope:-other}" --date "$_ja_today" \
+    --time "$JOURNAL_TIME" ${JOURNAL_AGENT:+--agent "$JOURNAL_AGENT"} ${JOURNAL_USER:+--user "$JOURNAL_USER"} \
+    "$@" "$_ja_slug"
+}
+
+journal_list() {
+  case "${1-}" in -h|--help) group_usage journal 0 ;; esac
+  _jl_all=0; _jl_scope=""; _jl_cue=""; _jl_since=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --all) _jl_all=1; shift ;;
+      --scope) [ $# -ge 2 ] || die "journal list: --scope requires an area or area/subpath"; _jl_scope="$2"; shift 2 ;;
+      --cue)   [ $# -ge 2 ] || die "journal list: --cue requires a slug"; _jl_cue="$2"; shift 2 ;;
+      --since) [ $# -ge 2 ] || die "journal list: --since requires YYYY[-MM[-DD]]"; _jl_since="$2"; shift 2 ;;
+      *) die "journal list: unknown argument: $1" ;;
+    esac
+  done
+  if [ ! -d "$ROOT/zamm-memory/journal" ]; then
+    echo "ZAMM journal: empty - no zamm-memory/journal/ tree yet ('journal add' creates it)."
+    exit 0
+  fi
+  journal_compile
+  if [ -n "$_jl_scope$_jl_cue$_jl_since" ]; then
+    # the query surface: a filtered ROW listing, entries only, dormant
+    # excluded unless --all (the unfiltered lens stays the one pulled read)
+    JP=""
+    jp_add class entry "journal list"
+    [ -z "$_jl_scope" ] || jp_add scope "$_jl_scope" "journal list"
+    [ -z "$_jl_cue" ] || jp_add cue "$_jl_cue" "journal list"
+    [ -z "$_jl_since" ] || jp_add since "$_jl_since" "journal list"
+    _jl_x=$(journal_export_tmp) || exit $?
+    _jl_x=${_jl_x#*"$JP_TAB"}
+    jp_filter 0 < "$_jl_x" |
+    while IFS="$JP_TAB" read -r _id _cls _cr _tm _ag _us _cue _kd _cv _ps _rt _sc _sal _st _rv _bg _ax _hl _pss; do
+      [ -n "$_id" ] || continue
+      if [ "$_jl_all" -eq 0 ] && [ "$_st" = "dormant" ]; then continue; fi
+      printf '%s  %-22s %s [%s]\n' "$_cr" "$_sc" "$(printf '%s' "$_hl" | cut -c1-60)" "$_id"
+    done
+    rm -f "$_jl_x"
+    journal_exit "$JOURNAL_RC"
+  fi
+  cat "$ROOT/zamm-memory/.compiled/journal.md"
+  if [ "$_jl_all" -eq 1 ]; then
+    JP=""
+    jp_add class entry "journal list"
+    _jl_x=$(journal_export_tmp) || exit $?
+    _jl_x=${_jl_x#*"$JP_TAB"}
+    jp_filter 0 < "$_jl_x" | awk -F"$JP_TAB" '
+      $14 == "dormant" {
+        if (!hdr) { print ""; print "Dormant entries (decayed below the floor; still the record of what happened):"; hdr = 1 }
+        print "- " $3 "  " $18 " [" $1 "]"
+      }'
+    rm -f "$_jl_x"
+  fi
+  # the lens itself carries the ## Degraded section, so the status alone
+  # is the signal here
+  exit "$JOURNAL_RC"
+}
+
+journal_show() {
+  case "${1-}" in -h|--help) group_usage journal 0 ;; esac
+  [ $# -ge 1 ] || die "journal show: need a slug or record id"
+  [ $# -le 1 ] || die "journal show: too many arguments (one slug or id)"
+  require_journal_tree
+  path=$(resolve_record "$1" journal)
+  rel="${path#"$ROOT/"}"
+  case "$rel" in
+    */archive/journal/*) echo "# $rel  (ARCHIVED - fully-retired chain)" ;;
+    *) echo "# $rel" ;;
+  esac
+  echo
+  cat "$path"
+}
+
+journal_export() {
+  case "${1-}" in -h|--help) group_usage journal 0 ;; esac
+  JP=""
+  while [ $# -gt 0 ]; do
+    if jp_flag "$1" "${2-}" "journal export"; then shift 2; continue; fi
+    die "journal export: unknown argument: $1 (predicates: --class --scope --cue --kind --covers --agent --user --axis --since --until)"
+  done
+  if [ ! -d "$ROOT/zamm-memory/journal" ]; then
+    # absence is data: an empty seam is still a well-formed seam
+    printf '%s\n%s\n' "$JOURNAL_EXPORT_HEADER" "$JOURNAL_EXPORT_COLUMNS"
+    exit 0
+  fi
+  _jx=$(journal_export_tmp) || exit $?
+  _jxrc=${_jx%%"$JP_TAB"*}; _jx=${_jx#*"$JP_TAB"}
+  jp_filter 1 < "$_jx"
+  rm -f "$_jx"
+  journal_exit "$_jxrc"
+}
+
+journal_search() {
+  case "${1-}" in -h|--help) group_usage journal 0 ;; esac
+  JP=""; _jse_text=""; _jse_files=0
+  while [ $# -gt 0 ]; do
+    if jp_flag "$1" "${2-}" "journal search"; then shift 2; continue; fi
+    case "$1" in
+      --text)  [ $# -ge 2 ] || die "journal search: --text requires a pattern"; _jse_text="$2"; shift 2 ;;
+      --files) _jse_files=1; shift ;;
+      *) die "journal search: unknown argument: $1 (predicates: --class --scope --cue --kind --covers --agent --user --axis --since --until; plus --text <pattern>, --files)" ;;
+    esac
+  done
+  if [ ! -d "$ROOT/zamm-memory/journal" ]; then
+    echo "ZAMM journal: empty - nothing to search ('journal add' creates the tree)." >&2
+    exit 0
+  fi
+  # A pattern grep cannot compile exits 2, exactly as an unreadable file
+  # does. Validating it once here against empty input separates the two, so
+  # a later 2 can only be the file - and a typo refuses instead of reading
+  # as an honest "no matches".
+  if [ -n "$_jse_text" ]; then
+    if printf '' | grep -q -e "$_jse_text" 2>/dev/null; then :; else
+      _jse_grc=$?
+      [ "$_jse_grc" -le 1 ] ||
+        die "journal search: --text is not a valid pattern: $_jse_text"
+    fi
+  fi
+  # no journal_compile here: the export IS a full parse of the tree, and
+  # this verb reads neither the lens nor the sidecar - compiling first
+  # parsed everything twice for no observable effect
+  _jx=$(journal_export_tmp) || exit $?
+  _jxrc=${_jx%%"$JP_TAB"*}; _jx=${_jx#*"$JP_TAB"}
+  # the rows land in a file, so the loop runs in THIS shell: an unreadable
+  # record has to be able to exit 4 (G3), which it cannot do from the
+  # subshell a pipeline would put it in
+  _jse_rows=$(mktemp "${TMPDIR:-/tmp}/zamm-journal-search.XXXXXX") ||
+    die "journal search: could not create a scratch file"
+  jp_filter 0 < "$_jx" > "$_jse_rows"
+  rm -f "$_jx"
+  while IFS="$JP_TAB" read -r _id _cls _cr _tm _ag _us _cue _kd _cv _ps _rt _sc _sal _st _rv _bg _ax _hl _pss; do
+    [ -n "$_id" ] || continue
+    _p=$(journal_record_path "$_id") || continue
+    if [ -n "$_jse_text" ]; then
+      if grep -q -e "$_jse_text" "$_p" 2>/dev/null; then :; else
+        _jse_grc=$?
+        if [ "$_jse_grc" -gt 1 ]; then
+          rm -f "$_jse_rows"
+          echo "zamm: journal search: cannot read ${_p#"$ROOT/"} (unreadable, not empty)." >&2
+          exit 4
+        fi
+        continue
+      fi
+    fi
+    if [ "$_jse_files" -eq 1 ]; then
+      echo "${_p#"$ROOT/"}"
+    else
+      printf '%s  %s\n' "$_id" "$_hl"
+    fi
+  done < "$_jse_rows"
+  rm -f "$_jse_rows"
+  journal_exit "$_jxrc"
+}
+
+journal_stats() {
+  case "${1-}" in -h|--help) group_usage journal 0 ;; esac
+  JP=""; _jst_axis=""; _jst_class=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --axis)
+        # a bare name drills into that axis; with an operator it is the
+        # shared predicate (rows rating the axis a certain way)
+        [ $# -ge 2 ] || die "journal stats: --axis requires an axis name"
+        case "$2" in
+          *[=\<\>]*) jp_add axis "$2" "journal stats" ;;
+          *) [ -z "$_jst_axis" ] || die "journal stats: one --axis to drill into"; _jst_axis="$2" ;;
+        esac
+        shift 2 ;;
+      --class) _jst_class=1; jp_flag "$1" "${2-}" "journal stats"; shift 2 ;;
+      *)
+        if jp_flag "$1" "${2-}" "journal stats"; then shift 2; continue; fi
+        die "journal stats: unknown argument: $1" ;;
+    esac
+  done
+  # entries only by default: a month's digest must never double-count the
+  # month it summarizes (--class elevation inspects them deliberately)
+  [ "$_jst_class" -eq 1 ] || jp_add class entry "journal stats"
+  if [ ! -d "$ROOT/zamm-memory/journal" ]; then
+    echo "ZAMM journal: empty - no entries to count ('journal add' creates the tree)."
+    exit 0
+  fi
+  # as in search: the export is the parse, and stats reads no sidecar
+  _jx=$(journal_export_tmp) || exit $?
+  _jxrc=${_jx%%"$JP_TAB"*}; _jx=${_jx#*"$JP_TAB"}
+  jp_filter 0 < "$_jx" | awk -F"$JP_TAB" -v drill="$_jst_axis" "$JOURNAL_AWK_QUARTILES"'
+    function axtype(v) { return (v ~ /^[+-]/) ? "bipolar" : "unipolar" }
+    function seen(arr, ord, k, cnt) { if (!(k in arr)) { arr[k] = 0; ord[++cnt[0]] = k }; arr[k]++ }
+    function rate(name, v,   ty, mo, g) {
+      ty = axtype(v)
+      if (!((name SUBSEP ty) in atn)) { atn[name SUBSEP ty] = 0; aord[++na] = name SUBSEP ty }
+      atn[name SUBSEP ty]++
+      if (drill != "" && name == drill) {
+        mo = substr($3, 1, 7)
+        g = mo SUBSEP ty
+        if (!(g in gn)) { gn[g] = 0; gord[++ng] = g; tyseen[ty] = 1 }
+        gv[g, ++gn[g]] = v + 0
+        if (v + 0 < 0) neg[g]++; else if (v + 0 == 0) zero[g]++; else pos[g]++
+      }
+    }
+    {
+      n++
+      mo = substr($3, 1, 7)
+      if (!(mo in mn)) { mn[mo] = 0; mord[++nmo] = mo }
+      mn[mo]++
+      if (lo == "" || $3 < lo) lo = $3
+      if (hi == "" || $3 > hi) hi = $3
+      seen(cues, cord, $7, cc); seen(agents, agord, $5, ac); seen(users, uord, $6, uc)
+      if ($13 != "-") rate("salience", $13)
+      if ($17 != "-") {
+        k = split($17, ax, " ")
+        for (i = 1; i <= k; i++) { p = index(ax[i], "="); rate(substr(ax[i], 1, p - 1), substr(ax[i], p + 1)) }
+      }
+    }
+    END {
+      if (n == 0) { print "# ZAMM journal stats: no matching entries"; exit 0 }
+      if (drill == "") {
+        printf "# ZAMM journal stats: %d entries, %s through %s\n\n", n, substr(lo, 1, 7), substr(hi, 1, 7)
+        print "axes (coverage = rated/entries; a sparse axis is never over-read):"
+        if (na == 0) print "  (none rated)"
+        for (i = 1; i <= na; i++) {
+          split(aord[i], ap, SUBSEP)
+          printf "  %-24s %-9s %d/%d rated (%d%%)\n", ap[1], ap[2], atn[aord[i]], n, int(100 * atn[aord[i]] / n + 0.5)
+        }
+        s = ""; for (i = 1; i <= cc[0]; i++) s = s ((i > 1) ? ", " : "") ((cord[i] == "-") ? "(none)" : cord[i]) " " cues[cord[i]]
+        print "cues: " s
+        s = ""; for (i = 1; i <= ac[0]; i++) s = s ((i > 1) ? ", " : "") ((agord[i] == "-") ? "(unstamped)" : agord[i]) " " agents[agord[i]]
+        print "agents: " s
+        s = ""; for (i = 1; i <= uc[0]; i++) s = s ((i > 1) ? ", " : "") ((uord[i] == "-") ? "(unstamped)" : uord[i]) " " users[uord[i]]
+        print "users: " s
+        s = ""; for (i = 1; i <= nmo; i++) s = s ((i > 1) ? ", " : "") mord[i] " " mn[mord[i]]
+        print "months: " s
+        exit 0
+      }
+      nty = 0; for (t in tyseen) nty++
+      if (nty == 0) { printf "# axis %s: no entry rates it (%d entries)\n", drill, n; exit 0 }
+      if (nty > 1) print "note: " drill " mixes signed and unsigned values across records (probable spelling drift); split by type"
+      for (tt = 1; tt <= 2; tt++) {
+        ty = (tt == 1) ? "unipolar" : "bipolar"
+        if (!(ty in tyseen)) continue
+        printf "# axis %s (%s %s), %s through %s\n\n", drill, ty, (ty == "bipolar") ? "-5..+5" : "0..10", substr(lo, 1, 7), substr(hi, 1, 7)
+        if (ty == "bipolar") print "month     n  rated  p25  med  p75   neg  zero  pos"
+        else print "month     n  rated  p25  med  p75"
+        rated = 0
+        for (i = 1; i <= nmo; i++) {
+          mo = mord[i]; g = mo SUBSEP ty
+          if (!(g in gn)) continue
+          isort(g, gn[g]); rated += gn[g]
+          if (ty == "bipolar")
+            printf "%s %3d %6d  %+3d  %+3d  %+3d  %4d  %4d %4d\n", mo, mn[mo], gn[g], gv[g, nrank(gn[g], 0.25)], gv[g, nrank(gn[g], 0.5)], gv[g, nrank(gn[g], 0.75)], neg[g] + 0, zero[g] + 0, pos[g] + 0
+          else
+            printf "%s %3d %6d  %3d  %3d  %3d\n", mo, mn[mo], gn[g], gv[g, nrank(gn[g], 0.25)], gv[g, nrank(gn[g], 0.5)], gv[g, nrank(gn[g], 0.75)]
+        }
+        printf "\ncoverage: %d/%d entries rate this axis (%d%%)\n", rated, n, int(100 * rated / n + 0.5)
+        if (tt == 1 && ("bipolar" in tyseen)) print ""
+      }
+    }
+  '
+  rm -f "$_jx"
+  journal_exit "$_jxrc"
+}
+
+journal_review() {
+  case "${1-}" in -h|--help) group_usage journal 0 ;; esac
+  _jr_head=0; _jr_cue=""; _jr_scope=""; _jr_period=""; _jr_pass=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --headlines) _jr_head=1; shift ;;
+      --cue)    [ $# -ge 2 ] || die "journal review: --cue requires a slug"; _jr_cue="$2"; shift 2 ;;
+      --scope)  [ $# -ge 2 ] || die "journal review: --scope requires an area or area/subpath"; _jr_scope="$2"; shift 2 ;;
+      --period) [ $# -ge 2 ] || die "journal review: --period requires YYYY or YYYY-MM"; _jr_period="$2"; shift 2 ;;
+      --pass)   [ $# -ge 2 ] || die "journal review: --pass requires a kind"; _jr_pass="$2"; shift 2 ;;
+      *) die "journal review: unknown argument: $1" ;;
+    esac
+  done
+  if [ -n "$_jr_period" ]; then
+    valid_period "$_jr_period" || die "journal review: --period must be YYYY or YYYY-MM: $_jr_period"
+    [ -z "$_jr_pass" ] || die "journal review: --period reads a calendar span, --pass an undigested set; pick one"
+  fi
+  if [ ! -d "$ROOT/zamm-memory/journal" ]; then
+    echo "ZAMM journal: empty - nothing to review ('journal add' creates the tree)."
+    exit 0
+  fi
+  journal_compile
+  _jr_state="$ROOT/zamm-memory/.compiled/journal-state.tsv"
+  _jr_wm=$(awk -F"$JP_TAB" -v p="${_jr_pass:-triage}" '$1 == "watermark" && $2 == p { print $3; exit }' "$_jr_state")
+  # WHICH rows is the shared predicate grammar, exactly as in search,
+  # export, stats and digest: undigested is `since <watermark>` (the
+  # inclusive boundary), a period is the since/until bracket, and the two
+  # reading aids are the ordinary --cue/--scope predicates. The awk below
+  # only builds the sort key.
+  JP=""
+  jp_add class entry "journal review"
+  if [ -n "$_jr_period" ]; then
+    jp_add since "$_jr_period" "journal review"
+    jp_add until "$_jr_period" "journal review"
+  else
+    # undigested is what no claim of this pass has NAMED - not a date range.
+    # An entry written or merged after a claim, dated before its boundary,
+    # is uncovered however old it looks.
+    jp_add coveredby "!${_jr_pass:-triage}" "journal review"
+  fi
+  [ -z "$_jr_cue" ] || jp_add cue "$_jr_cue" "journal review"
+  [ -z "$_jr_scope" ] || jp_add scope "$_jr_scope" "journal review"
+  _jx=$(journal_export_tmp) || exit $?
+  _jxrc=${_jx%%"$JP_TAB"*}; _jx=${_jx#*"$JP_TAB"}
+  # oldest first; within a day salience first, then time, then id
+  # the salience travels as its own field: deriving it back from the padded
+  # sort key meant $((10 - 09)), and a leading zero is an octal literal in
+  # shell arithmetic - salience 1 and 2 aborted the read mid-record
+  _jr_rows=$(jp_filter 0 < "$_jx" | awk -F"$JP_TAB" '
+    { s = ($13 == "-") ? 0 : $13 + 0; printf "%s\t%02d\t%s\t%s\t%s\t%s\n", $3, 10 - s, ($4 == "-") ? "~" : $4, $13, $1, $18 }
+  ' | sort)
+  rm -f "$_jx"
+  _jr_n=$(printf '%s\n' "$_jr_rows" | grep -c . || true)
+  # Entries dated ON the watermark stay listed by construction: the boundary
+  # is inclusive so same-day work is never silently skipped, which means a
+  # claim dated D cannot cover the entries of D. Say so, or the reader sees
+  # a settle that reported them covered and a review that still lists them.
+  _jr_same=0
+  if [ -z "$_jr_period" ] && [ -n "$_jr_wm" ]; then
+    _jr_same=$(printf '%s\n' "$_jr_rows" |
+      awk -F"$JP_TAB" -v w="$_jr_wm" '$1 == w { n++ } END { print n + 0 }')
+  fi
+  _jr_what="$(plural "$_jr_n" entry entries)"
+  if [ -n "$_jr_period" ]; then
+    echo "# Journal review: $_jr_what in $_jr_period (a calendar span; watermark-independent)"
+  elif [ -n "$_jr_wm" ]; then
+    echo "# Journal review: $_jr_what undigested (${_jr_pass:-triage} reviewed through $_jr_wm; coverage is by record, not by date)"
+  else
+    echo "# Journal review: $_jr_what undigested (${_jr_pass:-triage} never settled)"
+  fi
+  [ "${_jr_same:-0}" -eq 0 ] ||
+    echo "# $(plural "$_jr_same" "entry is" "entries are") dated on the watermark itself ($_jr_wm) and unnamed by the claim - still yours to read."
+  [ -z "$_jr_cue" ] || echo "# cue filter: $_jr_cue - a reading aid, never a coverage unit (a settle after this pass alone would overclaim)"
+  [ -z "$_jr_scope" ] || echo "# scope filter: $_jr_scope - a reading aid, never a coverage unit"
+  if [ "${_jr_n:-0}" -eq 0 ]; then
+    echo "(nothing to review)"
+    journal_exit "$_jxrc"
+  fi
+  if [ "$_jr_head" -eq 0 ] && [ "$_jr_n" -gt "$JOURNAL_REVIEW_MAX" ]; then
+    _jr_head=1
+    echo "zamm: $_jr_n entries exceed JOURNAL_REVIEW_MAX=$JOURNAL_REVIEW_MAX; headlines only (journal show <id> opens one; settle --through <date> chunks the backlog)" >&2
+  fi
+  echo
+  printf '%s\n' "$_jr_rows" | while IFS="$JP_TAB" read -r _d _rk _t _s _id _hl; do
+    [ -n "$_id" ] || continue
+    if [ "$_jr_head" -eq 1 ]; then
+      printf -- '- %s  %s [%s]\n' "$_d" "$_hl" "$_id"
+    else
+      _p=$(journal_record_path "$_id") || continue
+      echo "## $_id"
+      _meta="$_d"
+      [ "$_t" = "~" ] || _meta="$_meta $_t"
+      _c=$(fm_field "$_p" cue); [ -z "$_c" ] || _meta="$_meta  cue: $_c"
+      _sc=$(fm_field "$_p" scope); [ -z "$_sc" ] || _meta="$_meta  scope: $_sc"
+      [ "$_s" = "-" ] || _meta="$_meta  salience: $_s"
+      printf '%s\n' "$_meta"
+      echo
+      fm_body "$_p"
+      echo
+    fi
+  done
+  if [ -z "$_jr_period" ]; then
+    echo
+    echo "When done: distill patterns into knowledge records and implied actions into"
+    echo "backlog ideas, then claim the coverage: zamm-run.sh journal settle${_jr_pass:+ --pass $_jr_pass} [--through <date>]"
+  fi
+  journal_exit "$_jxrc"
+}
+
+journal_settle() {
+  case "${1-}" in -h|--help) group_usage journal 0 ;; esac
+  _jt_through=""; _jt_pass=""; _jt_agent=""; _jt_user=""
+  _jt_n=$#
+  while [ "$_jt_n" -gt 0 ]; do
+    case "$1" in
+      --through) [ $# -ge 2 ] || die "journal settle: --through requires a date"; _jt_through="$2"; shift 2; _jt_n=$((_jt_n - 2)) ;;
+      --pass)    [ $# -ge 2 ] || die "journal settle: --pass requires a kind"; _jt_pass="$2"; shift 2; _jt_n=$((_jt_n - 2)) ;;
+      --agent)   [ $# -ge 2 ] || die "journal settle: --agent requires a value"; _jt_agent="$2"; shift 2; _jt_n=$((_jt_n - 2)) ;;
+      --user)    [ $# -ge 2 ] || die "journal settle: --user requires a value"; _jt_user="$2"; shift 2; _jt_n=$((_jt_n - 2)) ;;
+      --x) [ $# -ge 2 ] || die "journal settle: --x requires key=value"; set -- "$@" "$1" "$2"; shift 2; _jt_n=$((_jt_n - 2)) ;;
+      --no-validate) set -- "$@" "$1"; shift; _jt_n=$((_jt_n - 1)) ;;
+      *) die "journal settle: unknown argument: $1" ;;
+    esac
+  done
+  require_journal_tree
+  journal_compile
+  require_clean_journal settle
+  _jt_today=$(journal_today)
+  _jt_through=${_jt_through:-$_jt_today}
+  valid_ymd "$_jt_through" || die "journal settle: --through must be a real YYYY-MM-DD date: $_jt_through"
+  if str_gt "$_jt_through" "$_jt_today"; then
+    die "journal settle: refusing the future date $_jt_through (an overclaim by construction; today is $_jt_today)"
+  fi
+  _jt_state="$ROOT/zamm-memory/.compiled/journal-state.tsv"
+  _jt_cur=$(awk -F"$JP_TAB" -v p="${_jt_pass:-triage}" '$1 == "watermark" && $2 == p { print $3; exit }' "$_jt_state")
+  if [ -n "$_jt_cur" ] && ! str_gt "$_jt_through" "$_jt_cur"; then
+    die "journal settle: $_jt_through is not beyond the current ${_jt_pass:-triage} watermark $_jt_cur (a claim adding no coverage is a mistake, not a no-op)"
+  fi
+  # what this claim covers: entries from the standing claim (inclusive) up
+  # to the new boundary (inclusive) - the headline narrates the maintenance
+  _jx=$(journal_export_tmp) || exit $?
+  _jxrc=${_jx%%"$JP_TAB"*}; _jx=${_jx#*"$JP_TAB"}
+  # The claim NAMES the entries it covers. A date cannot carry that: an
+  # entry written or merged later, dated before the boundary, existed for
+  # nobody to review, and a date-only claim would retire it unread. Entries
+  # dated exactly on the boundary are excluded, as before - this claim is
+  # written today and cannot have seen the rest of today.
+  _jt_out=$(awk -F"$JP_TAB" -v p="${_jt_pass:-triage}" -v thr="$_jt_through" '
+    function covered(   n, tg, i) {
+      if ($19 == "-" || $19 == "") return 0
+      n = split($19, tg, " ")
+      for (i = 1; i <= n; i++) if (tg[i] == p) return 1
+      return 0
+    }
+    NR > 2 && $2 == "entry" && !covered() {
+      if ($3 < thr) { ids = ids ((ids == "") ? "" : ",") $1; n++ }
+      else if ($3 == thr) same++
+    }
+    END { printf "%d\t%d\t%s\n", n + 0, same + 0, ids }' "$_jx")
+  rm -f "$_jx"
+  _jt_cnt=${_jt_out%%"$JP_TAB"*}
+  _jt_rest=${_jt_out#*"$JP_TAB"}
+  _jt_same=${_jt_rest%%"$JP_TAB"*}
+  _jt_ids=${_jt_rest#*"$JP_TAB"}
+  _jt_body=""
+  if [ ! -t 0 ]; then _jt_body=$(cat); fi
+  if [ -z "$(printf '%s' "$_jt_body" | tr -d '[:space:]')" ]; then
+    _jt_body="Reviewed $_jt_cnt entries through $_jt_through${_jt_pass:+ (pass $_jt_pass)}."
+    if [ "${_jt_same:-0}" -gt 0 ]; then
+      _jt_body="$_jt_body Not named: $(plural "$_jt_same" entry entries) dated $_jt_through."
+    fi
+  fi
+  _jt_slug=$(printf '%s' "${_jt_pass:+$_jt_pass-}reviewed-through-$_jt_through" | cut -c1-40 | sed 's/-*$//')
+  journal_stamps "$_jt_agent" "$_jt_user"
+  # shellcheck disable=SC2086 -- each stamp is one validated word
+  _jt_path=$(printf '%s\n' "$_jt_body" | sh "$INTERNAL/zamm-new-memory.sh" \
+    --project-root "$ROOT" --tree journal --scope other \
+    --reviewed-through "$_jt_through" ${_jt_pass:+--pass "$_jt_pass"} \
+    --covered "$_jt_ids" \
+    --date "$_jt_today" \
+    --time "$JOURNAL_TIME" ${JOURNAL_AGENT:+--agent "$JOURNAL_AGENT"} ${JOURNAL_USER:+--user "$JOURNAL_USER"} \
+    "$@" "$_jt_slug") ||
+    die "journal settle: could not write the watermark"
+  echo "Settled: ${_jt_pass:-triage} reviewed through $_jt_through ($_jt_cnt entries covered)."
+  echo "  ${_jt_path#"$ROOT/"}"
+  if [ "${_jt_same:-0}" -gt 0 ]; then
+    echo "  Not named by this claim: $(plural "$_jt_same" entry entries) dated $_jt_through,"
+    echo "  written after it. Those stay in the review set and clear on the next settle;"
+    echo "  the digest does not nag meanwhile."
+  fi
+}
+
+journal_elevate() {
+  case "${1-}" in -h|--help) group_usage journal 0 ;; esac
+  [ $# -ge 2 ] || die "journal elevate: need <kind> <YYYY[-MM]> (the elevation body on stdin)"
+  _je_kind="$1"; _je_period="$2"; shift 2
+  case "$_je_kind" in
+    ''|*[!a-z0-9-]*|-*) die "journal elevate: kind must be a slug [a-z0-9-]: $_je_kind" ;;
+  esac
+  valid_period "$_je_period" || die "journal elevate: period must be YYYY or YYYY-MM: $_je_period"
+  _je_today=$(journal_today)
+  # The period must be OVER. An elevation is a stored digest of a period,
+  # and the year view renders it INSTEAD of that period's entries - so one
+  # written mid-period hides every entry the period gains afterwards, with
+  # nothing falling due to correct it. For a period still running, the
+  # compiled view (journal digest <period>) is the live answer and is always
+  # current; elevation is for the settled narrative.
+  if ! str_gt "$(printf '%s' "$_je_today" | cut -c1-"${#_je_period}")" "$_je_period"; then
+    die "journal elevate: $_je_period is not over yet (today is $_je_today); elevate a completed period, or read the live view with: zamm-run.sh journal digest $_je_period"
+  fi
+  _je_scope=""; _je_slug=""; _je_agent=""; _je_user=""; _je_sup=0
+  _je_n=$#
+  while [ "$_je_n" -gt 0 ]; do
+    case "$1" in
+      --scope) [ $# -ge 2 ] || die "journal elevate: --scope requires a value"; _je_scope="$2"; shift 2; _je_n=$((_je_n - 2)) ;;
+      --slug)  [ $# -ge 2 ] || die "journal elevate: --slug requires a value"; _je_slug="$2"; shift 2; _je_n=$((_je_n - 2)) ;;
+      --agent) [ $# -ge 2 ] || die "journal elevate: --agent requires a value"; _je_agent="$2"; shift 2; _je_n=$((_je_n - 2)) ;;
+      --user)  [ $# -ge 2 ] || die "journal elevate: --user requires a value"; _je_user="$2"; shift 2; _je_n=$((_je_n - 2)) ;;
+      --supersedes)
+        [ $# -ge 2 ] || die "journal elevate: --supersedes requires a record id"
+        _je_sup=1; set -- "$@" "$1" "$2"; shift 2; _je_n=$((_je_n - 2)) ;;
+      --importance|--durability|--axis|--x)
+        [ $# -ge 2 ] || die "journal elevate: $1 requires a value"
+        set -- "$@" "$1" "$2"; shift 2; _je_n=$((_je_n - 2)) ;;
+      --no-validate) set -- "$@" "$1"; shift; _je_n=$((_je_n - 1)) ;;
+      *) die "journal elevate: unknown argument: $1" ;;
+    esac
+  done
+  if [ -t 0 ]; then
+    die "journal elevate: the elevation body arrives on stdin (line one: the period in one sentence, as the year view shows it; then the block the month view shows; optional ## Background)"
+  fi
+  _je_body=$(cat)
+  [ -n "$(printf '%s' "$_je_body" | tr -d '[:space:]')" ] || die "journal elevate: the body on stdin is empty"
+  # A correction SUPERSEDES; a second bare elevation of the same period is a
+  # competing claim, and which one the views show then rests on a tiebreak
+  # over random id suffixes. Say so before writing, and name the id.
+  if [ -d "$ROOT/zamm-memory/journal" ]; then
+    journal_compile
+    require_clean_journal elevate
+    _je_prior=""
+    [ "$_je_sup" -eq 1 ] || _je_prior=$(awk -F"$JP_TAB" -v k="$_je_kind" -v p="$_je_period" \
+      '$1 == "elev" && $2 == k && $3 == p { print $4; exit }' \
+      "$ROOT/zamm-memory/.compiled/journal-state.tsv" 2>/dev/null || true)
+    if [ -n "$_je_prior" ]; then
+      echo "zamm: an elevation for $_je_kind $_je_period already exists:" >&2
+      echo "        $_je_prior" >&2
+      echo "      Writing another without --supersedes leaves two competing claims for one" >&2
+      echo "      period. To correct the existing one instead, rerun with:" >&2
+      echo "        --supersedes $_je_prior" >&2
+    fi
+  fi
+  [ -n "$_je_slug" ] || _je_slug="$_je_kind-$_je_period"
+  # The elevation NAMES the entries of the period it saw, the same claim
+  # identity a watermark carries: an entry merged in afterwards, dated
+  # inside the period, was never part of this narrative, and the year view
+  # would otherwise render this record in its place forever.
+  _je_ids=""
+  if [ -d "$ROOT/zamm-memory/journal" ]; then
+    _jex=$(journal_export_tmp) || exit $?
+    _jex=${_jex#*"$JP_TAB"}
+    _je_ids=$(awk -F"$JP_TAB" -v per="$_je_period" '
+      NR > 2 && $2 == "entry" && substr($3, 1, length(per)) == per {
+        ids = ids ((ids == "") ? "" : ",") $1
+      }
+      END { print ids }' "$_jex")
+    rm -f "$_jex"
+  fi
+  journal_stamps "$_je_agent" "$_je_user"
+  # durability years by default: an elevation never decays in the compiler
+  # anyway, and it is the most durable output the journal produces
+  # shellcheck disable=SC2086 -- each stamp is one validated word
+  _je_path=$(printf '%s\n' "$_je_body" | sh "$INTERNAL/zamm-new-memory.sh" \
+    --project-root "$ROOT" --tree journal --type digest \
+    --digest "$_je_kind" --covers "$_je_period" --scope "${_je_scope:-other}" \
+    --covered "$_je_ids" \
+    --durability years --date "$_je_today" \
+    --time "$JOURNAL_TIME" ${JOURNAL_AGENT:+--agent "$JOURNAL_AGENT"} ${JOURNAL_USER:+--user "$JOURNAL_USER"} \
+    "$@" "$_je_slug") ||
+    die "journal elevate: could not write the elevation"
+  echo "Elevated: $_je_kind $_je_period"
+  echo "  ${_je_path#"$ROOT/"} (the record is the coverage; no settle for elevations)"
+}
+
+# journal digest <YYYY[-MM]>: the compiled period view, the PRIMARY digest -
+# automatic, composable, never stored. The period shape selects the base
+# settings: a month renders stats + elevations + entries; a year is the
+# digest of digests (per-month rows + monthly elevations with headline
+# fallback + the yearly elevation). A style is a saved invocation of the
+# flags below; there is no registry.
+journal_digest() {
+  case "${1-}" in -h|--help) group_usage journal 0 ;; esac
+  JP=""; _jd_period=""; _jd_detail=""; _jd_stats="summary"; _jd_elev="all"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --detail) [ $# -ge 2 ] || die "journal digest: --detail requires headlines|blocks|full"; _jd_detail="$2"; shift 2 ;;
+      --stats)  [ $# -ge 2 ] || die "journal digest: --stats requires none|summary|full"; _jd_stats="$2"; shift 2 ;;
+      --elevations) [ $# -ge 2 ] || die "journal digest: --elevations requires all|only|none"; _jd_elev="$2"; shift 2 ;;
+      --class) jp_flag "$1" "${2-}" "journal digest"; shift 2 ;;
+      -*)
+        if jp_flag "$1" "${2-}" "journal digest"; then shift 2; continue; fi
+        die "journal digest: unknown argument: $1" ;;
+      *)
+        [ -z "$_jd_period" ] || die "journal digest: one period (YYYY or YYYY-MM)"
+        _jd_period="$1"; shift ;;
+    esac
+  done
+  [ -n "$_jd_period" ] || die "journal digest: need a period, YYYY or YYYY-MM"
+  valid_period "$_jd_period" || die "journal digest: period must be YYYY or YYYY-MM: $_jd_period"
+  case "$_jd_detail" in ''|headlines|blocks|full) ;; *) die "journal digest: --detail must be headlines, blocks or full" ;; esac
+  case "$_jd_stats" in none|summary|full) ;; *) die "journal digest: --stats must be none, summary or full" ;; esac
+  case "$_jd_elev" in all|only|none) ;; *) die "journal digest: --elevations must be all, only or none" ;; esac
+  if [ ! -d "$ROOT/zamm-memory/journal" ]; then
+    echo "# Journal digest $_jd_period: no journal tree ('journal add' creates it)"
+    exit 0
+  fi
+  journal_compile
+  _jd_state="$ROOT/zamm-memory/.compiled/journal-state.tsv"
+  # The caller predicates are the base for BOTH selections; entries and
+  # elevations then add only what their own section needs. Selecting
+  # elevations straight from the sidecar ignored the grammar entirely, so
+  # `--kind monthly` narrowed the entries and left every elevation in - a
+  # saved style could not be trusted to mean one thing.
+  _jd_jpuser="$JP"
+  jp_add sectionclass entry "journal digest"
+  jp_add sectionsince "$_jd_period" "journal digest"
+  jp_add sectionuntil "$_jd_period" "journal digest"
+  _jx=$(journal_export_tmp) || exit $?
+  _jdxrc=${_jx%%"$JP_TAB"*}; _jx=${_jx#*"$JP_TAB"}
+  _jd_rows=$(mktemp "${TMPDIR:-/tmp}/zamm-journal-digest.XXXXXX") || die "journal digest: could not create a scratch file"
+  jp_filter 0 < "$_jx" > "$_jd_rows"
+  _jd_n=$(grep -c . "$_jd_rows" || true)
+  # Effectiveness is the sidecar (one elevation per kind and period); WHICH
+  # of those to render is the predicate set. A caller asking for a class
+  # other than elevation has asked for no elevations at all.
+  JP="$_jd_jpuser"
+  jp_add sectionclass elevation "journal digest"
+  jp_add sectioncovers "$_jd_period" "journal digest"
+  _jd_esel=$(jp_filter 0 < "$_jx" | cut -f1)
+  rm -f "$_jx"
+  # ENVIRON, never -v: BSD awk refuses a -v value holding a real newline
+  _jd_elevs=$(ZAMM_JD_SEL="$_jd_esel" awk -F"$JP_TAB" -v per="$_jd_period" '
+    BEGIN {
+      n = split(ENVIRON["ZAMM_JD_SEL"], a, "\n")
+      for (i = 1; i <= n; i++) if (a[i] != "") keep[a[i]] = 1
+    }
+    $1 == "elev" && substr($3, 1, length(per)) == per && ($4 in keep) { print $2 "\t" $3 "\t" $4 }
+  ' "$_jd_state" | sort -t "$JP_TAB" -k2,2r -k1,1)
+  _jd_ne=$(printf '%s\n' "$_jd_elevs" | grep -c . || true)
+  if [ "${#_jd_period}" -eq 7 ]; then
+    [ -n "$_jd_detail" ] || _jd_detail="blocks"
+    echo "# Journal digest $_jd_period ($(plural "$_jd_n" entry entries), $(plural "$_jd_ne" elevation elevations); compiled view, not stored)"
+  else
+    [ -n "$_jd_detail" ] || _jd_detail="headlines"
+    _jd_ny=$(printf '%s\n' "$_jd_elevs" | awk -F"$JP_TAB" -v per="$_jd_period" '$2 == per { n++ } END { print n + 0 }')
+    _jd_nm=$((_jd_ne - _jd_ny))
+    echo "# Journal digest $_jd_period ($(plural "$_jd_n" entry entries), $(plural "$_jd_nm" "monthly-grain elevation" "monthly-grain elevations"), $(plural "$_jd_ny" "yearly elevation" "yearly elevations"); the digest of digests, compiled, not stored)"
+  fi
+  if [ "$_jd_stats" != "none" ] && [ "$_jd_n" -gt 0 ]; then
+    echo
+    echo "## Stats"
+    awk -F"$JP_TAB" -v year="$([ "${#_jd_period}" -eq 4 ] && echo 1 || echo 0)" "$JOURNAL_AWK_QUARTILES"'
+      # keyed by name AND type: one name carrying both spellings is two
+      # scales, and averaging them reported a bipolar median under a
+      # unipolar label
+      function rate(name, v,   ty, g) {
+        ty = (v ~ /^[+-]/) ? "bipolar" : "unipolar"
+        g = name SUBSEP ty
+        if (!(g in gn)) { gn[g] = 0; gord[++ng] = g; gnm[g] = name; gty[g] = ty }
+        gv[g, ++gn[g]] = v + 0
+      }
+      {
+        n++
+        mo = substr($3, 1, 7)
+        if (!(mo in mn)) { mn[mo] = 0; mord[++nmo] = mo }
+        mn[mo]++
+        c = $7; if (!(c in cues)) { cues[c] = 0; cord[++nc] = c }; cues[c]++
+        if ($13 != "-") rate("salience", $13)
+        if ($17 != "-") { k = split($17, ax, " "); for (i = 1; i <= k; i++) { p = index(ax[i], "="); rate(substr(ax[i], 1, p - 1), substr(ax[i], p + 1)) } }
+      }
+      END {
+        if (year) { s = ""; for (i = nmo; i >= 1; i--) s = s ((i < nmo) ? ", " : "") mord[i] " " mn[mord[i]]; print "entries by month: " s }
+        s = ""; for (i = 1; i <= nc; i++) s = s ((i > 1) ? ", " : "") ((cord[i] == "-") ? "(none)" : cord[i]) " " cues[cord[i]]
+        print "cues: " s
+        for (i = 1; i <= ng; i++) {
+          g = gord[i]; isort(g, gn[g])
+          fmt = (gty[g] == "bipolar") ? "%+d" : "%d"
+          printf "axis %s (%s): %d/%d rated, median " fmt ", p25 " fmt ", p75 " fmt "\n", gnm[g], gty[g], gn[g], n, gv[g, nrank(gn[g], 0.5)], gv[g, nrank(gn[g], 0.25)], gv[g, nrank(gn[g], 0.75)]
+        }
+      }
+    ' "$_jd_rows"
+    if [ "$_jd_stats" = "full" ]; then
+      echo
+      echo "month x cue x axis (n, p25, median, p75; nearest rank):"
+      # over the SELECTED rows, not the sidecar: the sidecar aggregates the
+      # whole tree, so a filtered view was printing detail for the very
+      # records its own summary excluded
+      awk -F"$JP_TAB" "$JOURNAL_AWK_QUARTILES"'
+        function add(mo, cu, nm, v,   g) {
+          g = mo SUBSEP cu SUBSEP nm SUBSEP ((v ~ /^[+-]/) ? "bipolar" : "unipolar")
+          if (!(g in gn)) { gn[g] = 0; gord[++ng] = g }
+          gv[g, ++gn[g]] = v + 0
+        }
+        {
+          mo = substr($3, 1, 7); cu = $7
+          if ($13 != "-") add(mo, cu, "salience", $13)
+          if ($17 != "-") {
+            k = split($17, ax, " ")
+            for (i = 1; i <= k; i++) { p = index(ax[i], "="); add(mo, cu, substr(ax[i], 1, p - 1), substr(ax[i], p + 1)) }
+          }
+        }
+        END {
+          for (i = 1; i <= ng; i++) {
+            g = gord[i]; isort(g, gn[g]); split(g, f, SUBSEP)
+            fmt = (f[4] == "bipolar") ? "%+d" : "%d"
+            printf("  %s  %-24s %-20s %-9s %3d  " fmt " " fmt " " fmt "\n", f[1], f[2], f[3], f[4], gn[g], gv[g, nrank(gn[g], 0.25)], gv[g, nrank(gn[g], 0.5)], gv[g, nrank(gn[g], 0.75)])
+          }
+        }
+      ' "$_jd_rows" | sort -k1,1r -k2,2 -k3,3
+    fi
+  fi
+  # render one elevation at the requested detail: the year view at
+  # headlines detail shows an elevation's headline only, otherwise the
+  # digest block; full prints the whole body
+  jd_render_elev() {
+    _p=$(journal_record_path "$3") || return 0
+    echo
+    echo "### $1 $2 [$3]"
+    if [ "$_jd_detail" = "full" ]; then journal_block "$_p" full
+    elif [ "${#_jd_period}" -eq 4 ] && [ "$_jd_detail" = "headlines" ]; then journal_block "$_p" block | awk 'NF { print; exit }'
+    else journal_block "$_p" block; fi
+  }
+  if [ "$_jd_elev" != "none" ]; then
+    awk -F"$JP_TAB" -v per="$_jd_period" '
+      $1 == "elev_competing" && substr($3, 1, length(per)) == per {
+        printf "note: %s %s has %d live elevations; showing %s - supersede one to decide it\n", $2, $3, $4, $5
+      }' "$_jd_state"
+  fi
+  if [ "$_jd_elev" != "none" ] && [ "$_jd_ne" -gt 0 ]; then
+    if [ "${#_jd_period}" -eq 7 ] || [ "$_jd_elev" = "only" ]; then
+      # every selected elevation, newest period first - the whole answer
+      # when the caller asked for only these
+      echo
+      echo "## Elevations"
+      printf '%s\n' "$_jd_elevs" | while IFS="$JP_TAB" read -r _k _c _id; do
+        [ -n "$_id" ] || continue
+        jd_render_elev "$_k" "$_c" "$_id"
+      done
+    elif [ "$_jd_ny" -gt 0 ]; then
+      echo
+      echo "## Yearly elevation"
+      printf '%s\n' "$_jd_elevs" | while IFS="$JP_TAB" read -r _k _c _id; do
+        [ -n "$_id" ] && [ "$_c" = "$_jd_period" ] || continue
+        jd_render_elev "$_k" "$_c" "$_id"
+      done
+    fi
+  fi
+  if [ "$_jd_elev" != "only" ]; then
+    echo
+    if [ "${#_jd_period}" -eq 7 ]; then
+      echo "## Entries"
+      if [ "$_jd_n" -eq 0 ]; then echo "(no entries)"; fi
+      while IFS="$JP_TAB" read -r _id _cls _cr _tm _ag _us _cue _kd _cv _ps _rt _sc _sal _st _rv _bg _ax _hl _pss; do
+        [ -n "$_id" ] || continue
+        _tag=""
+        [ "$_cue" = "-" ] || _tag=" ($_cue)"
+        case "$_jd_detail" in
+          headlines) printf -- '- %s  %s%s [%s]\n' "${_cr#*-*-}" "$_hl" "$_tag" "$_id" ;;
+          blocks)
+            printf -- '- %s  %s%s [%s]\n' "${_cr#*-*-}" "$_hl" "$_tag" "$_id"
+            _p=$(journal_record_path "$_id") || continue
+            journal_block "$_p" rest ;;
+          full)
+            printf '### %s  %s%s [%s]\n' "$_cr" "$_hl" "$_tag" "$_id"
+            _p=$(journal_record_path "$_id") || continue
+            journal_block "$_p" full
+            echo ;;
+        esac
+      done < "$_jd_rows"
+    else
+      # the year view reads the grain below: an elevated month shows its
+      # elevation, an unelevated month falls back to entry headlines
+      echo "## Months"
+      # every month that has entries or a month-grain elevation, newest first
+      { awk -F"$JP_TAB" '{ print substr($3, 1, 7) }' "$_jd_rows"
+        printf '%s\n' "$_jd_elevs" | awk -F"$JP_TAB" 'length($2) == 7 { print $2 }'; } | sort -ur | while IFS= read -r _mo; do
+        [ -n "$_mo" ] || continue
+        _mel=$(printf '%s\n' "$_jd_elevs" | awk -F"$JP_TAB" -v m="$_mo" '$2 == m { print }')
+        echo
+        if [ -n "$_mel" ] && [ "$_jd_elev" != "none" ]; then
+          echo "### $_mo (elevated)"
+          printf '%s\n' "$_mel" | while IFS="$JP_TAB" read -r _k _c _id; do
+            [ -n "$_id" ] || continue
+            jd_render_elev "$_k" "$_c" "$_id"
+            # entries this elevation never saw are listed under it: the
+            # year view renders the elevation INSTEAD of the month, so
+            # anything outside its coverage would vanish from this view
+            # WHICH entries an elevation missed is the compiler's answer,
+            # read from the sidecar. Re-deriving it here meant a second
+            # frontmatter parser with its own rules about carriage returns
+            # and spacing - and the two disagreeing is exactly how an
+            # uncovered entry went missing from this view again.
+            _munc=$(awk -F"$JP_TAB" -v k="$_k" -v c="$_c" \
+              '$1 == "elev_uncovered" && $2 == k && $3 == c { print $4 }' "$_jd_state")
+            [ -n "$_munc" ] || continue
+            ZAMM_JD_UNC="$_munc" awk -F"$JP_TAB" '
+              BEGIN {
+                n = split(ENVIRON["ZAMM_JD_UNC"], a, "\n")
+                for (i = 1; i <= n; i++) if (a[i] != "") want[a[i]] = 1
+              }
+              ($1 in want) {
+                if (!hdr) { print ""; print "  Not covered by this elevation:"; hdr = 1 }
+                print "  - " substr($3, 9, 2) "  " $18 " [" $1 "]"
+              }' "$_jd_rows"
+          done
+        else
+          echo "### $_mo (unelevated: entry headlines)"
+          awk -F"$JP_TAB" -v m="$_mo" 'substr($3, 1, 7) == m { print "- " substr($3, 9, 2) "  " $18 " [" $1 "]" }' "$_jd_rows"
+        fi
+      done
+    fi
+  fi
+  rm -f "$_jd_rows"
+  journal_exit "$_jdxrc"
+}
+
 run_check_all() {
-  crc=0; prc=0; xrc=0; brc=0
+  crc=0; prc=0; xrc=0; brc=0; jrc=0
   sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" --check || crc=$?
-  # the backlog tree is optional (absence is data); when present it is
-  # checked with the same rigor as the knowledge ledger
+  # the backlog and journal trees are optional (absence is data); when
+  # present each is checked with the same rigor as the knowledge ledger
   if [ -d "$ROOT/zamm-memory/backlog" ]; then
     sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" --tree backlog --check || brc=$?
+  fi
+  if [ -d "$ROOT/zamm-memory/journal" ]; then
+    sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" --tree journal --check || jrc=$?
   fi
   sh "$INTERNAL/zamm-plan-check.sh" --project-root "$ROOT" || prc=$?
   # cross-object reconciliation runs last: it assumes each side is individually
@@ -1730,7 +3109,7 @@ run_check_all() {
   # An enumeration failure (4) outranks a validation failure (1): "could not
   # read" must never be flattened into "checked and found problems".
   rc=0
-  for c in $crc $brc $prc $xrc; do
+  for c in $crc $brc $jrc $prc $xrc; do
     [ "$c" -eq 0 ] && continue
     [ "$c" -ge 2 ] && rc=4
     [ "$rc" -eq 0 ] && rc=1
@@ -1775,6 +3154,7 @@ do_help() {
       esac
       ;;
     backlog) group_usage backlog 0 ;;           # every verb is a built-in
+    journal) group_usage journal 0 ;;           # every verb is a built-in
     scaffold) exec bash "$INTERNAL/zamm-scaffold.sh" --help ;;
     *)        usage 0 ;;                        # status, check, help, unknown
   esac
@@ -1852,6 +3232,28 @@ case "$cmd" in
       check)   require_root; require_version; backlog_check "$@"; exit 0 ;;
       help|--help|-h) group_usage backlog 0 ;;
       *) unknown "backlog $verb" ;;
+    esac
+    ;;
+
+  journal)
+    [ $# -gt 0 ] || group_usage journal 0
+    verb="$1"; shift
+    # Help is read-only: route it before the version gate or the built-ins.
+    wants_help "$@" && do_help journal "$verb"
+    case "$verb" in
+      add)     require_root; require_version; journal_add "$@"; exit 0 ;;
+      list)    require_root; require_version; journal_list "$@"; exit 0 ;;
+      show)    require_root; require_version; journal_show "$@"; exit 0 ;;
+      search)  require_root; require_version; journal_search "$@"; exit 0 ;;
+      stats)   require_root; require_version; journal_stats "$@"; exit 0 ;;
+      export)  require_root; require_version; journal_export "$@"; exit 0 ;;
+      digest)  require_root; require_version; journal_digest "$@"; exit 0 ;;
+      elevate) require_root; require_version; journal_elevate "$@"; exit 0 ;;
+      review)  require_root; require_version; journal_review "$@"; exit 0 ;;
+      settle)  require_root; require_version; journal_settle "$@"; exit 0 ;;
+      check)   require_root; require_version; journal_check "$@"; exit 0 ;;
+      help|--help|-h) group_usage journal 0 ;;
+      *) unknown "journal $verb" ;;
     esac
     ;;
 

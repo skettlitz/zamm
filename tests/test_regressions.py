@@ -268,6 +268,83 @@ class TestDigestRendering(ZammTest):
         self.assertIn_("Late successor", group)
 
 
+
+class TabsAndLineEndingsInRecords(ZammTest):
+    """Two readers of the same files disagreeing about formatting.
+
+    Found 2026-09-05 while reviewing the journal, but both defects are
+    older than it and belong to the shared surfaces: `--list-live` is what
+    `memory list` and `backlog list --scope` read, and the plan tail is
+    compiled into every digest.
+    """
+
+    def test_a_tab_in_a_headline_survives_the_listing(self):
+        """--list-live writes TSV, so a headline carrying a TAB truncated
+        the row at it -- losing, in the reproduction, the half of the
+        sentence that qualified the instruction."""
+        self.led.add_idea("tabbed", "Do the thing\tONLY AFTER APPROVAL.",
+                          scope="tooling", date="2026-07-18")
+
+        r = self.led.backlog("list", "--scope", "tooling")
+
+        self.assertCode(r, EXIT_OK)
+        self.assertIn_("Do the thing ONLY AFTER APPROVAL.", r.out)
+
+    def test_a_tab_in_a_scope_does_not_shift_columns(self):
+        self.led.add_idea("tabscope", "An idea.", scope="tooling/a\tb",
+                          date="2026-07-18")
+        r = self.led.backlog("list", "--scope", "tooling")
+        self.assertCode(r, EXIT_OK)
+        self.assertIn_("An idea.", r.out,
+                       "a tab in the scope must not hide the record")
+
+    def test_a_crlf_plan_keeps_its_progress(self):
+        """Field VALUES were normalized while section headings were matched
+        raw, so a plan converted to CRLF compiled without its Done-when
+        census: the digest, `plan show` and the checker all read the
+        section by an exact heading."""
+        slug = "2026-07-01-a-plan"
+        self.led.write(
+            f"zamm-memory/active/plans/{slug}/{slug}.plan.md",
+            "\r\n".join(["# A plan", "", "Status: Implementing",
+                          "Execution-context-before: x",
+                          "Complexity-forecast: gecko",
+                          "Last updated: 2026-07-01", "", "Scope:",
+                          "* In: something", "* Out: nothing.", "",
+                          "## Done-when", "", "- [ ] the thing", ""]))
+
+        self.assertCode(self.led.compile(), EXIT_OK)
+        self.assertIn_("done-when 0/1", self.led.digest())
+        self.assertIn_("Done-when: 0/1", self.led.plan_show("a-plan").out)
+        self.assertCode(self.led.plan_check(), EXIT_OK)
+
+
+
+class LiveAndArchivedDuplicates(ZammTest):
+    """An interrupted `memory archive` leaves a record live AND archived; the
+    compiler warns and uses the live copy. Every pass that exempts an
+    archived id has to check for the live copy first, or the exemption
+    silently swallows something that exists.
+    """
+
+    def test_a_vote_on_a_record_caught_mid_archive_still_counts(self):
+        """Found 2026-09-05 auditing the archived-exemption sites after the
+        coverage finding: addvotes dropped a vote whose target had an
+        archived copy, so the live record lost the vote silently."""
+        m = self.led.add("real", "R.")
+        (self.led.root / "zamm-memory/archive/knowledge/2026").mkdir(
+            parents=True, exist_ok=True)
+        (self.led.root / f"zamm-memory/archive/knowledge/2026/{m}.md").write_text(
+            (self.led.root / f"zamm-memory/knowledge/2026/{m}.md").read_text())
+        self.led.add("v", type="votes", date="2026-01-06",
+                     plan="2026-01-06-p", up=m, sfx="vvvvv")
+
+        self.led.compile()
+
+        self.assertIn_(f"{m} +1", self.led.digest(),
+                       "the live copy is the one the vote lands on")
+
+
 class TestScaffoldSafety(ZammTest):
     def _bare_project(self):
         """A project tree with no zamm-memory/ at all."""
