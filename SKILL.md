@@ -40,6 +40,7 @@ proceeding under the old rules.
 | session start | one `memory digest` run; its stdout IS the digest. Reread only after records were written or merged | nothing further: the router's paragraph is the whole rule. `references/memory-reading.md` only when a marker in the digest is unclear; spine `Session Start` only for an empty ledger or a plan decision |
 | digest shows `Needs reconciliation` | resolve it this session | `references/memory-maintenance.md` |
 | digest shows no live records | ask before initialization; never write placeholder records | `references/initialization/existing-project.md` |
+| the digest is silent and you need what was written down (a citation, a prior decision) | search the ledger — grep, or any markdown search you have (QMD is one) — then `whatis <hit>...` before citing or acting: a hit is a lead, not a standing; history hands you its live head | `references/memory-reading.md` |
 | a distillation cue fires: remember-this; a correction or standing rule; strong emotion with substance; the same failure twice; a pointable research result | ledger write (below) | `references/memory-writing.md` first; the cues in full: `references/distillation-triggers.md` |
 | correcting, merging or retiring a record; voting; erasing a secret | a new record, never an edit | `references/memory-maintenance.md` |
 | an idea worth keeping but not starting | `backlog list`, then `backlog add '<sentence>'` or supersede/vote an existing idea; never a Draft plan | `references/backlog-writing.md` first |
@@ -79,7 +80,9 @@ One entrypoint, `bash <zamm-skill>/scripts/zamm-run.sh <group> <verb>`. `help [<
 reference for flags and semantics — read it rather than guessing.
 
 - Project: `scaffold` (install, or refresh the rendered surfaces after a skill update; idempotent;
-  refuses a pre-v3 tree), `status`, `check` (every tree, one exit code), `help`.
+  refuses a pre-v3 tree), `status`, `check` (every tree, one exit code), `whatis <ref>...` (what
+  a path, `qmd://` URL, id or slug is and whether it still counts: tree, standing, supersede
+  chain, the live head and its body; read-only, every tree, live and archive), `help`.
 - `memory`: `digest`, `list [--all] [--scope]` (default: the digest's records; `--all`: every live one), `show`, `create`, `check`, `archive`;
   hand-composed drafts: `publish`, `drafts`, `discard`.
 - `backlog`: `add`, `list [--all] [--scope]`, `show`, `mark` / `unmark`, `promote`, `check`.

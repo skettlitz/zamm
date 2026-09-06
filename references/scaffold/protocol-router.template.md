@@ -26,4 +26,10 @@ One step: it validates the record and lands it, or prints why not. Never edit or
 
 **Health:** `status` for an overview; `check` validates every tree.
 
+**Finding (retrieval; ZAMM does not own it):** the digest is the read, not a search. When it is silent and you need what was written down, grep the ledger (`grep -r <term> zamm-memory/`), or use any markdown search you happen to have (QMD is one: `qmd search`, then `qmd get`). A hit is a lead, never a standing — resemblance cannot tell a superseded, retired or archived record from the one in force. Before citing or acting on anything under `zamm-memory/`, run
+
+    bash <zamm-skill>/scripts/zamm-run.sh whatis <path-or-id>...
+
+It says what the hit is and, when the hit is history, hands you the live head to cite instead. Unlisted and dormant records are still true; superseded, retired, erased and archived ones are not. An active plan's Status and the digest win on conflict. Never write records, ideas, episodes or plans through a search tool, and never read `.compiled/` through one.
+
 **Read the layer for what you are about to do** (all under `<zamm-skill>/references/`, each opening with who will read what you write): a record → `memory-writing.md`; reconciliation, votes, erasure → `memory-maintenance.md`; an idea → `backlog-writing.md`; marking or promoting → `backlog-maintenance.md`; a plan, or an IDE-written plan file → `plans-writing.md`; a status change, close-out or archive → `plans-maintenance.md`; an episode → `journal-writing.md`; a question about what happened, or a summary of a period → `journal-reading.md` (`journal digest`, a read); a `Journal:` line in the digest, or storing a summary → `journal-maintenance.md`. The spine, `<zamm-skill>/references/protocol.md`, holds session start and end, the boundary test between the four trees and the rules they share: load it for an empty ledger, session end, or anything the router does not answer. The router is a map, not the manual.

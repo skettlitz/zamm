@@ -180,6 +180,8 @@ Everything runs through one entrypoint, which finds the project root itself
 scaffold             install ZAMM here, or refresh the rendered surfaces
 status               health overview: ledger, backlog, journal, plans, drift
 check                validate everything (memory + backlog + journal + plans)
+whatis <ref>...      what a path, qmd:// URL, id or slug is, and whether it
+                     still counts: standing, supersede chain, the live head
 help [<topic>]       this text, or help for one command
 
 memory digest        rebuild and print the digest

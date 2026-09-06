@@ -57,6 +57,8 @@ Project
   scaffold             install ZAMM here, or refresh the rendered surfaces
   status               health overview: ledger, backlog, journal, plans, drift
   check                validate everything (memory + backlog + journal + plans)
+  whatis <ref>...      what a path, qmd:// URL, id or slug is, and whether it
+                       still counts: standing, supersede chain, the live head
   help [<topic>]       this text, or help for one command
 
 Memory
@@ -3156,6 +3158,7 @@ do_help() {
     backlog) group_usage backlog 0 ;;           # every verb is a built-in
     journal) group_usage journal 0 ;;           # every verb is a built-in
     scaffold) exec bash "$INTERNAL/zamm-scaffold.sh" --help ;;
+    whatis)   exec sh "$INTERNAL/zamm-whatis.sh" --help ;;
     *)        usage 0 ;;                        # status, check, help, unknown
   esac
 }
@@ -3317,6 +3320,11 @@ case "$cmd" in
     case "${1-}" in -h|--help) usage 0 ;; esac
     [ $# -eq 0 ] || die "check takes no arguments (got: $*)"
     require_root; require_version; run_check_all ;;
+  whatis)
+    # "a search handed me this file; what is it?" - read-only, every tree
+    case "${1-}" in -h|--help) exec sh "$INTERNAL/zamm-whatis.sh" --help ;; esac
+    TARGET="zamm-whatis.sh"
+    require_root; require_version ;;
 
   *) unknown "$cmd" ;;
 esac

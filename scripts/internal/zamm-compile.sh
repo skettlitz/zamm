@@ -25,6 +25,15 @@
 #   --list-inert  print the path of every record in a supersede component with
 #                 no live memory record and no live votes record. Read-only;
 #                 these are the records memory archive may move.
+#   --list-state  print one row per record the graph knows, live tree AND
+#                 archive, with the standing the compiler assigned it:
+#                 "id<TAB>state<TAB>class<TAB>primary-scope<TAB>created<TAB>
+#                 votes<TAB>bg<TAB>applied-supersedes<TAB>path<TAB>headline
+#                 <TAB>stray-key". state is live | dormant | superseded |
+#                 retired | quarantined | erased | archived; stray-key is the
+#                 first body line when it is a frontmatter key the compiler
+#                 ignored ("-" otherwise). Read-only; the surface behind
+#                 `whatis`.
 
 set -eu
 LC_ALL=C
@@ -36,6 +45,7 @@ LIST_INERT=0
 LIST_LIVE=0
 LIST_VOTES=0
 LIST_GRAPH=0
+LIST_STATE=0
 EXPORT=0
 CANDIDATE=""
 TREE="knowledge"
@@ -83,6 +93,10 @@ while [ $# -gt 0 ]; do
       LIST_GRAPH=1
       shift
       ;;
+    --list-state)
+      LIST_STATE=1
+      shift
+      ;;
     --list-votes)
       LIST_VOTES=1
       shift
@@ -92,7 +106,7 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     -h|--help)
-      echo "Usage: zamm-compile.sh [--project-root <path>] [--tree knowledge|backlog|journal] [--check [--with-candidate <draft>]] [--list-live] [--list-inert] [--list-votes] [--list-graph] [--export]"
+      echo "Usage: zamm-compile.sh [--project-root <path>] [--tree knowledge|backlog|journal] [--check [--with-candidate <draft>]] [--list-live] [--list-inert] [--list-votes] [--list-graph] [--list-state] [--export]"
       echo "  --with-candidate validates the ledger AS IF the named .md.draft were"
       echo "  published, without renaming anything into the live namespace."
       exit 0
@@ -153,7 +167,16 @@ if [ "$EXPORT" -eq 1 ] && [ "$TREE" != "journal" ]; then
   exit 1
 fi
 
-mkdir -p "$OUT_DIR"
+# The list modes read the ledger and publish nothing, so they must not need a
+# writable .compiled/ either: a sandboxed agent that may read the tree but
+# not write beside it still gets an answer from whatis. Everything else
+# (digest, check with its candidate overlay) builds beside the digest so the
+# final rename stays on one filesystem.
+READ_ONLY=0
+if [ "$LIST_INERT" -eq 1 ] || [ "$LIST_LIVE" -eq 1 ] || [ "$LIST_VOTES" -eq 1 ] || [ "$LIST_GRAPH" -eq 1 ] || [ "$LIST_STATE" -eq 1 ]; then
+  READ_ONLY=1
+fi
+[ "$READ_ONLY" -eq 1 ] || mkdir -p "$OUT_DIR"
 
 # Candidate overlay: the draft is validated under its FINAL id by staging a
 # private copy named <id>.md and enumerating that copy with the manifest. The
@@ -162,6 +185,7 @@ mkdir -p "$OUT_DIR"
 # ever needed (there is nothing to roll back).
 OVERLAY_DIR=""
 OVERLAY_COPY=""
+cid=""
 if [ -n "$CANDIDATE" ]; then
   cb=$(basename "$CANDIDATE")
   case "$cb" in
@@ -191,7 +215,9 @@ fi
 # Per-process temp files: concurrent compiles must never share a path, or one
 # process renames another's half-written file (digest truncated to a stub).
 # The whole digest is built privately, then published with a single mv.
-if command -v mktemp >/dev/null 2>&1; then
+if [ "$READ_ONLY" -eq 1 ]; then
+  TMP_FILE=$(mktemp "${TMPDIR:-/tmp}/zamm-compile.XXXXXX")
+elif command -v mktemp >/dev/null 2>&1; then
   TMP_FILE=$(mktemp "$OUT_DIR/memory.md.XXXXXX")
 else
   TMP_FILE="$OUT_DIR/memory.md.tmp.$$"
@@ -304,7 +330,7 @@ fi
 
 set +e
 awk \
-  -v today="$TODAY" -v check="$CHECK" -v listinert="$LIST_INERT" -v listlive="$LIST_LIVE" -v listvotes="$LIST_VOTES" -v listgraph="$LIST_GRAPH" -v export="$EXPORT" -v root="$PROJECT_ROOT/" -v statefile="$STATE_TMP" -v lens="$TREE" '
+  -v today="$TODAY" -v check="$CHECK" -v listinert="$LIST_INERT" -v listlive="$LIST_LIVE" -v listvotes="$LIST_VOTES" -v listgraph="$LIST_GRAPH" -v liststate="$LIST_STATE" -v candidate="$cid" -v export="$EXPORT" -v root="$PROJECT_ROOT/" -v statefile="$STATE_TMP" -v lens="$TREE" '
 BEGIN {
   DIGEST_MAX = 75       # full digest blocks (actionable: headline + elaboration)
   HEADLINE_MAX = 150    # headline-only reminders (topic exists; open if relevant)
@@ -406,6 +432,7 @@ function read_archived_header(path, aid,   line, state, firstline, pos, key, val
     exit 4
   }
   close(path)
+  archpath[aid] = path
   state = 0; firstline = 1
   while ((getline line < path) > 0) {
     sub(/\r$/, "", line)
@@ -642,6 +669,26 @@ function read_record(path, base,   id, line, state, firstline, fmclosed, pos, ke
         rerr(id, path ": digest block exceeds 1200 chars; move detail under ## Background")
     }
   }
+  # A frontmatter key at the head of the BODY is the one authoring mistake
+  # the parser cannot see: "supersedes: <id>" as the first body line reads
+  # as prose, so the edge never enters the graph, the target stays live and
+  # the stray line becomes the headline (a consumer ledger had three such
+  # records, ranked at 97% by its search tool and judged live by whatis).
+  # Refused for the record being written - fail closed at write time, at no
+  # cost to ledgers already landed - and a warning for existing records,
+  # which stay valid: quarantining them would drop true content to punish a
+  # typo. The stray line rides --list-state so whatis can show it.
+  fbl = first_body_line(id)
+  if (fbl ~ /^[a-z][a-z-]*:/) {
+    fk = substr(fbl, 1, index(fbl, ":") - 1)
+    if (index(KNOWN_KEYS, " " fk " ") > 0) {
+      straykey[id] = fbl
+      if (id == candidate)
+        rerr(id, path ": body opens with \"" fk ":\" - a frontmatter key belongs above the closing ---; here the compiler reads it as prose (no edge, no value applied)")
+      else
+        warn(path ": body opens with \"" fk ":\" - the compiler reads it as prose, so no " fk " was applied; correct it with a new record carrying the key in its header")
+    }
+  }
   if (rtype[id] == "tombstone") {
     if (rsup[id] == "") rerr(id, path ": tombstone without supersedes target")
     # a tombstone retires knowledge; without a reason nobody can tell later
@@ -747,6 +794,11 @@ function read_record(path, base,   id, line, state, firstline, fmclosed, pos, ke
 
 # ---- helpers ----
 function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
+function first_body_line(id,   m, bl, t, ln) {
+  m = split(rbody[id], bl, "\n")
+  for (t = 1; t <= m; t++) { ln = trim(bl[t]); if (ln != "") return ln }
+  return ""
+}
 
 # Machine-readable compilation state, written beside memory.md. Downstream
 # commands (status, memory list) read THIS instead of grepping the rendered
@@ -2302,6 +2354,65 @@ END {
     exit 0
   }
 
+  # Every record the graph knows, one row each, with the standing the
+  # compiler assigned it. This is what `whatis` reads to answer "a search
+  # tool handed me this file, what is it?" - a similarity ranker cannot tell
+  # a retired or archived record from a current one, so the compiler says
+  # which. Quarantined and erased records are listed too (their standing IS
+  # the answer), and archived ids come from the inert headers, so a hit in
+  # archive/ resolves without re-reading the file. Columns: id, state,
+  # class (the record type; journal entries split into entry / elevation /
+  # watermark), primary scope, created, votes (+u/-d over the chain, as the
+  # digest pointer shows them), bg (yes when a ## Background exists), applied
+  # supersede targets (comma-joined, "-" when none), path relative to the
+  # project root, headline (TAB-sanitized; the quarantine reason for a
+  # quarantined record), and the stray body line when the body opens with a
+  # frontmatter key ("-" otherwise). "retired" means a tombstone superseded it.
+  if (liststate == 1) {
+    for (i = 1; i <= nrec; i++) {
+      id = order[i]
+      if (rtype[id] != "tombstone" || asup[id] == "") continue
+      m = split(asup[id], tg, ",")
+      for (j = 1; j <= m; j++) if (tg[j] != "") tombof[tg[j]] = 1
+    }
+    for (i = 1; i <= nrec; i++) {
+      id = order[i]
+      if (id in bad) st = "quarantined"
+      else if (id in erased) st = "erased"
+      else if (id in dead) st = ((id in tombof) ? "retired" : "superseded")
+      else if (id in dormant) st = "dormant"
+      else st = "live"
+      cls = rtype[id]
+      if (lens == "journal") {
+        if (rtype[id] == "digest") cls = "elevation"
+        else if (rtype[id] == "memory") cls = ((id in haswm) ? "watermark" : "entry")
+      }
+      sc2 = (pscope[id] == "" ? "-" : pscope[id]); gsub(/\t/, " ", sc2)
+      if (st == "quarantined") {
+        vs = "-"; bg = "-"; lvh = badmsg[id]
+      } else if (st == "erased") {
+        # erased content must not travel anywhere, the headline included
+        vs = "-"; bg = "-"; lvh = "-"
+      } else {
+        u = chainagg(id, 1); d = chainagg(id, 2)
+        vs = (u > 0 || d > 0) ? sprintf("+%d/-%d", u, d) : "0"
+        analyze(id)
+        bg = (id in hasbg) ? "yes" : "no"
+        lvh = headline(id)
+      }
+      gsub(/\t/, " ", lvh)
+      sk = (id in straykey) ? straykey[id] : "-"; gsub(/\t/, " ", sk)
+      printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", id, st, cls, sc2, (rcreated[id] == "" ? "-" : rcreated[id]), vs, bg, (asup[id] == "" ? "-" : asup[id]), relpath(filepath[id]), lvh, sk
+    }
+    for (aid in archived) {
+      if (aid in filepath) continue
+      sup = asupinert[aid]; gsub(/[ \t]/, "", sup)
+      printf "%s\t%s\t%s\t-\t%s\t-\t-\t%s\t%s\t-\t-\n", aid, "archived", (atype[aid] == "" ? "-" : atype[aid]), ((aid ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-/) ? substr(aid, 1, 10) : "-"), (sup == "" ? "-" : sup), relpath(archpath[aid])
+    }
+    close("cat 1>&2")
+    exit 0
+  }
+
   # The active (counted) votes records, for the plan<->ledger cross-check. One
   # line per votes record that actually affects ranking: id <TAB> plan <TAB> up
   # <TAB> down. This is the compilers own graph verdict — the cross-check reads
@@ -3050,7 +3161,7 @@ elif [ "$EXPORT" -eq 1 ]; then
   fi
   cat "$TMP_FILE"
   exit "$rc"
-elif [ "$LIST_INERT" -eq 1 ] || [ "$LIST_LIVE" -eq 1 ] || [ "$LIST_VOTES" -eq 1 ] || [ "$LIST_GRAPH" -eq 1 ]; then
+elif [ "$LIST_INERT" -eq 1 ] || [ "$LIST_LIVE" -eq 1 ] || [ "$LIST_VOTES" -eq 1 ] || [ "$LIST_GRAPH" -eq 1 ] || [ "$LIST_STATE" -eq 1 ]; then
   # read-only: the awk wrote the list rows to the private temp file, so
   # emit them and publish nothing. Exit 2 (a degraded but valid ledger) is not
   # a failure for a read-only listing; only a real failure (>2) refuses.

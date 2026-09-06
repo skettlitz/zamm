@@ -53,8 +53,43 @@ is where the evidence, the paths and the history live.
   that might overlap, it is `--all` you want.
 - `grep -r <term> zamm-memory/knowledge/` — the ledger is plain files;
   dormant and unlisted records are found this way.
+- `whatis <path|qmd-url|id|slug>...` — what a thing is and whether it
+  still counts: the tree, its standing (live and listed or unlisted,
+  dormant, superseded, retired, quarantined, erased, archived), the chain
+  it belongs to and, when the hit is history, the live head and the head's
+  body — the answer is "superseded, cite this instead", never the dead
+  record's own detail. Plans report Status and progress; a file outside
+  `zamm-memory/` is reported as ordinary. A bare slug prints every record
+  that kept that slug; the chain listed under any hit is the graph,
+  whatever the slugs along it. Read-only; `--brief` drops the bodies.
 - `memory check` — validate the ledger; prints `ZAMM check passed.` or the
   violations.
+
+## Search results are leads
+
+Any search — grep, an editor index, or a markdown search tool if the
+project happens to have one (QMD is one: `qmd search` for exact words,
+`qmd query` when its models are available, then `qmd get`) — is welcome
+for "where did we write about X"; the digest is deliberately too small for
+that question. None of them is required, and none can judge standing: they
+rank by resemblance, so a superseded record, a retired chain or an
+archived plan scores like the one in force. The rules ZAMM owns, whatever
+the tool:
+
+- Session start is still `memory digest`; a search is never a digest, and
+  `.compiled/` is never read through a search tool.
+- After a hit under `zamm-memory/`, `whatis` the path before citing or
+  acting on it, and cite what it names as live. Unlisted and dormant
+  records are still true; `archive/` is history; an active plan's Status
+  and the digest win on conflict.
+- A search tool never writes: records, ideas, episodes and plans go through
+  `memory create`, `backlog add`, `journal add` and `plan create` only.
+- `whatis` is only as good as the graph. An edge written in prose — a
+  `supersedes:` line at the top of the body instead of the header — is
+  invisible to the compiler, to search and to `whatis` alike, which is why
+  `memory create` refuses such a body, `check` warns about existing ones
+  and `whatis` flags them. Correct one with a new record carrying the key
+  in its header.
 
 ## Trust
 

@@ -1400,3 +1400,86 @@ every action reaches a named, existing layer file that carries its command,
 no surface points at a missing file, and each maintenance file names its own
 tree's erasure command. A dangling pointer in a doc is a routing defect the
 suite never saw before.
+
+## Locked 2026-09-06 (search hits get a standing: `whatis`, `--list-state`)
+
+A consumer project put a local markdown search tool (QMD: BM25 + vectors
+over `**/*.md`, CLI and MCP) beside the ledger and asked the skill to own
+the authority-vs-retrieval rules rather than every consumer reinventing
+them. Its smoke test named the failure mode: archived plans and superseded
+records ranked ~84% as if current, because a similarity ranker cannot see
+`supersedes:`, tombstones, plan Status or `archive/`. Nothing in the
+toolchain could answer "a search handed me this file - what is it?" in one
+step: `memory show` marked only records already in `archive/`, and a
+superseded, dormant or unlisted record printed exactly like a listed one.
+
+New top-level verb `whatis <ref>...` (internal `zamm-whatis.sh`, read-only,
+every tree, live and archive). A ref is a path in any form, a
+`qmd://<collection>/<path>` URL (a trailing `:line[:count]` is ignored), a
+record id, a plan id or directory, or a bare slug; a slug that names a chain
+prints every generation, which is the graph. Per record: the tree and class,
+the standing (live and listed or unlisted, dormant, superseded by, retired
+by tombstone, quarantined with the reason, erased, archived), scope, votes,
+headline, the connected supersede chain oldest first with `<- this`, the
+live head(s), and - unless `--brief` - the body of what is in force: the
+head's, or the tombstone's reason when nothing is. Plans report Status,
+progress, title and head; `workdir/` scratch, subplans, `.compiled/`,
+drafts, tree files and ordinary files outside `zamm-memory/` are each named
+for what they are. A path that no longer exists (archived or erased since
+the index was built) resolves by name with a note. Exit 1 when a ref names
+nothing; 4 when a tree is unreadable or does not compile (G3).
+
+The compiler gained `--list-state`, the surface behind it: one row per
+record the graph knows - live tree, quarantined and erased included, and
+archived ids from the inert headers - with the standing the compiler
+assigned; `whatis` re-derives no liveness from filenames or frontmatter.
+Archived rows carry no headline (the compiler reads only their header, by
+design); `whatis` fills them from the file, since reading the archive is
+the point there.
+
+Routing: the router gains a Finding paragraph (the digest is the read, not a
+search; a hit is a lead, never a standing; `whatis` before citing; archive
+is history; never write or read `.compiled/` through a search tool),
+SKILL.md a dispatch row for "the digest is silent and you need a citation",
+and memory-reading.md the verb plus a "Search results are leads" section
+naming QMD as the known instance. The skill stays tool-agnostic and ships
+no QMD block of its own; consumers keep their collection names.
+
+Field-note round, same day, from a worker running `whatis` against the
+consumer's real ledger with its search tool's hits. Folded in:
+
+- A body-leading frontmatter key (`supersedes: <id>` as the first body
+  line) was invisible to the compiler, to search and to `whatis` alike:
+  three same-day combat records in the consumer ledger claimed to replace
+  each other in prose, so all three were live, the oldest sat in the
+  digest, and the stray line was each record's headline. `memory create`
+  (and every writer that funnels through it) now refuses such a body;
+  `check` warns about existing ones without quarantining them (dropping
+  true content to punish a typo would be worse); `--list-state` carries
+  the stray line and `whatis` prints a warning naming it. `whatis` still
+  re-derives no edge from prose - the report reflects the graph, and says
+  so.
+- `whatis` on a tombstone said "live - counts now": the compiler's
+  liveness is per record, and a tombstone in effect is an instrument, not
+  an idea in force. Standings are now worded per class (tombstone, votes,
+  erasure record in effect); only content records count now.
+- Fail-closed was broken in the verb: the per-tree compile ran inside a
+  command substitution, so its exit 4 died in the subshell and an empty
+  row set read as "the compiler does not enumerate it". The compile now
+  runs at top level and ends the run. The compiler's read-only list modes
+  also no longer create their scratch file (or `.compiled/` itself) beside
+  the digest, so a sandbox that may read the tree but not write next to it
+  still gets an answer.
+- A dead hit is no longer dug up: a superseded, retired, erased or
+  archived record reports its standing, the chain and the live head (and
+  the head's body, or the tombstone's reason), not its own scope, votes and
+  body. "This exists but is superseded; cite that instead" is the answer.
+  Two refs resolving to one record print one report.
+- The help promised that a slug prints the chain; it prints every record
+  that kept the slug, and the chain under any hit is the graph whatever the
+  slugs along it. Reworded. A pre-v3 archived note without frontmatter now
+  shows its title as the headline.
+- The search tool is optional and the skill says so: the router's Finding
+  paragraph names grep first and "any markdown search you happen to have"
+  (QMD as the example, `qmd search` rather than the model-backed `query`),
+  and adds that unlisted and dormant records are still true.
