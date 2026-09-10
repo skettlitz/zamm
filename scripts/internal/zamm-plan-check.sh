@@ -45,6 +45,10 @@ nplans=0
 nimpl=0
 nterm=0
 
+# ZAMM_TODAY like every other date seam in the toolchain, so a block's age
+# is testable and a pinned run stays deterministic.
+TODAY=${ZAMM_TODAY:-$(date +%Y-%m-%d)}
+
 err() { echo "zamm-plan: ERROR: $*" >&2; nerr=$((nerr + 1)); }
 warn() { echo "zamm-plan: WARNING: $*" >&2; nwarn=$((nwarn + 1)); }
 
@@ -160,6 +164,134 @@ scope_has_content() {
     grep -q .
 }
 
+# Parse the `## Blocked-on` log. An entry is
+#   - YYYY-MM-DD [<class>]: <sentence>
+# at column 0; the lines under it are its detail paragraph, and a `Resolved
+# YYYY-MM-DD:` line among them closes it. Emits one tab-separated row per
+# entry: ENTRY<TAB>date<TAB>class<TAB>has-sentence<TAB>is-open. A malformed
+# entry still emits a row (class "-", or has-sentence 0) so the caller can name
+# what is wrong, rather than silently parsing to nothing. An absent class is
+# "-" and never the empty string: tab is an IFS WHITESPACE character, so an
+# empty field would collapse into its neighbour and shift every field after it.
+# The template's `- (no blocks recorded)` placeholder matches no entry shape,
+# so an untouched plan reports nothing at all.
+blocked_entries() {
+  section_body "$1" "Blocked-on" | awk -v OFS="\t" '
+    function flush() {
+      if (cur == "") return
+      print "ENTRY", cur, (kind == "" ? "-" : kind), (txt == "" ? 0 : 1), (res ? 0 : 1)
+    }
+    { sub(/\r$/, "") }
+    /^- [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/ {
+      rest = substr($0, 13)
+      # Only `[` (a classed entry) or `:` (an unclassified one) opens an entry;
+      # anything else after the date is ordinary prose and is left alone. The
+      # separator is tested here rather than in the pattern because a bracket
+      # expression holding `[` and `:` reads as a character-class opener.
+      if (rest !~ /^[ \t]*\[/ && rest !~ /^[ \t]*:/) next
+      flush()
+      cur = substr($0, 3, 10)
+      kind = ""
+      # ` [<class>]: <sentence>` is the current shape; a bare `: <sentence>`
+      # is an unclassified entry and is reported as such, never guessed at.
+      if (match(rest, /^[ \t]*\[[^]]*\][ \t]*:/)) {
+        kind = substr(rest, index(rest, "[") + 1)
+        kind = substr(kind, 1, index(kind, "]") - 1)
+        txt = substr(rest, RLENGTH + 1)
+      } else {
+        sub(/^[ \t]*:/, "", rest)
+        txt = rest
+      }
+      sub(/^[ \t]+/, "", txt); sub(/[ \t]+$/, "", txt)
+      sub(/^[ \t]+/, "", kind); sub(/[ \t]+$/, "", kind)
+      res = 0
+      next
+    }
+    cur != "" && /^[[:space:]]*Resolved [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]:/ { res = 1 }
+    END { flush() }
+  '
+}
+
+# The block classes, split on WHO CLEARS THE BLOCK — the one thing a reader of
+# the digest needs in order to know whether it is their move:
+#   human            a person on this team must decide, answer, approve or grant
+#   plan:<plan-id>   another plan in this ledger must land first (named, and
+#                    checked below: a dependency that lands silently is the
+#                    failure mode this class exists to catch)
+#   external         someone or something outside this team — an upstream
+#                    release, a deploy, another team's queue
+#   defect           something is broken and nobody has committed to fixing it
+# If the answer is "nobody, ever", the plan is not blocked, it is Abandoned.
+BLOCK_CLASSES="human plan external defect"
+
+# How long a block of each class may sit before the check nags. One number for
+# all of them would cry wolf: an unanswered human question at a week means
+# someone dropped it, while an upstream release at a week is just Tuesday.
+blocked_stale_days() {
+  case "$1" in
+    human)    echo 7 ;;
+    defect)   echo 14 ;;
+    plan|plan:*) echo 21 ;;
+    external) echo 30 ;;
+    *)        echo 14 ;;
+  esac
+}
+
+# A `[plan:<id>]` block names a dependency inside this ledger, which is the
+# whole reason that class is spelled differently from the rest: the id is
+# verified to exist here, and — the payoff — an entry still OPEN against a plan
+# that has already landed is reported, because a dependency that clears itself
+# is precisely the one nobody notices.
+check_block_dep() {
+  # _bd_act: this entry is open AND its plan is still Blocked, i.e. someone is
+  # genuinely waiting. Existence and self-reference are checked regardless.
+  _bd_rel="$1"; _bd_date="$2"; _bd_id="$3"; _bd_self="$4"; _bd_act="$5"
+  if [ "$_bd_id" = "$_bd_self" ]; then
+    err "$_bd_rel: ## Blocked-on entry $_bd_date waits on itself ($_bd_id)"
+    return 0
+  fi
+  _bd_row=$(awk -F"$TAB" -v OFS="$TAB" -v id="$_bd_id" '
+    ($1 == "PLANDIR" || $1 == "ARCHDIR") {
+      n = split($2, parts, "/")
+      if (parts[n] == id) { print $1, $2; exit }
+    }' "$MF")
+  if [ -z "$_bd_row" ]; then
+    err "$_bd_rel: ## Blocked-on entry $_bd_date names a plan that does not exist: $_bd_id"
+    return 0
+  fi
+  [ "$_bd_act" = "1" ] || return 0
+  _bd_tag=${_bd_row%%"$TAB"*}
+  _bd_dir=${_bd_row#*"$TAB"}
+  if [ "$_bd_tag" = "ARCHDIR" ]; then
+    warn "$_bd_rel: still blocked on $_bd_id, which is archived -- the dependency landed (zamm-run.sh plan unblock)"
+    return 0
+  fi
+  _bd_pf=$(awk -F"$TAB" -v d="$_bd_dir/" '$1 == "PLANFILE" && index($2, d) == 1 { print $2; exit }' "$MF")
+  [ -n "$_bd_pf" ] || return 0
+  _bd_st=$(field "$_bd_pf" "Status")
+  case "$_bd_st" in
+    Done|Abandoned)
+      warn "$_bd_rel: still blocked on $_bd_id, which is $_bd_st -- the dependency landed (zamm-run.sh plan unblock)" ;;
+  esac
+}
+
+# Exact calendar days between two YYYY-MM-DD dates (days-from-civil, the same
+# algorithm the digest compiler uses for policy boundaries). A negative span
+# clamps to 0, so a hand-typed future date never reads as stale.
+days_between() {
+  awk -v a="$1" -v b="$2" '
+    function civildays(d,   y, m, dd, era, yoe, doy, doe) {
+      if (d !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/) return 0
+      y = substr(d, 1, 4) + 0; m = substr(d, 6, 2) + 0; dd = substr(d, 9, 2) + 0
+      if (m <= 2) y--
+      era = int(y / 400); yoe = y - era * 400
+      doy = int((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5) + dd - 1
+      doe = yoe * 365 + int(yoe / 4) - int(yoe / 100) + doy
+      return era * 146097 + doe - 719468
+    }
+    BEGIN { n = civildays(b) - civildays(a); print (n < 0 ? 0 : n) }'
+}
+
 # The plan tree is enumerated by the shared checked manifest, never by a
 # private glob: a glob over an unreadable directory expands to nothing and
 # reports "0 plans" for a tree nobody actually read. Manifest failure is
@@ -257,9 +389,9 @@ check_plan_dir() {
 
   status=$(field "$pf" "Status")
   case "$status" in
-    Draft|Implementing|Review|Done|Abandoned) ;;
+    Draft|Implementing|Blocked|Review|Done|Abandoned) ;;
     "") err "$rel: no Status: line"; return 0 ;;
-    *) err "$rel: unknown Status \"$status\" (Draft|Implementing|Review|Done|Abandoned)"; return 0 ;;
+    *) err "$rel: unknown Status \"$status\" (Draft|Implementing|Blocked|Review|Done|Abandoned)"; return 0 ;;
   esac
 
   if [ "$mode" = "archived" ]; then
@@ -288,9 +420,75 @@ check_plan_dir() {
   dw_open=$(printf '%s\n' "$dw_body" | grep -cE '^- \[ \]' || true)
   dw_any=$(printf '%s\n' "$dw_body" | grep -cE '^- \[' || true)
 
+  # The block log, and the invariant that carries the whole Blocked design.
+  # It stays a SNAPSHOT rule, never a history: Blocked requires at least one
+  # OPEN entry, and every other status requires none. That pair alone makes
+  # "unblock without recording the resolution" structurally impossible, lets N
+  # simultaneous blocks work with no extra machinery, and keeps a fully
+  # resolved log legal in any status — it is execution telemetry, and it
+  # travels into the archive with the plan.
+  bl=$(blocked_entries "$pf")
+  nbl_open=0
+  while IFS="$TAB" read -r btag bdate bkind bhastext bopen; do
+    [ "$btag" = "ENTRY" ] || continue
+    [ "$bopen" = "1" ] && nbl_open=$((nbl_open + 1))
+    valid_date "$bdate" ||
+      err "$rel: ## Blocked-on entry date is not a real YYYY-MM-DD date: $bdate"
+    [ "$bhastext" = "1" ] ||
+      err "$rel: ## Blocked-on entry $bdate has no reason sentence"
+    bdep=""
+    case "$bkind" in
+      human|external|defect) ;;
+      plan:?*) bdep=${bkind#plan:} ;;
+      plan) err "$rel: ## Blocked-on entry $bdate must name the plan it waits on: [plan:<plan-id>]" ;;
+      -|"") bkind=""
+            err "$rel: ## Blocked-on entry $bdate has no class; one of [human] [plan:<plan-id>] [external] [defect] says who clears it" ;;
+      *) err "$rel: ## Blocked-on entry $bdate has unknown class \"$bkind\" ($BLOCK_CLASSES; plan takes a plan id)" ;;
+    esac
+    # "the dependency landed" is advice to act, so it is worth printing only
+    # where acting is possible: an open entry on a plan that is actually
+    # Blocked. An abandoned plan keeps its open entry forever by design and
+    # must not nag about a dependency nobody is waiting for any more.
+    bact=0
+    [ "$bopen" = "1" ] && [ "$status" = "Blocked" ] && bact=1
+    [ -n "$bdep" ] && check_block_dep "$rel" "$bdate" "$bdep" "$slug" "$bact"
+    # Per-class staleness, on the OPEN entries of an active Blocked plan. Age
+    # is the only pressure on the one non-terminal status nothing pushes
+    # forward -- advisory, never a failure, because whether to chase the
+    # obstruction or abandon the plan is a human call.
+    if [ "$mode" = "active" ] && [ "$status" = "Blocked" ] && [ "$bopen" = "1" ] &&
+       valid_date "$bdate"; then
+      bage=$(days_between "$bdate" "$TODAY")
+      bmax=$(blocked_stale_days "$bkind")
+      [ "${bage:-0}" -ge "${bmax:-14}" ] &&
+        warn "$rel: blocked $bage days on [${bkind:-unclassified}] since $bdate (nags at $bmax); unblock or abandon"
+    fi
+  done <<EOF
+$bl
+EOF
+  case "$status" in
+    Blocked)
+      [ "${nbl_open:-0}" -eq 0 ] &&
+        err "$rel: status is Blocked but ## Blocked-on has no open entry (a block needs a dated reason sentence)"
+      ;;
+    Abandoned)
+      # The one status that may carry an open block, because it is the status
+      # you reach when the obstruction turned out to be fatal. Nothing cleared
+      # it, so demanding a Resolved line here would ask the log to record a
+      # clearing that never happened -- and the entry is the whole reason the
+      # plan died. The digest still prints the open block under the entry, so
+      # abandoning hides nothing.
+      :
+      ;;
+    *)
+      [ "${nbl_open:-0}" -gt 0 ] &&
+        err "$rel: status is $status but ## Blocked-on has $nbl_open open entry(ies); record how each cleared ('plan unblock'), or set Status: Blocked, or Abandoned if the obstruction proved fatal"
+      ;;
+  esac
+
   # status-conditional required fields
   case "$status" in
-    Implementing|Review|Done)
+    Implementing|Blocked|Review|Done)
       require "$pf" "$rel" "$status" "Execution-context-before" "Complexity-forecast"
       # a plan doing work must declare what it covers and have something to do
       scope_has_content "$pf" ||
@@ -371,6 +569,7 @@ check_plan_dir() {
         err "$rel: status is $status but $dw_open Done-when item(s) are unchecked"
       ;;
   esac
+
   return 0
 }
 

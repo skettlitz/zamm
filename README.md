@@ -71,6 +71,12 @@ yet worth a trace: the **journal**. The archive is the exit for all four.
   Draft, Implementing, Review, then Done or Abandoned; only a human approves Done. Close-out
   writes learnings and a votes record into the ledger, and `plan archive` moves the directory
   out of active memory.
+- **Blocked** — `plan block --kind <human|plan|external|defect> '<sentence>'` is how an agent
+  says "I cannot continue, and the reason will outlive this session". The class says who
+  clears it; the reason leads the digest Plans tail, above Review, so the whole team sees it
+  without opening a file. `plan unblock '<how it cleared>'` returns the plan to Implementing
+  and keeps the entry as execution telemetry. A `plan:<id>` block is checked: `plan check`
+  says so when the dependency has already landed.
 
 ## One record
 

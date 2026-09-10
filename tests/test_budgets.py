@@ -539,6 +539,13 @@ class TestTheBudgetIsRememberedNotReverted(ZammTest):
         self.assertCode(r, 0)
         self.assertEqual(self.CEILING, self._ceiling())
 
+    def test_a_plan_block_keeps_it(self):
+        self.led.add_plan("2026-01-05-p", status="Implementing")
+        r = self.led.plan_block("--kind", "human", "2026-01-05-p",
+                                "Waiting on an answer.", stdin="")
+        self.assertCode(r, 0)
+        self.assertEqual(self.CEILING, self._ceiling())
+
     def test_a_later_flag_overrides_it(self):
         """Sticky must not mean stuck: the flag is still the authority."""
         self.assertEqual(0, self.led.compile("--softmax", "9000").code)

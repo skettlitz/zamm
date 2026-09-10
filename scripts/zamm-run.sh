@@ -118,6 +118,10 @@ Plans
   plan show <slug>     one plan, with progress
   plan check           validate active plans
   plan create <title>  new plan directory and file
+  plan block <slug> '<sentence>'
+                       record what stopped the work; sets Status: Blocked
+  plan unblock <slug> '<sentence>'
+                       record how it cleared; returns to Implementing
   plan archive         move terminal plans to the archive
 
 The project root is found automatically: the nearest ancestor holding a
@@ -140,6 +144,9 @@ Usage: zamm-run.sh memory <command> [args...]
                        the soft character ceiling (default 80000, or
                        $ZAMM_DIGEST_SOFTMAX) - an attention budget. Past it,
                        Digest blocks collapse to their headline (+el); no
+                       record is ever dropped. It STICKS: the value is
+                       remembered beside the digest, so later writes rebuild
+                       at it; --softmax 80000 goes back to the default.
   list [--all] [--scope <area>]
                        index of live records (default: those in the digest)
   show <slug|id>       one record in full
@@ -160,6 +167,20 @@ Usage: zamm-run.sh plan <command> [args...]
   show <slug>          one plan, with Done-when progress
   check                validate active plans
   create <title>       new plan directory and file
+  block <slug> '<sentence>'
+                       stop work and say why: appends a dated entry to the
+                       plan's ## Blocked-on log and sets Status: Blocked, so
+                       the reason leads the digest Plans tail. Pipe a detail
+                       paragraph on stdin. The sentence should name the
+                       obstruction AND what would clear it -- if you cannot
+                       name that, the plan is not blocked, it is Abandoned.
+                       Only from Implementing (or Blocked, for a second,
+                       independent obstruction).
+  unblock <slug> '<sentence>'
+                       say how the block cleared: resolves the open entry in
+                       place and returns the plan to Implementing. Detail
+                       paragraph on stdin. --all resolves every open block
+                       when one sentence genuinely covers them all.
   archive [--list]     move terminal plans to the archive (--list previews)
 EOF
       ;;
@@ -1149,11 +1170,14 @@ memory_show() {
   cat "$path"
 }
 
-plan_show() {
-  case "${1-}" in -h|--help) group_usage plan 0 ;; esac
-  [ $# -ge 1 ] || die "plan show: need a plan slug"
-  [ $# -le 1 ] || die "plan show: too many arguments (one slug)"
-  needle="$1"
+# Resolve a plan needle to exactly one main plan file, leaving the answer in
+# PLAN_RESOLVED. `scope` is `all` (active + archive, for read-only views) or
+# `active` (the mutating verbs: an archived plan is history, not something to
+# block or unblock). It sets a global rather than echoing because it dies on
+# ambiguity, and a `die` inside $( ) would exit only the subshell and hand the
+# caller an empty path.
+resolve_plan_file() {
+  needle="$1"; _rp_scope="$2"; _rp_verb="$3"
   # Candidates come from the checked manifest, like every other consumer of
   # "which plans exist": a silenced find reported "no plan matches" for a
   # tree nobody could read, and it happily displayed content reached through
@@ -1171,7 +1195,11 @@ plan_show() {
     echo "  restore it ('zamm-run.sh scaffold' recreates the directory), then investigate." >&2
     exit 4
   fi
-  all=$(awk -F"$_pstab" '$1 == "PLANFILE" || $1 == "ARCHFILE" { print $2 }' "$_psmf")
+  if [ "$_rp_scope" = "active" ]; then
+    all=$(awk -F"$_pstab" '$1 == "PLANFILE" { print $2 }' "$_psmf")
+  else
+    all=$(awk -F"$_pstab" '$1 == "PLANFILE" || $1 == "ARCHFILE" { print $2 }' "$_psmf")
+  fi
   rm -f "$_psmf"
 
   # Tiered resolution, the same precedence resolve_record uses for records:
@@ -1196,7 +1224,12 @@ plan_show() {
     [ -n "$matches" ] && break
   done
   n=$(printf '%s\n' "$matches" | grep -c . || true)
-  [ "${n:-0}" -eq 0 ] && die "no plan matches \"$needle\""
+  if [ "${n:-0}" -eq 0 ]; then
+    if [ "$_rp_scope" = "active" ]; then
+      die "$_rp_verb: no ACTIVE plan matches \"$needle\" (an archived plan is history; it is never blocked or unblocked)"
+    fi
+    die "no plan matches \"$needle\""
+  fi
   if [ "$n" -gt 1 ]; then
     echo "zamm: \"$needle\" matches $n plans:" >&2
     printf '%s\n' "$matches" | while IFS= read -r f; do
@@ -1205,7 +1238,15 @@ plan_show() {
     echo "  Use the full plan id to pick one." >&2
     exit 1
   fi
-  pf="$matches"
+  PLAN_RESOLVED="$matches"
+}
+
+plan_show() {
+  case "${1-}" in -h|--help) group_usage plan 0 ;; esac
+  [ $# -ge 1 ] || die "plan show: need a plan slug"
+  [ $# -le 1 ] || die "plan show: too many arguments (one slug)"
+  resolve_plan_file "$1" all "plan show"
+  pf="$PLAN_RESOLVED"
   # Count checkboxes ONLY inside the ## Done-when section (exact heading, not a
   # prefix), and only valid markers — a checkbox under ## Approach must not
   # inflate the total, and `[?]` is not a done item.
@@ -1223,6 +1264,415 @@ plan_show() {
   case "$pf" in */archive/plans/*) echo "(archived)" ;; esac
   echo
   cat "$pf"
+}
+
+# ---------------- plan block / plan unblock ----------------
+# Blocked is the status an agent sets to tell the rest of the team — human and
+# agent — "I cannot continue, and the reason will outlive this session". Its
+# entire ceremony is that reason, deliberately: every other transition in the
+# protocol carries a retrospective, and a transition that costs anything at the
+# moment you hit a wall is a transition agents skip, leaving a plan sitting
+# Implementing with a stale date and nobody knowing why. So `block` asks for one
+# sentence and nothing else, and `unblock` asks for one sentence saying how it
+# cleared.
+#
+# The log is append-only: entries are never deleted, they travel into the
+# archive with the plan, and they are what Execution-friction-after is
+# reconstructed from at closure.
+
+# One "date<TAB>class<TAB>sentence" row per entry in ## Blocked-on that carries
+# no `Resolved <date>:` line. An absent class prints as "-", never as an empty
+# field: tab is an IFS WHITESPACE character, so an empty field would collapse
+# into its neighbour and shift the sentence into the class slot. The separator after the date is tested in the
+# action rather than the pattern: a bracket expression holding both `[` and `:`
+# reads as a character-class opener.
+plan_blocked_open() {
+  awk '
+    function flush() { if (cur != "" && !res) print cur "\t" (kind == "" ? "-" : kind) "\t" txt }
+    { sub(/\r$/, "") }
+    $0 == "## Blocked-on" || substr($0,1,14) == "## Blocked-on " || substr($0,1,14) == "## Blocked-on\t" { bl = 1; next }
+    bl && /^## / { flush(); cur = ""; bl = 0 }
+    bl && /^- [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/ {
+      rest = substr($0, 13)
+      if (rest !~ /^[ \t]*\[/ && rest !~ /^[ \t]*:/) next
+      flush()
+      cur = substr($0, 3, 10)
+      kind = ""
+      if (match(rest, /^[ \t]*\[[^]]*\][ \t]*:/)) {
+        kind = substr(rest, index(rest, "[") + 1)
+        kind = substr(kind, 1, index(kind, "]") - 1)
+        txt = substr(rest, RLENGTH + 1)
+      } else {
+        sub(/^[ \t]*:/, "", rest)
+        txt = rest
+      }
+      sub(/^[ \t]+/, "", txt); sub(/[ \t]+$/, "", txt)
+      res = 0
+      next
+    }
+    bl && cur != "" && /^[[:space:]]*Resolved [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]:/ { res = 1 }
+    END { if (bl) flush() }
+  ' "$1"
+}
+
+# The block classes, split on WHO CLEARS THE BLOCK -- the one thing a reader of
+# the digest needs in order to know whether it is their move. Kept in step with
+# BLOCK_CLASSES in zamm-plan-check.sh.
+block_kind_help() {
+  cat >&2 <<'BKEOF'
+  --kind human               a person on this team must decide, answer,
+                             approve, or grant access
+  --kind plan --on <plan-id> another plan in this ledger must land first
+  --kind external            an upstream release, a deploy, another team's
+                             queue -- outside this team's control
+  --kind defect              something is broken and nobody has committed to
+                             fixing it yet
+  If the honest answer is "nobody, ever", the plan is not blocked. It is
+  Abandoned.
+BKEOF
+}
+
+plan_status_of() {
+  sed -n 's/^Status:[[:space:]]*//p' "$1" | head -1 | sed 's/[[:space:]]*$//'
+}
+
+# One sentence, on one line, with something in it: the log's shape depends on
+# the entry being a single line, and a newline would inject further structure
+# into the plan file the way a multi-line title once did.
+plan_check_sentence() {
+  _pcs_verb="$1"; _pcs_text="$2"
+  _pcs_nl=$(printf '\nx'); _pcs_nl=${_pcs_nl%x}
+  _pcs_cr=$(printf '\rx'); _pcs_cr=${_pcs_cr%x}
+  case "$_pcs_text" in
+    *"$_pcs_nl"*|*"$_pcs_cr"*) die "$_pcs_verb: the sentence must be a single line" ;;
+  esac
+  [ -n "$(printf '%s' "$_pcs_text" | tr -d '[:space:]')" ] ||
+    die "$_pcs_verb: the sentence is empty"
+}
+
+# Optional detail paragraph on stdin — any depth, indented into the entry.
+plan_read_paragraph() {
+  if [ -t 0 ]; then
+    printf ''
+    return 0
+  fi
+  _prp=$(cat)
+  [ -n "$(printf '%s' "$_prp" | tr -d '[:space:]')" ] || { printf ''; return 0; }
+  printf '%s' "$_prp"
+}
+
+# Publish a rewritten plan file with one rename, from a temp file beside it so
+# the move is atomic and never crosses a filesystem. The temp name is neither a
+# .plan.md nor a directory, so a compile racing this sees the old file or the
+# new one and never a half-written third thing.
+plan_publish_rewrite() {
+  # plan_publish_rewrite <verb> <planfile> <tmpfile> <expected-status>
+  [ -s "$3" ] || die "$1: the rewrite produced an empty file; $2 is unchanged"
+  grep -q "^Status: $4\$" "$3" ||
+    die "$1: the rewrite did not set 'Status: $4'; $2 is unchanged"
+  mv "$3" "$2" || die "$1: could not publish the rewritten plan file"
+}
+
+# The plans tail is the whole point of Blocked, so a block that is not in the
+# digest has not been announced. Recompile like `plan archive` does — but never
+# roll the edit back on failure: the block is correctly recorded either way, and
+# a degraded digest is a separate problem to fix, not a reason to lose the
+# reason someone just wrote down.
+plan_recompile_tail() {
+  _prt_rc=0
+  sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" >/dev/null 2>&1 || _prt_rc=$?
+  if [ "$_prt_rc" != "0" ] && [ "$_prt_rc" != "2" ]; then
+    echo "zamm: WARNING: the plan file is written, but the digest recompile failed (rc=$_prt_rc)." >&2
+    echo "  Run 'zamm-run.sh memory digest' and fix what it reports, or the Plans tail stays stale." >&2
+    return 0
+  fi
+  echo "Digest recompiled." >&2
+}
+
+plan_block() {
+  _pb_kind=""; _pb_on=""; _pb_n=0; _pb_slug=""; _pb_sent=""; _pb_endflags=0
+  while [ $# -gt 0 ]; do
+    if [ "$_pb_endflags" -eq 0 ]; then
+      case "$1" in
+        -h|--help) group_usage plan 0 ;;
+        --kind) [ $# -ge 2 ] || die "plan block: --kind needs a value (human|plan|external|defect)"
+                _pb_kind="$2"; shift 2; continue ;;
+        --kind=*) _pb_kind="${1#--kind=}"; shift; continue ;;
+        --on) [ $# -ge 2 ] || die "plan block: --on needs a plan id"
+              _pb_on="$2"; shift 2; continue ;;
+        --on=*) _pb_on="${1#--on=}"; shift; continue ;;
+        --) _pb_endflags=1; shift; continue ;;
+        -?*) die "plan block: unknown flag: $1" ;;
+      esac
+    fi
+    _pb_n=$((_pb_n + 1))
+    case "$_pb_n" in
+      1) _pb_slug="$1" ;;
+      2) _pb_sent="$1" ;;
+      *) die "plan block: too many arguments (a slug and ONE quoted sentence)" ;;
+    esac
+    shift
+  done
+  [ "$_pb_n" -ge 1 ] || die "plan block: need a plan slug"
+  [ "$_pb_n" -ge 2 ] || die "plan block: need one sentence naming the obstruction and what would clear it (detail paragraph on stdin)"
+
+  # The class is required, never defaulted: a default is a class nobody thinks
+  # about, and thinking about who clears the block is most of its value.
+  case "$_pb_kind" in
+    human|external|defect)
+      [ -z "$_pb_on" ] ||
+        die "plan block: --on names a plan and belongs only to --kind plan" ;;
+    plan)
+      [ -n "$_pb_on" ] ||
+        die "plan block: --kind plan must name the plan it waits on (--on <plan-id>)" ;;
+    "")
+      echo "zamm: plan block: --kind is required -- say who clears this block:" >&2
+      block_kind_help
+      exit 1 ;;
+    *) die "plan block: unknown --kind \"$_pb_kind\" (human|plan|external|defect)" ;;
+  esac
+  plan_check_sentence "plan block" "$_pb_sent"
+
+  # Resolve the dependency BEFORE touching the target: a dangling `[plan:...]`
+  # reference is worth failing on here, not discovering at the next plan check.
+  _pb_dep=""
+  if [ "$_pb_kind" = "plan" ]; then
+    resolve_plan_file "$_pb_on" all "plan block --on"
+    case "$PLAN_RESOLVED" in
+      */archive/plans/*)
+        die "plan block: --on $_pb_on is archived, so it has already landed; it cannot be what you are waiting on" ;;
+    esac
+    _pb_dep=$(basename "$(dirname "$PLAN_RESOLVED")")
+  fi
+
+  resolve_plan_file "$_pb_slug" active "plan block"
+  pf="$PLAN_RESOLVED"
+  [ -z "$_pb_dep" ] || [ "$_pb_dep" != "$(basename "$(dirname "$pf")")" ] ||
+    die "plan block: a plan cannot wait on itself ($_pb_dep)"
+  if [ "$_pb_kind" = "plan" ]; then _pb_label="plan:$_pb_dep"; else _pb_label="$_pb_kind"; fi
+  rel="${pf#"$ROOT/"}"
+  today=${ZAMM_TODAY:-$(date +%Y-%m-%d)}
+  valid_ymd "$today" || die "plan block: refusing an impossible date: $today"
+
+  # Implementing is the only entry point, and Blocked accepts a second,
+  # independent obstruction. A Draft is not blocked, it is unstarted — nobody
+  # is waiting on it — and a terminal plan is not resumed, it is replaced.
+  st=$(plan_status_of "$pf")
+  case "$st" in
+    Implementing|Blocked) ;;
+    Draft) die "plan block: $rel is a Draft; blocking is for work that has started (a stalled draft blocks nobody). Set Status: Implementing first, or leave it." ;;
+    Review) die "plan block: $rel is in Review; reopen it (Review -> Implementing) before recording a block." ;;
+    Done|Abandoned) die "plan block: $rel is $st (terminal); a terminal plan is never resumed — start a new one." ;;
+    "") die "plan block: $rel has no Status: line" ;;
+    *) die "plan block: $rel has an unknown Status \"$st\"" ;;
+  esac
+
+  para=$(plan_read_paragraph)
+  tmp=$(mktemp "$(dirname "$pf")/.zamm-block.XXXXXX") ||
+    die "plan block: could not create a temporary file beside $rel"
+  trap 'rm -f "$tmp"' EXIT HUP INT TERM
+  # Values travel through the environment, not `awk -v`: -v runs escape
+  # processing over its argument, so a sentence mentioning a path with a
+  # backslash would arrive mangled.
+  # Two passes over the same file: the first only answers "does this plan
+  # already have a ## Blocked-on section", the second edits. A single pass has
+  # to decide whether to OPEN a section at ## Learnings without knowing whether
+  # one follows, and a plan whose log sits after ## Learnings got both -- a new
+  # section AND an append to the real one, leaving two open blocks from one
+  # `plan block`.
+  ZAMM_BLOCK_SENT="$_pb_sent" ZAMM_BLOCK_PARA="$para" awk -v today="$today" -v label="$_pb_label" '
+    function emit(   n, i, lines) {
+      print "- " today " [" label "]: " sent
+      if (para != "") {
+        n = split(para, lines, "\n")
+        for (i = 1; i <= n; i++) {
+          sub(/[ \t]+$/, "", lines[i])
+          if (lines[i] == "") print ""
+          else print "  " lines[i]
+        }
+      }
+    }
+    function flushbl(   i, last) {
+      # The entry lands in the FIRST ## Blocked-on only. A malformed plan with
+      # two of them passes the rest through verbatim rather than growing a
+      # second copy of the block.
+      if (added) {
+        for (i = 1; i <= nbuf; i++) print buf[i]
+        nbuf = 0
+        return
+      }
+      last = nbuf
+      while (last > 0 && buf[last] ~ /^[ \t]*$/) last--
+      if (last == 0) {
+        print ""
+      } else {
+        for (i = 1; i <= last; i++) print buf[i]
+        print ""
+      }
+      emit()
+      print ""
+      nbuf = 0; added = 1
+    }
+    BEGIN { sent = ENVIRON["ZAMM_BLOCK_SENT"]; para = ENVIRON["ZAMM_BLOCK_PARA"] }
+    { sub(/\r$/, "") }
+    # pass 1: does a ## Blocked-on section exist anywhere in this file?
+    NR == FNR {
+      if ($0 == "## Blocked-on" || substr($0,1,14) == "## Blocked-on " || substr($0,1,14) == "## Blocked-on\t") hasbl = 1
+      next
+    }
+    !stdone && /^Status:/       { print "Status: Blocked"; stdone = 1; next }
+    !ludone && /^Last updated:/ { print "Last updated: " today; ludone = 1; next }
+    $0 == "## Blocked-on" || substr($0,1,14) == "## Blocked-on " || substr($0,1,14) == "## Blocked-on\t" {
+      print; inbl = 1; next
+    }
+    inbl && /^## / { flushbl(); inbl = 0; print; next }
+    # A plan written before the block log existed gets the section opened in
+    # the right place — never appended at EOF, where it would land under the
+    # trailing telemetry keys that physically sit inside ## Loose ends.
+    !hasbl && !added && ($0 == "## Learnings" || $0 == "## Loose ends") {
+      print "## Blocked-on"; print ""
+      emit(); print ""
+      added = 1
+      print; next
+    }
+    inbl && /^- \(no blocks recorded\)[[:space:]]*$/ { next }
+    inbl { buf[++nbuf] = $0; next }
+    { print }
+    END {
+      if (inbl) flushbl()
+      if (!added) { print ""; print "## Blocked-on"; print ""; emit() }
+    }
+  ' "$pf" "$pf" > "$tmp"
+  plan_publish_rewrite "plan block" "$pf" "$tmp" Blocked
+  trap - EXIT HUP INT TERM
+
+  echo "$rel"
+  echo "Blocked [$_pb_label]. The reason now leads the digest Plans tail." >&2
+  echo "  Clear it with: plan unblock $_pb_slug '<how it cleared>'" >&2
+  plan_recompile_tail
+}
+
+plan_unblock() {
+  _pu_all=0; _pu_n=0; _pu_slug=""; _pu_sent=""; _pu_endflags=0
+  while [ $# -gt 0 ]; do
+    if [ "$_pu_endflags" -eq 0 ]; then
+      case "$1" in
+        -h|--help) group_usage plan 0 ;;
+        --all) _pu_all=1; shift; continue ;;
+        --) _pu_endflags=1; shift; continue ;;
+        -?*) die "plan unblock: unknown flag: $1" ;;
+      esac
+    fi
+    _pu_n=$((_pu_n + 1))
+    case "$_pu_n" in
+      1) _pu_slug="$1" ;;
+      2) _pu_sent="$1" ;;
+      *) die "plan unblock: too many arguments (a slug and ONE quoted sentence)" ;;
+    esac
+    shift
+  done
+  [ "$_pu_n" -ge 1 ] || die "plan unblock: need a plan slug"
+  [ "$_pu_n" -ge 2 ] || die "plan unblock: need one sentence saying how the block cleared (detail paragraph on stdin)"
+  plan_check_sentence "plan unblock" "$_pu_sent"
+  resolve_plan_file "$_pu_slug" active "plan unblock"
+  pf="$PLAN_RESOLVED"
+  rel="${pf#"$ROOT/"}"
+  today=${ZAMM_TODAY:-$(date +%Y-%m-%d)}
+  valid_ymd "$today" || die "plan unblock: refusing an impossible date: $today"
+
+  st=$(plan_status_of "$pf")
+  [ "$st" = "Blocked" ] ||
+    die "plan unblock: $rel is $st, not Blocked; there is nothing to clear"
+
+  open=$(plan_blocked_open "$pf")
+  nopen=$(printf '%s\n' "$open" | grep -c . || true)
+  [ "${nopen:-0}" -ge 1 ] ||
+    die "plan unblock: $rel says Blocked but ## Blocked-on has no open entry ('plan check' explains)"
+  # More than one obstruction and one sentence to describe the clearing: refuse
+  # rather than guess which block that sentence belongs to. --all says the
+  # sentence really does cover every one of them.
+  if [ "${nopen:-0}" -gt 1 ] && [ "$_pu_all" -eq 0 ]; then
+    echo "zamm: $rel has $nopen open blocks:" >&2
+    printf '%s\n' "$open" | while IFS="$(printf '\t')" read -r d k t; do
+      [ -n "$d" ] && { [ "$k" = "-" ] && k=unclassified; echo "  $d [$k]: $t" >&2; }
+    done
+    echo "  One sentence cannot say how each of them cleared. Pass --all if it" >&2
+    echo "  genuinely covers every one, or edit the plan file to resolve them" >&2
+    echo "  individually (add an indented 'Resolved $today: <how>' under each)." >&2
+    exit 1
+  fi
+
+  para=$(plan_read_paragraph)
+  tmp=$(mktemp "$(dirname "$pf")/.zamm-unblock.XXXXXX") ||
+    die "plan unblock: could not create a temporary file beside $rel"
+  trap 'rm -f "$tmp"' EXIT HUP INT TERM
+  ZAMM_BLOCK_SENT="$_pu_sent" ZAMM_BLOCK_PARA="$para" awk -v today="$today" '
+    function endentry(   i, last, n, lines) {
+      if (!inentry) return
+      last = nent
+      while (last > 0 && ent[last] ~ /^[ \t]*$/) last--
+      print "- " edate (ekind == "" ? "" : " [" ekind "]") ": " etext
+      for (i = 1; i <= last; i++) print ent[i]
+      if (!eres) {
+        print "  Resolved " today ": " sent
+        if (para != "") {
+          n = split(para, lines, "\n")
+          for (i = 1; i <= n; i++) {
+            sub(/[ \t]+$/, "", lines[i])
+            if (lines[i] == "") print ""
+            else print "  " lines[i]
+          }
+        }
+      }
+      # give back the blank lines trimmed above, so entry spacing survives
+      for (i = last + 1; i <= nent; i++) print ent[i]
+      inentry = 0; nent = 0
+    }
+    BEGIN { sent = ENVIRON["ZAMM_BLOCK_SENT"]; para = ENVIRON["ZAMM_BLOCK_PARA"] }
+    { sub(/\r$/, "") }
+    !stdone && /^Status:/       { print "Status: Implementing"; stdone = 1; next }
+    !ludone && /^Last updated:/ { print "Last updated: " today; ludone = 1; next }
+    $0 == "## Blocked-on" || substr($0,1,14) == "## Blocked-on " || substr($0,1,14) == "## Blocked-on\t" {
+      print; inbl = 1; next
+    }
+    inbl && /^## / { endentry(); inbl = 0; print; next }
+    inbl && /^- [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/ {
+      erest = substr($0, 13)
+      # `[` (classed) or `:` (an entry written before classes) opens an entry;
+      # anything else after the date is ordinary prose in the section body.
+      if (erest ~ /^[ \t]*\[/ || erest ~ /^[ \t]*:/) {
+        endentry()
+        inentry = 1
+        edate = substr($0, 3, 10)
+        ekind = ""
+        if (match(erest, /^[ \t]*\[[^]]*\][ \t]*:/)) {
+          ekind = substr(erest, index(erest, "[") + 1)
+          ekind = substr(ekind, 1, index(ekind, "]") - 1)
+          etext = substr(erest, RLENGTH + 1)
+        } else {
+          sub(/^[ \t]*:/, "", erest)
+          etext = erest
+        }
+        sub(/^[ \t]+/, "", etext); sub(/[ \t]+$/, "", etext)
+        eres = 0; nent = 0
+        next
+      }
+    }
+    inbl && inentry {
+      if ($0 ~ /^[[:space:]]*Resolved [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]:/) eres = 1
+      ent[++nent] = $0
+      next
+    }
+    { print }
+    END { if (inentry) endentry() }
+  ' "$pf" > "$tmp"
+  plan_publish_rewrite "plan unblock" "$pf" "$tmp" Implementing
+  trap - EXIT HUP INT TERM
+
+  echo "$rel"
+  echo "Unblocked; back to Implementing. The resolution stays in ## Blocked-on" >&2
+  echo "  as execution telemetry — it feeds Execution-friction-after at closure." >&2
+  plan_recompile_tail
 }
 
 plan_create() {
@@ -3340,6 +3790,8 @@ case "$cmd" in
       list)   TARGET="zamm-status.sh"; INTERP="bash" ;;
       show)   require_root; require_version; plan_show "$@"; exit 0 ;;
       create) require_root; require_version; plan_create "$@"; exit 0 ;;
+      block)   require_root; require_version; plan_block "$@"; exit 0 ;;
+      unblock) require_root; require_version; plan_unblock "$@"; exit 0 ;;
       check)  TARGET="zamm-plan-check.sh" ;;
       archive)
         case "${1-}" in -h|--help) exec bash "$INTERNAL/zamm-archive.sh" --help ;; esac

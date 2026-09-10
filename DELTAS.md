@@ -1728,3 +1728,128 @@ Honest limit: synthetic load (8-core spin, fork storm) did not reproduce the
 original failure, so the fix is justified by construction — the window is held
 rather than raced — not by a falsified repro.
 
+
+## 2026-09-10 — `Blocked`, a sixth plan status
+
+The status set described forward motion (`Draft`, `Implementing`, `Review`) and
+finality (`Done`, `Abandoned`), and nothing described *stopped but not
+finished*. An agent that hit a wall had no legal way to say so: the plan stayed
+`Implementing`, `Last updated:` went stale, `done-when x/y` stopped moving, and
+the digest reported it identically to work in progress. The next session picked
+it up and rediscovered the same wall, because the one thing worth keeping — what
+the wall WAS — died with the session.
+
+`Blocked` is non-terminal, reachable only from `Implementing`, and leaves to
+`Implementing` or `Abandoned`. It is never archive-ready.
+
+**Entering costs one sentence, and that is the design.** Every other transition
+carries a retrospective; a transition that costs anything at the moment you hit
+a wall is a transition nobody makes, and the feature would have been dead on
+arrival. The retrospective still lives where it lived, on the way out through
+Review or Abandoned.
+
+**The log.** A `## Blocked-on` section between `## Approach` and `## Learnings`
+(chosen so the trailing telemetry keys that physically sit under `## Loose ends`
+keep their parsing). One entry per block:
+
+    - 2026-09-04 [external]: qmd 0.9 must reach staging before the writer can be tested.
+      Tried pinning 0.8; the incremental API only exists in 0.9. OPS-412 filed.
+      Resolved 2026-09-12: 0.9 landed; resumed against the real index.
+
+Append-only: entries are never deleted, they travel into the archive with the
+plan, and they are what `Execution-friction-after` is reconstructed from at
+closure rather than remembered.
+
+**The invariant, and why it is only a snapshot.** `Blocked` requires at least
+one OPEN entry; every other status requires none. That pair is the whole
+enforcement. It makes "unblock without recording the resolution" impossible to
+express, needs no transition history a mutable markdown file could not prove,
+supports N simultaneous blocks with no extra machinery, and leaves a fully
+resolved log legal in any status. It fits `plan check`'s existing philosophy
+exactly: ask what the declared status requires, never how it was reached.
+
+**Classes, split on who clears the block** — `human`, `plan:<plan-id>`,
+`external`, `defect`. Required, never defaulted, because choosing one is the
+thinking: if the honest answer is "nobody, ever", the plan is not blocked, it is
+Abandoned. Three things pay for the taxonomy:
+
+  1. `plan:<id>` is machine-checkable. The id must resolve, and `plan check`
+     warns when the named plan has already landed — a dependency that clears
+     itself is exactly the one nobody notices.
+  2. Staleness stops being one number: 7 days for `human`, 14 for `defect`, 21
+     for `plan`, 30 for `external`. One threshold would cry wolf — an
+     unanswered question at a week means someone dropped it; an upstream
+     release at a week is just Tuesday. Advisory, never a failure.
+  3. The digest reader learns whether it is their move.
+
+**The digest.** Rank 0, above Review — both want a human, but Review is
+finished work awaiting a blessing while Blocked is work that has stopped. The
+entry line gains `blocked <N>d`, and each open block renders as
+`blocked[<class>]: <sentence>` under the title. The detail paragraph stays in
+the file. Open blocks render whatever the status claims, so one can never hide
+behind a stale `Implementing`.
+
+**Verbs.** `plan block --kind <class> [--on <plan-id>] <slug> '<sentence>'` and
+`plan unblock [--all] <slug> '<sentence>'`, detail paragraph on stdin, both
+recompiling the tail the way `plan archive` does. `unblock` refuses to guess
+which of several open blocks a single sentence describes.
+
+`plan block` reads the plan file TWICE: the first pass only answers "does a
+`## Blocked-on` section already exist". A single pass has to decide at
+`## Learnings` whether to open one without knowing whether one follows, and a
+plan whose log sat after `## Learnings` got both — a new section AND an append
+to the real one, so one `plan block` left two open blocks.
+
+Three bugs found while building it, all worth recording. Values reach `awk`
+through the environment rather than `-v`, which runs escape processing over its
+argument and mangled any sentence mentioning a Windows path. And an absent
+class is written `-`, never the empty string: tab is an IFS *whitespace*
+character, so an empty field collapsed into its neighbour and shifted every
+field after it — which made an unclassified block invisible to the open-entry
+count, the one place the invariant could have been silently defeated. And
+`\e` is not an escape sequence in double quotes, so a refusal message printed
+a literal backslash at the reader.
+
+Also resolves a live inconsistency: the compiler already prefix-matched status
+and commented "annotated statuses keep their label", while the checker
+exact-matched five known statuses. `Implementing (blocked)` rendered and failed
+validation. There is now a real status to match instead of an annotation.
+
+**`Blocked -> Abandoned` was documented and unreachable.** The invariant's
+second half — "every status but `Blocked` requires no open entry" — is what
+makes an unrecorded unblock impossible to express, and it swallowed the fatal
+case with it: `plan check` errored on an Abandoned plan with an open block,
+`plan archive` refuses anything failing `plan check`, and the remedy the error
+named (`plan unblock`) dies on a plan that is no longer Blocked. Only a
+hand-edit escaped. `Abandoned` is now the one status allowed to carry an open
+entry, because it is the status you reach when the obstruction turned out to be
+fatal: nothing cleared, so a `Resolved` line would make the log lie about the
+one fact that explains why the plan died. The digest keeps printing the open
+block, so abandoning hides nothing; the "the dependency landed" warning is
+gated on the plan still being Blocked, since it is advice to act and nobody is
+waiting any more.
+
+**The attention budget is a setting, so it is remembered.** `--softmax`
+survived only until the next ledger write. `memory create`, `memory archive`,
+`plan block` and `plan unblock` all recompile implicitly, none of them could
+know what the published digest had been built at, and each rebuilt it at the
+default 80000 — so the digest's own "Raise with `--softmax`" advice appeared to
+work and then quietly undid itself. `memory archive` was the sharpest form:
+it normalizes the digest before snapshotting it, so the snapshot was already
+the reverted file and "Digest unchanged (verified)" was verified against a pair
+the script had itself replaced. The effective value now rides in the state
+sidecar beside the digest it produced, and any run that does not name one
+adopts it; `--softmax 80000` returns to the default. A sidecar value is
+re-validated against the same floor and integer rules as the flag — a derived
+file anyone can clobber may fail to answer, but must never be able to brick the
+digest.
+
+**The below-the-caps note only makes sense for records that compete.** "No
+session will be handed it" is read out of the sidecar's `select` rows, and only
+type `memory` is ever ranked into one. Tombstones, votes, erasures and journal
+elevations are reached through their targets and never produce a `select` row
+at all, so both of the note's claims were false for every one of them — and a
+note that fires on 100% of instrument writes teaches the reader to skip it
+where it is true. This is the same mistake as the per-tree sidecar fix above,
+one axis over: that one asked the wrong file, this one asked about the wrong
+kind of record.

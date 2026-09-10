@@ -52,6 +52,7 @@ rules that are not gates:
 | `test_ledger_shape.py` | **G5** — real files and real directories only; plus the duplicate-id realities the invariants promise to tolerate |
 | `test_graph.py` | supersession, votes and erasure semantics |
 | `test_plan_validation.py` | `plan check` and plan/ledger cross-check rules |
+| `test_plan_blocked.py` | the `Blocked` status: the classed block log, its snapshot invariant, per-class staleness, the dependency check, and `plan block` / `plan unblock` |
 | `test_cli_safety.py` | help, argument handling, version and migration gates |
 | `test_journal.py` | the journal tree: classes, policy, watermarks, capture, the read seams, the digestion trichotomy, the digest line |
 

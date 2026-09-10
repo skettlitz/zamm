@@ -267,19 +267,26 @@ class Ledger:
     def delete(self, rid, year="2026"):
         (self.root / f"zamm-memory/knowledge/{year}/{rid}.md").unlink()
 
-    def add_plan(self, slug, status="Implementing", title=None, valid=True):
+    def add_plan(self, slug, status="Implementing", title=None, valid=True,
+                 blocked_kind="human", blocked_since=None):
         """Write a plan fixture.
 
         valid=True fills whatever the status requires, so terminal plans are
         archivable — `plan archive` refuses plans that fail `plan check`.
         Pass valid=False to build a deliberately malformed fixture.
+
+        status="Blocked" gets a `## Blocked-on` log holding one open entry:
+        blocked_kind sets its class (`human`, `external`, `defect` or
+        `plan:<plan-id>`) and blocked_since its date, which is what the
+        per-class staleness advisory measures against ZAMM_TODAY.
         """
         head = [f"# {title or slug}", "", f"Status: {status}"]
         # Abandoned included: a terminal plan the suite archives represents work
         # that was done and then abandoned, so it carries execution context (and
         # the retrospective below). The checker's work-happened heuristic then
         # requires that retrospective, which this fixture supplies.
-        if valid and status in ("Implementing", "Review", "Done", "Abandoned"):
+        if valid and status in ("Implementing", "Blocked", "Review", "Done",
+                                "Abandoned"):
             head += ["Execution-context-before: synthetic fixture",
                      "Complexity-forecast: gecko"]
         head += ["Last updated: 2026-01-05", ""]
@@ -292,6 +299,13 @@ class Ledger:
         head += ["## Done-when", ""]
         head += ["- [x] something" if (valid and status in ("Review", "Done"))
                  else "- [ ] something", ""]
+        # A Blocked plan MUST carry an open block entry — that pairing is the
+        # invariant, so a fixture without one is not a Blocked plan at all.
+        if valid and status == "Blocked":
+            head += ["## Blocked-on", "",
+                     f"- {blocked_since or '2026-01-05'} [{blocked_kind}]: "
+                     "Synthetic obstruction; clears when the fixture says so.",
+                     ""]
         if valid and status in ("Review", "Done", "Abandoned"):
             head += ["## Learnings", "", "- Synthetic fixture learning.", ""]
             if status == "Abandoned":
@@ -412,6 +426,12 @@ class Ledger:
 
     def plan_create(self, *args, **kw) -> Result:
         return self.zamm("plan", "create", *args, **kw)
+
+    def plan_block(self, *args, **kw) -> Result:
+        return self.zamm("plan", "block", *args, **kw)
+
+    def plan_unblock(self, *args, **kw) -> Result:
+        return self.zamm("plan", "unblock", *args, **kw)
 
     def status(self, *args, **kw) -> Result:
         return self.zamm("status", *args, **kw)

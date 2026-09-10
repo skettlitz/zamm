@@ -50,6 +50,7 @@ normalize_status() {
   case "$lowered" in
     draft) echo "Draft" ;;
     implementing) echo "Implementing" ;;
+    blocked) echo "Blocked" ;;
     review) echo "Review" ;;
     done) echo "Done" ;;
     abandoned) echo "Abandoned" ;;
@@ -182,6 +183,7 @@ fi
 
 print_bucket "Draft" "Draft" "$ROWS_FILE"
 print_bucket "Implementing" "Implementing" "$ROWS_FILE"
+print_bucket "Blocked" "Blocked" "$ROWS_FILE"
 print_bucket "Review" "Review" "$ROWS_FILE"
 print_bucket "Done" "Done" "$ROWS_FILE"
 print_bucket "Abandoned" "Abandoned" "$ROWS_FILE"

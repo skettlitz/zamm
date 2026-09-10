@@ -12,7 +12,7 @@ Commands are reached through one entrypoint, `zamm-run.sh`, which finds the proj
    - No memory records at all: tell the human active memory is not initialized and ask whether to run `<zamm-skill>/references/initialization/existing-project.md`. Never create placeholder records to silence the prompt.
    - The tail carries `## Plans`, a `Backlog:` line and, only when journal digestion is due, a `Journal:` line — a nudge, never an obligation.
    - Never edit the digest; the record files are the only source of truth.
-2. Identify the active plan from the digest's `## Plans` tail (status, progress, title; ranked Review, Implementing, Draft). A recently-archived list follows: check it before treating a referenced plan directory as missing after a pull.
+2. Identify the active plan from the digest's `## Plans` tail (status, progress, title; ranked Blocked, Review, Implementing, Draft; a Blocked entry carries the reason and who clears it, and is the first thing to act on or route). A recently-archived list follows: check it before treating a referenced plan directory as missing after a pull.
 3. If no plan matches the request AND the request warrants one — multi-step work, changes that persist beyond the session, research artifacts or a decision worth revisiting, work spanning sessions — create it (`plan create '<title>'`; `<zamm-skill>/references/plans-writing.md`) and recompile. Answering a question, explaining code, a lookup, a trivial edit or running a command does not warrant a plan; plan-less sessions are normal, and distillation still applies to them. When genuinely unsure, ask.
 4. Prefer one active implementing plan at a time; if unclear, auto-pick by best match and ask the human only when ambiguity remains.
 
