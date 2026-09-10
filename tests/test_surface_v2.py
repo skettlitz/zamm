@@ -115,21 +115,40 @@ class TestMemoryArchive(ZammTest):
         self.assertFalse(self.led.exists(
             "zamm-memory/knowledge/2026/2026-01-05-obsolete-22223.md"))
 
-    def test_never_moves_an_ancestor_of_a_live_head(self):
-        """The dangerous case. Votes aggregate over the ancestor chain, so a
-        superseded ancestor of something living is load-bearing: moving it
-        would drop its descendant's vote signal and dangle the reference."""
+    def test_moves_a_superseded_ancestor_and_the_head_keeps_its_rank(self):
+        """The case the old rule refused. Votes aggregate over the ancestor
+        chain, so a superseded ancestor of a live head used to be
+        load-bearing. Archived records are lineage nodes now: the head keeps
+        the ancestor vote and the digest below the header is byte-identical,
+        and the path says what a search cannot - archive/ is history."""
         old = self.led.add("evolving", "First version.")
-        self.led.add("evolving", "Current version.", date="2026-01-06",
-                     supersedes=old)
+        head = self.led.add("evolving", "Current version.", date="2026-01-06",
+                            supersedes=old)
+        self.led.add("closure", type="votes", date="2026-01-07", plan="p", up=old)
         self.led.compile()
+        before = self.led.digest()
+        self.assertIn_(f"{head} +1", before, "the ancestor vote reaches the head")
 
         r = self.led.memory_archive()
 
         self.assertCode(r, EXIT_OK)
-        self.assertIn_("No inert records", r.out)
         self.assertTrue(self.led.exists(
-            f"zamm-memory/knowledge/2026/{old}.md"), "ancestor must stay")
+            f"zamm-memory/archive/knowledge/2026/{old}.md"), "the ancestor moves")
+        self.assertFalse(self.led.exists(f"zamm-memory/knowledge/2026/{old}.md"))
+        after = self.led.digest()
+        self.assertIn_(f"{head} +1", after, "the vote survives the move")
+        self.assertEqual(before.splitlines()[1:-1], after.splitlines()[1:-1],
+                         "digest body unchanged below the header")
+        self.assertIn_("archive-ready=0", after.splitlines()[0])
+        self.assertCode(self.led.check(), EXIT_OK)
+
+    def test_never_moves_the_live_head_or_its_tombstone_in_effect(self):
+        old = self.led.add("evolving", "First version.")
+        head = self.led.add("evolving", "Current version.", date="2026-01-06",
+                            supersedes=old)
+        self.led.compile()
+        self.led.memory_archive()
+        self.assertTrue(self.led.exists(f"zamm-memory/knowledge/2026/{head}.md"))
 
     def test_never_moves_a_live_votes_record(self):
         target = self.led.add("voted", "A statement with a vote.")
@@ -139,7 +158,7 @@ class TestMemoryArchive(ZammTest):
 
         r = self.led.memory_archive()
 
-        self.assertIn_("No inert records", r.out)
+        self.assertIn_("Nothing to archive", r.out)
 
     def test_the_digest_is_unchanged_by_archiving(self):
         """The defining property: archiving removes only records that

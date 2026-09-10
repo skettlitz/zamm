@@ -797,7 +797,23 @@ fi
 # Refresh the digest so the new record is visible immediately. The digest is
 # derived and disposable (G2), so a failure here is reported, not fatal: the
 # record is already in the ledger and the next compile picks it up.
+#
+# The write REPORTS what it changed, because the alternative is the caller
+# re-reading the whole digest to find out — tens of thousands of tokens to
+# learn two facts it already had the pieces for. Both come from the state
+# sidecar, which the compile just rewrote.
+# The selection sidecar is per tree, and this note is about THIS record's
+# lens: reading the knowledge sidecar for a backlog or journal write reported
+# "no session will be handed it" about a record that was never a candidate for
+# that file, which is false for every idea and episode ever captured.
+case "$TREE" in
+  backlog) _state="$PROJECT_ROOT/zamm-memory/.compiled/backlog-state.tsv" ;;
+  journal) _state="$PROJECT_ROOT/zamm-memory/.compiled/journal-state.tsv" ;;
+  *)       _state="$PROJECT_ROOT/zamm-memory/.compiled/state.tsv" ;;
+esac
+_field() { [ -f "$_state" ] || return 0; awk -F'\t' -v k="$1" '$1==k{print $2; exit}' "$_state"; }
 if [ "$VALIDATE" -eq 1 ]; then
+  _contested_before=$(_field contested)
   crc=0
   sh "$SCRIPT_DIR/zamm-compile.sh" --project-root "$PROJECT_ROOT" >/dev/null 2>&1 || crc=$?
   if [ "$crc" -eq 2 ]; then
@@ -806,6 +822,32 @@ if [ "$VALIDATE" -eq 1 ]; then
   elif [ "$crc" -ne 0 ]; then
     echo "note: the record was written, but the digest could not be rebuilt (rc=$crc);" >&2
     echo "      run 'zamm-run.sh memory digest' to refresh it." >&2
+  fi
+  if [ "$crc" -eq 0 ] || [ "$crc" -eq 2 ]; then
+    # Did this write leave a fork unresolved? Superseding ONE of two live heads
+    # is the mistake the reconciliation index exists to catch, and it is
+    # invisible in the exit code — contested heads are not degradation.
+    _cb=${_contested_before:-0}
+    _ca=$(_field contested); _ca=${_ca:-0}
+    if [ "$_ca" -gt "$_cb" ]; then
+      echo "note: this write left $_ca reconciliation group(s) open - two live heads of" >&2
+      echo "      the same chain. Read the '## Needs reconciliation' section of" >&2
+      echo "      zamm-memory/.compiled/memory.md and resolve it this session." >&2
+    fi
+    # Did it land somewhere anyone will see? A record below the entry caps stays
+    # greppable and can rank back in later, but no session is handed it, and a
+    # writer who believes otherwise has silently written to nobody.
+    # Only type memory is ever ranked into a lens, so only type memory can be
+    # BELOW the caps. Instruments (tombstone, votes, erasure) and journal
+    # elevations (digest) are read through their targets and never get a
+    # `select` row, so this note said "no session will be handed it" about
+    # every single one of them - false, and firing on 100% of instrument
+    # writes trains the reader to skip the note where it is true.
+    if [ "$RTYPE" = "memory" ] && [ -f "$_state" ] &&
+       ! awk -F'\t' -v id="$BASE" '$1=="select" && $2==id{f=1} END{exit !f}' "$_state"; then
+      echo "note: $BASE is below the digest entry caps, so no session will be handed" >&2
+      echo "      it. It stays greppable and can rank back in as others decay." >&2
+    fi
   fi
 fi
 

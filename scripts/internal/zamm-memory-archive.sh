@@ -1,18 +1,20 @@
 #!/bin/sh
-# ZAMM memory archive — move fully-inert records out of the compiler scan path.
+# ZAMM memory archive — move dead records out of the live tree.
 #
 # Usage: zamm-memory-archive.sh [--project-root <path>] [--dry-run]
 #
-# Only records in a supersede component with NO live memory record and NO live
-# votes record are moved. Votes aggregate over the whole ancestor chain of a
-# record, so a dead ancestor of a live head is load-bearing: moving it would
-# silently drop the vote signal of its descendants and dangle their
-# supersedes: target. zamm-compile.sh --list-inert owns that rule, because it
-# already owns the graph.
+# Moves every superseded or retired memory record, plus the tombstones and
+# votes records of chains that are dead end to end, into
+# zamm-memory/archive/knowledge/<year>/. The path then says what a search
+# cannot: knowledge/ is what is, archive/ is what was. The compiler keeps an
+# archived record in the graph as a lineage node (id, type, edges, seed
+# votes from its header), so a live head keeps every ancestor vote and its
+# depth credit and the digest below the header is byte-identical - verified
+# after every run, rolled back otherwise. zamm-compile.sh --list-inert owns
+# the selection, because it owns the graph; erasure records never move.
 #
 # Archived records stay in the working tree (still greppable) and their ids
-# stay resolvable — the compiler registers archived filenames as known-inert
-# reference targets.
+# stay resolvable; `whatis` reports one as archived with its live head.
 
 set -eu
 LC_ALL=C
@@ -77,17 +79,24 @@ if ! sh "$COMPILE" --project-root "$PROJECT_ROOT" --check >/dev/null 2>&1; then
   exit 1
 fi
 
+# Normalize first, so the inert list and the BEFORE snapshot below come from
+# the same compile. This is also why the digest's attention budget has to be
+# remembered rather than re-defaulted: this line publishes, and when it rebuilt
+# a --softmax-built digest at 80000 the BEFORE captured just after it was
+# already the reverted file -- so "Digest unchanged (verified)" was verified
+# against a pair this script had itself replaced. The claim covers what THIS
+# ARCHIVE changed, never what the recompile before it did.
 sh "$COMPILE" --project-root "$PROJECT_ROOT" >/dev/null
 
 INERT=$(sh "$COMPILE" --project-root "$PROJECT_ROOT" --list-inert)
 
 if [ -z "$INERT" ]; then
-  echo "No inert records: every record still belongs to a live chain."
+  echo "Nothing to archive: no superseded or retired records in the live tree."
   exit 0
 fi
 
 COUNT=$(printf '%s\n' "$INERT" | wc -l | tr -d ' ')
-echo "Inert records (fully-retired chains): $COUNT"
+echo "Archive-ready records (superseded, retired, or in a chain dead end to end): $COUNT"
 printf '%s\n' "$INERT" | while IFS= read -r f; do
   [ -n "$f" ] && echo "  - ${f#"$PROJECT_ROOT/"}"
 done
@@ -232,8 +241,8 @@ tail -n +2 "$DIGEST" | sed '/^<!-- zamm-generation: /d' > "$AFTER"
 if ! diff -q "$BEFORE" "$AFTER" >/dev/null 2>&1; then
   echo "" >&2
   echo "ERROR: the digest changed after archiving; rolling back." >&2
-  echo "       A record that changes the digest was not inert. This is a bug" >&2
-  echo "       in the inert rule, not in your ledger — please report it." >&2
+  echo "       A record that changes the digest was still load-bearing. This is a" >&2
+  echo "       bug in the archive rule, not in your ledger — please report it." >&2
   exit 1
 fi
 

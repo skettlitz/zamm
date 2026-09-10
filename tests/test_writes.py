@@ -267,15 +267,58 @@ class Rev3PublishBlame(ZammTest):
         self.assertTrue(os.path.exists(draft), "draft is untouched")
 
 
-class Rev3PublishInterrupt(ZammTest):
+class Rev3PublishInterrupt(ShimTest):
     """A faithful Ctrl-C is a process-group SIGINT. Publish validates a
     private copy and only then claims the final name, so an interrupt during
     the (long) validation can only ever leave the draft exactly as it was:
-    there is no half-published state to roll back from."""
+    there is no half-published state to roll back from.
+
+    The window is HELD open with a barrier rather than raced for. An earlier
+    version polled until it saw the pending copy and then hoped to still be
+    inside the validation window when the signal landed, widening the odds
+    with 60 throwaway records. Under full-suite load the test process could
+    be descheduled past the whole window and fail its own premise instead of
+    the invariant — a suite that cries wolf is worse than a slower one.
+    """
+
+    def _paused_publish(self, rid, year, barrier):
+        """Start `memory publish` with an awk shim that BLOCKS on the first
+        awk to run while the pending copy exists — i.e. inside validation,
+        which runs the compiler twice (zamm-validate.sh). Returns the Popen,
+        provably paused rather than probably still there."""
+        real_awk = shutil.which("awk")
+        self._write_exec(
+            self._shim_dir() / "awk",
+            "#!/bin/sh\n"
+            'if ls "$ZAMM_TEST_YEAR"/.*.md.pending.* >/dev/null 2>&1; then\n'
+            '  if mkdir "$ZAMM_TEST_BARRIER/once" 2>/dev/null; then\n'
+            '    : > "$ZAMM_TEST_BARRIER/paused"\n'
+            '    while [ ! -e "$ZAMM_TEST_BARRIER/go" ]; do sleep 0.02; done\n'
+            "  fi\n"
+            "fi\n"
+            f'exec "{real_awk}" "$@"\n')
+        env = dict(os.environ)
+        env["PATH"] = f"{self._shim_dir()}:{env['PATH']}"
+        env["ZAMM_TEST_BARRIER"] = str(barrier)
+        env["ZAMM_TEST_YEAR"] = year
+        env["ZAMM_TODAY"] = PINNED_TODAY
+        p = subprocess.Popen(
+            ["sh", str(SCRIPTS / "zamm-run.sh"), "--project-root",
+             str(self.led.root), "memory", "publish", rid],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env=env, cwd=str(self.led.root), preexec_fn=os.setsid,
+        )
+        deadline = time.time() + 60
+        while not (barrier / "paused").exists():
+            self.assertLess(time.time(), deadline,
+                            "publish never reached its validation window")
+            if p.poll() is not None:
+                self.fail(f"publish exited before validating: {p.communicate()}")
+            time.sleep(0.02)
+        return p
 
     def test_sigint_mid_validation_leaves_the_draft_alone(self):
-        # enough records that validation leaves a wide window
-        self.led.add_many(60)
+        self.led.add_many(3)
         draft = self.led.draft("victim", "A valid body.")
         rid = os.path.basename(draft)[: -len(".md.draft")]
         final = draft[: -len(".draft")]
@@ -285,26 +328,15 @@ class Rev3PublishInterrupt(ZammTest):
         def pending():
             return [f for f in os.listdir(year) if ".md.pending." in f]
 
-        env = dict(os.environ)
-        env["ZAMM_TODAY"] = PINNED_TODAY
-        proc = subprocess.Popen(
-            ["sh", str(SCRIPTS / "zamm-run.sh"), "--project-root",
-             str(self.led.root), "memory", "publish", rid],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            env=env, cwd=str(self.led.root), preexec_fn=os.setsid,
-        )
+        barrier = self.led.root / ".barrier"
+        barrier.mkdir()
+        proc = self._paused_publish(rid, year, barrier)
         try:
-            # the private copy precedes validation; once it exists the
-            # publish is inside its validation window
-            deadline = time.time() + 20
-            while not pending() and time.time() < deadline:
-                if proc.poll() is not None:
-                    break
-                time.sleep(0.005)
-            self.assertTrue(proc.poll() is None and pending(),
-                            "publish finished before it could be interrupted")
+            # Held inside validation, with the private copy on disk. `go` is
+            # never written: the signal is what releases this publish.
+            self.assertTrue(pending(), "the private copy should exist while paused")
             os.killpg(os.getpgid(proc.pid), signal.SIGINT)
-            out, err = proc.communicate(timeout=30)
+            out, err = proc.communicate(timeout=60)
         finally:
             if proc.poll() is None:
                 proc.kill()
@@ -921,3 +953,138 @@ class Rev6PlanIdUniqueness(ZammTest):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheWriteReportsWhatItChanged(ZammTest):
+    """`memory create` recompiles; it should also SAY what that did.
+
+    The alternative is the caller re-reading the digest to find out, which is
+    tens of thousands of tokens to learn two facts — did my write leave a fork
+    open, and did it land anywhere anyone will see. Both are in the state
+    sidecar the compile just rewrote, so the write can answer them in a line.
+    """
+
+    def test_a_clean_write_says_nothing_extra(self):
+        """Silence is the common case and must stay silent, or the notes
+        become noise the reader learns to skip."""
+        r = self.led.new_memory(
+            "--scope", "internals/thing", "a-rule",
+            body="A statement that lands normally.\n", validate=True,
+        )
+
+        self.assertEqual(r.code, 0)
+        self.assertNotIn_("reconciliation group", r.err)
+        self.assertNotIn_("below the digest entry caps", r.err)
+
+    def test_a_write_that_leaves_two_live_heads_says_so(self):
+        """Superseding ONE of two live heads is the mistake the reconciliation
+        index exists to catch, and it is invisible in the exit code — a
+        contested head is not degradation."""
+        a = self.led.add("original", "The original statement.")
+        self.led.add("first-fix", "The first replacement.", supersedes=a)
+
+        r = self.led.new_memory(
+            "--scope", "contracts/api", "second-fix",
+            "--supersedes", a,
+            body="A competing replacement for the same original.\n", validate=True,
+        )
+
+        self.assertEqual(r.code, 0)
+        self.assertIn_("reconciliation group", r.err)
+        self.assertIn_("Needs reconciliation", r.err)
+
+    def test_a_write_nobody_will_be_handed_says_so(self):
+        """A record below the entry caps stays greppable and can rank back in,
+        but no session is handed it — and a writer who believes otherwise has
+        silently written to nobody."""
+        # Same crowded area as the fixture: a fresh record in an EMPTY area
+        # gets a large diversity bonus (GROUP_PENALTY x mintaken) and is
+        # selected despite a low score, which is the selector working.
+        self.led.add_many(240)
+
+        r = self.led.new_memory(
+            "--scope", "contracts/api", "low-rank",
+            "--importance", "minor", "--durability", "weeks",
+            body="A minor, fast-decaying note in a saturated ledger.\n", validate=True,
+        )
+
+        self.assertEqual(r.code, 0)
+        self.assertIn_("below the digest entry caps", r.err)
+        self.assertIn_("stays greppable", r.err)
+
+
+class TestBelowTheCapsNoteFollowsTheTree(ZammTest):
+    """After a write, the writer is told when the record landed below the
+    digest entry caps — "no session will be handed it". That verdict is read
+    out of the per-tree selection sidecar, and it used to read the knowledge
+    sidecar whatever the tree was. A backlog idea and a journal episode are
+    never candidates for that file, so every idea and episode ever captured
+    was falsely reported as invisible."""
+
+    def test_a_fresh_backlog_idea_is_not_called_invisible(self):
+        r = self.led.backlog("add", "A brand new and only idea.")
+        self.assertCode(r, EXIT_OK)
+        self.assertNotIn("below the digest entry caps", r.err)
+
+    def test_a_fresh_journal_episode_is_not_called_invisible(self):
+        r = self.led.zamm("journal", "add", "A brand new and only episode.")
+        self.assertCode(r, EXIT_OK)
+        self.assertNotIn("below the digest entry caps", r.err)
+
+    def test_the_note_still_fires_for_a_knowledge_record_that_earns_it(self):
+        """The check must stay useful, not merely quiet: past the 75 full +
+        150 headline caps, a minor record really does reach nobody."""
+        self.led.add_many(240, scope="internals")
+        self.led.compile()
+        r = self.led.zamm("memory", "create", "--scope", "internals",
+                          "--importance", "minor", "--durability", "weeks",
+                          "late-arrival", stdin="A minor late statement.\n")
+        self.assertCode(r, EXIT_OK)
+        self.assertIn("below the digest entry caps", r.err)
+
+
+class TestBelowTheCapsNoteFollowsTheRecordType(ZammTest):
+    """The note is only ever true of a record that COMPETES for a digest seat.
+
+    "Below the digest entry caps" is read out of the sidecar's `select` rows,
+    and only type `memory` is ever ranked into one. Tombstones, votes,
+    erasures and journal elevations are read through their targets and never
+    produce a `select` row at all, so the check reported every single one of
+    them as invisible — both of its claims ("no session will be handed it",
+    "can rank back in as others decay") false, on 100% of instrument writes.
+    A note that fires always is a note nobody reads where it is true."""
+
+    def test_a_tombstone_is_not_called_invisible(self):
+        rec = self.led.add("doomed", "A statement about to be retired.")
+        r = self.led.zamm("memory", "create", "--type", "tombstone",
+                          "--supersedes", rec, "retire-it",
+                          stdin="No longer true; nothing replaces it.\n")
+        self.assertCode(r, EXIT_OK)
+        self.assertNotIn("below the digest entry caps", r.err)
+
+    def test_a_votes_record_is_not_called_invisible(self):
+        rec = self.led.add("helpful", "A statement that helped.")
+        self.led.add_plan("2026-01-05-p", status="Review")
+        r = self.led.zamm("memory", "create", "--type", "votes",
+                          "--plan", "2026-01-05-p", "--up", rec,
+                          "plan-votes", stdin="")
+        self.assertCode(r, EXIT_OK)
+        self.assertNotIn("below the digest entry caps", r.err)
+
+    def test_an_erasure_is_not_called_invisible(self):
+        rec = self.led.add("leaky", "A statement that leaked something.")
+        r = self.led.zamm("memory", "create", "--type", "erasure",
+                          "--erases", rec, "redact-it",
+                          stdin="Redacted a credential; file deleted.\n")
+        self.assertCode(r, EXIT_OK)
+        self.assertNotIn("below the digest entry caps", r.err)
+
+    def test_a_journal_elevation_is_not_called_invisible(self):
+        """An elevation is always listed as an elevation, never ranked, so it
+        has no `select` row for exactly the same reason the instruments do
+        not — and `journal elevate` writes one through this path."""
+        self.led.add_episode("a", "A June thing.", date="2026-06-03")
+        r = self.led.zamm("journal", "elevate", "monthly", "2026-06",
+                          stdin="June condensed.\n")
+        self.assertCode(r, EXIT_OK)
+        self.assertNotIn("below the digest entry caps", r.err)

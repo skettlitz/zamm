@@ -113,11 +113,23 @@ delete it.
 
 ## Archive
 
-`memory archive` moves fully-retired chains to
-`zamm-memory/archive/knowledge/`: only chains where nothing still affects
-the digest — no live memory record and no live votes record, because votes
-aggregate over the whole ancestor chain and a dead ancestor of a live head
-is load-bearing. Archived records stay greppable and their ids resolvable;
-the command verifies the digest is unchanged and rolls back otherwise.
+`memory archive` moves every superseded or retired memory record, plus
+the tombstones and votes records of chains that are dead end to end, to
+`zamm-memory/archive/knowledge/<year>/`. Run it whenever the digest header
+shows `archive-ready=N` (or `status` says so); nothing depends on when.
+The path then carries the standing a search cannot see: `knowledge/` is
+what is, `archive/` is what was. An archived record stays a lineage node
+— the compiler reads its header for id, type, edges and seed votes — so a
+live head keeps every ancestor vote and its depth credit; the command
+verifies the digest below the header is byte-identical and rolls back
+otherwise. Archived records stay greppable, their ids resolve, and
+`whatis` reports one with its live head. Erasure records never move.
 Nothing else under `zamm-memory/knowledge/` is ever moved or renamed: the
 add-only layout is what keeps merges conflict-free.
+
+An archived record can come back to life: erase or quarantine its
+successor and no applied edge reaches it any more. In the live tree such a
+record simply reappears in the digest; in the archive its content is never
+read, so the digest lists it under `## Degraded` as live again and `check`
+fails until it is moved back into `knowledge/<year>/` (`git mv`) or
+superseded again. An archived record nobody names is left alone.

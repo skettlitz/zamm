@@ -62,7 +62,8 @@ Project
   help [<topic>]       this text, or help for one command
 
 Memory
-  memory digest        rebuild and print the digest
+  memory digest        recompile the digest; READ the file it names
+                       [--inline] print it instead  [--softmax N] attention cap
   memory list          index of live records, slug first
   memory show <slug>   one record in full
   memory check         validate the ledger
@@ -72,7 +73,7 @@ Memory
   memory drafts        list hand-written drafts not yet published
   memory discard <slug>
                        show and delete an unpublished draft
-  memory archive       move fully-retired chains out of the scan path
+  memory archive       move superseded and retired records into archive/
 
 Backlog
   backlog add '<sentence>'
@@ -131,7 +132,14 @@ group_usage() {
     memory) cat <<'EOF'
 Usage: zamm-run.sh memory <command> [args...]
 
-  digest               rebuild and print the digest
+  digest [--softmax N] [--inline]
+                       recompile the digest and hand back its path. READ THAT
+                       FILE - this output is not the digest. --inline prints
+                       it instead, for a reader with no file tool (command
+                       output is capped; a real ledger gets cut). --softmax is
+                       the soft character ceiling (default 80000, or
+                       $ZAMM_DIGEST_SOFTMAX) - an attention budget. Past it,
+                       Digest blocks collapse to their headline (+el); no
   list [--all] [--scope <area>]
                        index of live records (default: those in the digest)
   show <slug|id>       one record in full
@@ -140,7 +148,9 @@ Usage: zamm-run.sh memory <command> [args...]
   drafts               list hand-written drafts not yet published
   discard <slug|id>    show and delete an unpublished draft
   check                validate the ledger, write nothing
-  archive [--dry-run]  move fully-retired chains out of the scan path
+  archive [--dry-run]  move superseded and retired records into archive/
+                       (the live head keeps its rank; the digest is verified
+                       unchanged)
 EOF
       ;;
     plan) cat <<'EOF'
@@ -422,6 +432,46 @@ installed_stamp() {
 # what governs that, and it refuses. The stamp hashes every skill file, so a
 # comment edit moves it; refusing here would break the project on a doc-only
 # update. Goes to stderr so the digest on stdout stays clean and pipeable.
+# ---- The session read is a FILE READ. `memory digest` recompiles and hands
+#      back a path; the agent opens it with its file tool. Command output is
+#      capped by the harness (30000 chars in Claude Code, the remainder
+#      replaced by a short preview), and a digest delivered that way is
+#      truncated SILENTLY — the session sees a header and one entry and
+#      proceeds believing it read memory. A path cannot be truncated.
+#
+#      Everything below is deliberately NOT the digest: it is short, it says
+#      so, and it carries only what an operator must see even if the file is
+#      never opened (degradation, and what the read will cost).
+memory_digest_handoff() {
+  d="$ROOT/zamm-memory/.compiled/memory.md"
+  sz=$(wc -c < "$d" | tr -d ' ')
+  echo "ZAMM memory recompiled. THIS OUTPUT IS NOT THE DIGEST."
+  echo ""
+  echo "Read this file now, whole. It is the entire session memory read:"
+  echo ""
+  echo "  $d"
+  echo ""
+  echo "Open it with your file-reading tool. Do NOT cat/head/tail it: command"
+  echo "output is capped by the harness and the digest would be cut silently."
+  echo ""
+  sed -n '1p' "$d"
+  # The budget line is two or three lines in the file; echo just the first,
+  # which carries the size and the collapse count.
+  grep -m1 '^Budget: ' "$d" || :
+  printf '%s chars to read (~%sk tokens).\n' "$sz" "$((sz / 4000))"
+  if grep -q '^## Degraded' "$d"; then
+    echo ""
+    echo "DEGRADED: the ledger has integrity problems. The file opens with a"
+    echo "## Degraded section listing them; run: zamm-run.sh memory check"
+  fi
+  if grep -q '^OVER BUDGET' "$d"; then
+    echo ""
+    echo "OVER BUDGET: every entry is already collapsed to its headline and the"
+    echo "digest still exceeds its soft ceiling. Nothing was dropped; the cost is"
+    echo "context spent by every session. Retire or supersede what has gone stale."
+  fi
+}
+
 warn_if_surfaces_stale() {
   _rs=$(rendered_stamp)
   [ -n "$_rs" ] || return 0
@@ -539,7 +589,7 @@ print_status() {
     dormant=$(sed -n 's/^Dormant (.*): //p' "$DIGEST" | head -1)
     [ -n "$dormant" ] && printf '          dormant: %s\n' "$dormant"
     unlisted=$(sed -n 's/^Unlisted live (.*): //p' "$DIGEST" | head -1)
-    [ -n "$unlisted" ] && printf '          unlisted (below budget): %s\n' "$unlisted"
+    [ -n "$unlisted" ] && printf '          unlisted (below entry caps): %s\n' "$unlisted"
     # guardrail/contested/other counts are graph facts the compiler records in
     # the sidecar. There is deliberately NO Markdown fallback: reverse-parsing
     # the digest double-counted contested guardrails and reconciliation groups
@@ -619,7 +669,7 @@ print_status() {
     else
       ninert=$(printf '%s\n' "$_il" | grep -c . || true)
       [ "${ninert:-0}" -gt 0 ] &&
-        printf '          %s in fully-retired chains (zamm-run.sh memory archive)\n' "$ninert"
+        printf '          %s archive-ready: superseded or retired (zamm-run.sh memory archive)\n' "$ninert"
     fi
   fi
   # A hand-composed draft is invisible to check and the digest, so status is
@@ -1092,7 +1142,7 @@ memory_show() {
   path=$(resolve_record "$1")
   rel="${path#"$ROOT/"}"
   case "$rel" in
-    */archive/knowledge/*) echo "# $rel  (ARCHIVED - fully-retired chain)" ;;
+    */archive/knowledge/*) echo "# $rel  (ARCHIVED - history; whatis names the live head)" ;;
     *) echo "# $rel" ;;
   esac
   echo
@@ -3152,7 +3202,7 @@ do_help() {
         list)    exec bash "$INTERNAL/zamm-status.sh" --help ;;
         check)   exec sh "$INTERNAL/zamm-plan-check.sh" --help ;;
         archive) exec bash "$INTERNAL/zamm-archive.sh" --help ;;
-        *)       group_usage plan 0 ;;          # incl. show/create (built-in)
+        *)       group_usage plan 0 ;;          # incl. show/create/block/unblock (built-in)
       esac
       ;;
     backlog) group_usage backlog 0 ;;           # every verb is a built-in
@@ -3196,10 +3246,31 @@ case "$cmd" in
         # would otherwise abort here before the digest is printed: a degraded
         # publish (exit 2) still produced a digest and must be shown AND
         # signalled; a refusal (3) or unreadable ledger (4) produced none.
+        # --inline restores the old behaviour of printing the digest itself.
+        # It is an escape hatch for a reader with no file tool and for humans
+        # at a terminal, NOT the session protocol: command output is capped
+        # (30000 chars in Claude Code, and the rest replaced by a short
+        # preview), so a real ledger piped this way is silently truncated.
+        inline=0
+        _n=$#; _i=0
+        while [ "$_i" -lt "$_n" ]; do
+          _a="$1"; shift; _i=$((_i + 1))
+          if [ "$_a" = "--inline" ]; then inline=1; else set -- "$@" "$_a"; fi
+        done
+        DIGEST="$ROOT/zamm-memory/.compiled/memory.md"
         rc=0
         sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" "$@" >/dev/null || rc=$?
         if [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ]; then
-          cat "$ROOT/zamm-memory/.compiled/memory.md"
+          if [ "$inline" -eq 1 ]; then
+            cat "$DIGEST"
+            sz=$(wc -c < "$DIGEST" | tr -d ' ')
+            [ "$sz" -gt 28000 ] && {
+              echo "zamm: WARNING: --inline printed $sz chars; output past ~30000 is cut" >&2
+              echo "      by the tool, not by ZAMM. Drop --inline and read the file." >&2
+            }
+          else
+            memory_digest_handoff
+          fi
           # after the digest, so it is the last thing on the way out, and on
           # stderr so it never lands inside piped digest content
           warn_if_surfaces_stale

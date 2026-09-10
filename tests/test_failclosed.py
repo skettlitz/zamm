@@ -386,6 +386,10 @@ class Rev7SelfFoundGaps(ShimTest):
             "zamm-memory/archive/knowledge/2025/2025-03-05-old-88888.md",
             "---\ntype: memory\nscope: internals\nimportance: useful\n"
             "durability: months\ncreated: 2025-03-05\nschema: 3\n---\nOld.\n")
+        # superseded, so the archived record is properly dead: an archived
+        # memory record nothing retires is itself a degradation now
+        self.led.add("newer", "The successor.", date="2026-01-06",
+                     supersedes="2025-03-05-old-88888")
         self.assertCode(self.led.compile(), EXIT_OK)
         self.assertNotIn_("STALE", self.led.status().out,
                           "a freshly compiled ledger is not stale")
@@ -411,6 +415,10 @@ class Rev7SelfFoundGaps(ShimTest):
             "zamm-memory/archive/knowledge/2025/2025-03-05-old-88888.md",
             "---\ntype: memory\nscope: internals\nimportance: useful\n"
             "durability: months\ncreated: 2025-03-05\nschema: 3\n---\nOld.\n")
+        # superseded, so the archived record is properly dead: an archived
+        # memory record nothing retires is itself a degradation now
+        self.led.add("newer", "The successor.", date="2026-01-06",
+                     supersedes="2025-03-05-old-88888")
         self.assertCode(self.led.compile(), EXIT_OK)
         locked = (self.led.root /
                   "zamm-memory/archive/knowledge/2025/2025-03-05-old-88888.md")

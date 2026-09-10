@@ -44,6 +44,14 @@ def knowledge_view(digest_text):
             continue
         if ln.startswith("Backlog:") or ln.startswith("<!-- zamm-generation:"):
             continue
+        # The Budget total is knowledge-owned but it is a function of the
+        # WHOLE file, and the backlog/journal tail is part of that file — a
+        # budget that skipped it was the bug this normalization outlives. So
+        # the number is normalized while the rest of the line still compares:
+        # tail SIZE may move the total, tail CONTENT may not reach anything
+        # else. (Budget accounting itself is covered in test_budgets.py.)
+        if ln.startswith("Budget: "):
+            ln = re.sub(r"^Budget: \d+/", "Budget: N/", ln)
         out.append(ln)
     # the blank separator ahead of the Backlog line is backlog-owned too
     return "\n".join(out).rstrip("\n")

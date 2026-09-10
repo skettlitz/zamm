@@ -273,7 +273,25 @@ describe_record() {
     erased)
       echo "  standing:  erased - an erasure record names it; use nothing from it and delete the file (the record already retired it)" ;;
     archived)
-      echo "  standing:  archived - fully-retired chain moved out of the scan path; history" ;;
+      _dr_tomb=$(printf '%s\n' "$_dr_by" | awk -F"$TAB" '$2 == "tombstone" { print $1 }' | paste -sd, - | sed 's/,/, /g')
+      _dr_byids=$(printf '%s\n' "$_dr_by" | awk -F"$TAB" '$2 != "tombstone" { print $1 }' | paste -sd, - | sed 's/,/, /g')
+      if [ -n "$_dr_tomb" ]; then
+        echo "  standing:  archived - history; retired by tombstone $_dr_tomb - withdrawn, not replaced"
+      elif [ -n "$_dr_byids" ]; then
+        echo "  standing:  archived - history; superseded by $_dr_byids - cite the live head below, not this"
+      else
+        echo "  standing:  archived - history; nothing supersedes it and nothing in its chain is in force"
+      fi ;;
+    revived)
+      # The knowledge tree's verb is `memory`, not `knowledge`: the tree name
+      # is a directory, and only backlog and journal happen to share theirs
+      # with a command.
+      case "$_dr_t" in
+        backlog|journal) _dr_verb="$_dr_t" ;;
+        *)               _dr_verb="memory" ;;
+      esac
+      echo "  standing:  archived but LIVE AGAIN - nothing supersedes it, and archived content is never read;"
+      echo "             move it back into zamm-memory/$_dr_t/<year>/ (git mv) or retire it with a tombstone ($_dr_verb check lists it)" ;;
     *)
       echo "  standing:  $_dr_st" ;;
   esac

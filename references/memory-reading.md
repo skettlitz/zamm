@@ -5,11 +5,33 @@ changes the ledger.
 
 ## The digest
 
-`bash <zamm-skill>/scripts/zamm-run.sh memory digest` recompiles and prints
-the digest. That output is the whole session-start read; do not open
-`zamm-memory/.compiled/memory.md` as well (the same text, ingested twice).
-Rerun only after records were written or merged — your own `memory create`
-already recompiled.
+`bash <zamm-skill>/scripts/zamm-run.sh memory digest` recompiles the digest
+and hands back its path. **Reading that file, whole, is the session read.**
+The command's own output is a handoff — a few lines naming the file, what it
+will cost, and whether the ledger is degraded. It is not the digest, it says
+so, and an agent that stops there has read nothing.
+
+Open the file with a file-reading tool. Do NOT `cat`, `head` or `tail` it:
+command output is capped by the harness (Claude Code cuts a Bash result at
+30000 characters and replaces the rest with a short preview), so a real
+ledger piped that way is truncated silently — which reads to the session as
+a memory that was consulted rather than one that was cut. The file itself has
+no such limit. `--inline` prints the digest to stdout for a reader with no
+file tool, and warns when the output will not survive the trip.
+
+**Read it once per session.** Do not reread it after writing a record. The
+digest is re-sent with every subsequent request for the rest of the session,
+so a second read does not refresh anything — it puts a whole second copy in
+the context, and a session that writes three records and rereads each time
+carries four. On a large ledger that is the difference between one memory
+read and four, for no new information: you already know what you just wrote,
+and `memory create` reports the two things you could not have known — whether
+the write left a reconciliation group open, and whether the record landed
+below the entry caps where no session will be handed it.
+
+Writes also recompile, so the file is already current for the NEXT session.
+Reread within a session only if something outside it changed the ledger — a
+pull, or another agent writing to the same tree.
 
 Its anatomy, top to bottom:
 
@@ -20,15 +42,24 @@ Its anatomy, top to bottom:
 - `## Marked backlog` — only when ideas are marked: the ideas someone
   selected for implementation, one headline each. Implement or unmark.
 - `## Digest (actionable; full blocks)` — up to ~75 records grouped under
-  `### area/subpath` headings, balanced across areas so one hot topic cannot
-  drown the rest. Each is `- headline [record-id votes +bg]` with its
-  elaboration indented under it. A leading `!` is a GUARDRAIL: violating it
+  `### area` headings (the fixed eight), balanced across areas so one hot
+  topic cannot drown the rest. Each is `- subpath: headline [record-id votes
+  +bg]` with its elaboration indented under it; the subpath names the one
+  record inside its area, and is absent when the record has none. A leading `!` is a GUARDRAIL: violating it
   breaks the project or wastes hours — do not. A leading `~` is a contested
-  head, also listed under Needs reconciliation.
-- `## Headlines (reminders)` — up to ~150 more records, headline only. Not
-  enough to act on alone: when the topic matches what you are doing, open
-  the record.
-- Trailing counts: live records below the budget (unlisted) and dormant
+  head, also listed under Needs reconciliation. An entry ending `+el` had
+  elaboration the space budget could not afford — open the record.
+- `## Headlines (reminders)` — up to ~150 more records, headline only, under
+  the same `### area` headings. Not enough to act on alone: when the topic
+  matches what you are doing, open the record. Grouped rather than ranked
+  flat, because that is how this layer is used — you scan it for a topic,
+  not for the top of a list.
+- `Budget:` — the digest's size against its soft character ceiling, and how
+  many blocks kept their elaboration. `OVER BUDGET` means the surface is
+  large enough that a tool capping command output will silently cut it:
+  read `.compiled/memory.md` directly, and say so — the ledger needs
+  pruning, and only a human can decide what goes.
+- Trailing counts: live records below the entry caps (unlisted) and dormant
   ones (decayed below the floor). Both stay in the ledger, greppable.
 - `## Plans` — every active plan (status, progress, title) and the recently
   archived ones; `plans-reading.md`.
@@ -42,6 +73,12 @@ the date is its creation date), its vote total when non-zero, and `+bg`
 when the file holds a `## Background` section. `+bg` is an instruction:
 open the record before a high-impact action on that topic — the Background
 is where the evidence, the paths and the history live.
+
+`+el` is the same instruction for a different reason: the record's digest
+block HAS elaboration, and the space budget could not render it here. It
+marks a shortfall in the surface, not in the record — the text is intact in
+the file. A block with no elaboration is never marked, so `+el` always means
+there is more to read.
 
 ## Opening and finding records
 
@@ -82,6 +119,16 @@ the tool:
   acting on it, and cite what it names as live. Unlisted and dormant
   records are still true; `archive/` is history; an active plan's Status
   and the digest win on conflict.
+- The path is the cheapest signal. `memory archive` moves superseded and
+  retired records out of `knowledge/` as soon as they die, so a hit under
+  `zamm-memory/archive/` is history before any command runs, and
+  `grep -r <term> zamm-memory/knowledge/` sees only what still stands.
+  Give a search tool the same split: index the project with
+  `zamm-memory/archive/**`, `zamm-memory/.compiled/**` and plan `workdir/**`
+  excluded for "what is", and, if history questions matter, a second
+  collection rooted at `zamm-memory/archive/` for "what was". Superseded
+  records that have not been archived yet still rank like current ones,
+  which is why `whatis` stays the last word.
 - A search tool never writes: records, ideas, episodes and plans go through
   `memory create`, `backlog add`, `journal add` and `plan create` only.
 - `whatis` is only as good as the graph. An edge written in prose — a

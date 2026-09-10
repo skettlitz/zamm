@@ -755,3 +755,268 @@ class TestErasureRecordsAreNeverArchived(ZammTest):
             self.SECRET, self.led.digest(),
             "an archived erasure record must keep redacting")
         self.assertNotIn_(leaky, self.led.digest())
+
+
+class TestArchivedRecordsAreLineageNodes(ZammTest):
+    """Locks for the six defects found reviewing "archive early" (2026-09-09).
+
+    Archived records became full lineage nodes so a superseded ancestor can
+    leave the live tree the moment it dies. That widened the authority of a
+    tree whose CONTENT is never read, so every way an archived record can be
+    live again — and every way its header can influence ranking — has to be
+    reported rather than silently believed.
+    """
+
+    ARCH = "zamm-memory/archive/knowledge/2026"
+
+    def _archived(self, rid, body="Archived body.", extra="", type="memory"):
+        fm = f"type: {type}\nscope: internals\n"
+        if type == "memory":
+            fm += "importance: useful\ndurability: months\n"
+        self.led.write(f"{self.ARCH}/{rid}.md",
+                       f"---\n{fm}{extra}created: 2026-01-05\nschema: 3\n---\n{body}\n")
+        return rid
+
+    # --- revival detection -------------------------------------------------
+
+    def test_zero_live_ledger_still_reports_a_revived_archived_record(self):
+        """An empty live tree plus a live-again archived record used to print
+        'active memory has not been initialized' and exit 0 — inviting a
+        re-seed over content that is still in force."""
+        self._archived("2026-01-05-orphan-11111")
+
+        r = self.led.compile()
+
+        self.assertCode(r, EXIT_DEGRADED, "zero-live is not clean here")
+        d = self.led.digest()
+        self.assertIn_("## Degraded", d)
+        self.assertIn_("2026-01-05-orphan-11111", d)
+        self.assertNotEqual(self.led.check().code, 0)
+
+    def test_an_erased_archived_successor_retires_nothing(self):
+        """PRE-FIX: the archived-edge loop had no `erased` guard, so an erased
+        successor still marked its predecessor superseded. The predecessor was
+        then neither live nor reported, and both compile and check exited 0."""
+        pred = self._archived("2026-01-05-pred-11111", "The predecessor claim.")
+        succ = self._archived("2026-01-06-succ-22222", "The successor.",
+                              extra=f"supersedes: {pred}\n")
+        self.led.add("alive", "A living record.")
+        self.led.erase(succ, date="2026-01-07")
+
+        r = self.led.compile()
+
+        self.assertCode(r, EXIT_DEGRADED)
+        self.assertIn_(pred, self.led.digest(), "the orphan must be named")
+        self.assertIn_("live again", self.led.digest())
+
+    def test_the_documented_erasure_procedure_cannot_orphan_silently(self):
+        """Erase a record, then delete its file — exactly what
+        memory-maintenance.md prescribes. PRE-FIX the claim on the archived
+        predecessor died with the deleted file, so the orphan was permanently
+        invisible: no Degraded section, check clean, content gone."""
+        pred = self._archived("2026-01-05-pred-11111", "The predecessor claim.")
+        self.led.add("alive", "A living record.")
+        succ = self.led.add("successor", "Replaces the archived claim.",
+                            date="2026-01-06", supersedes=pred)
+        self.assertCode(self.led.compile(), EXIT_OK)
+
+        self.led.erase(succ, date="2026-01-07")
+        self.led.delete(succ)
+
+        r = self.led.compile()
+
+        self.assertCode(r, EXIT_DEGRADED, "the orphan must surface")
+        self.assertIn_(pred, self.led.digest())
+        self.assertNotEqual(self.led.check().code, 0)
+
+    def test_a_hand_moved_live_record_is_reported_not_believed(self):
+        """The same defect reached another way: content moved into the archive
+        with nothing retiring it is live with unreadable content."""
+        self._archived("2026-01-05-handmoved-11111", "Still-true content.")
+        self.led.add("alive", "A living record.")
+
+        self.assertCode(self.led.compile(), EXIT_DEGRADED)
+        self.assertIn_("2026-01-05-handmoved-11111", self.led.digest())
+
+    def test_a_properly_superseded_archived_record_is_silent(self):
+        """The control: normal archiving must not nag."""
+        pred = self._archived("2026-01-05-pred-11111")
+        self._archived("2026-01-06-tomb-22222", "Retired.", type="tombstone",
+                       extra=f"supersedes: {pred}\n")
+        self.led.add("alive", "A living record.")
+
+        self.assertCode(self.led.compile(), EXIT_OK)
+        self.assertNotIn_("live again", self.led.digest())
+        self.assertCode(self.led.check(), EXIT_OK)
+
+    def test_a_non_memory_archived_record_asserts_nothing(self):
+        """A tombstone or votes record in the archive carries no claim that
+        could go missing, so an orphaned one is not a degradation."""
+        self._archived("2026-01-05-tomb-11111", "Retired something.",
+                       type="tombstone")
+        self.led.add("alive", "A living record.")
+
+        self.assertCode(self.led.compile(), EXIT_OK)
+
+    # --- the other lenses --------------------------------------------------
+
+    def test_the_backlog_lens_exits_degraded_and_names_its_own_tree(self):
+        """PRE-FIX: backlog and journal rendered the warning and exited 0, and
+        the remedy told the reader to move a backlog idea into knowledge/."""
+        self.led.write(
+            "zamm-memory/archive/backlog/2026/2026-01-05-idea-11111.md",
+            "---\ntype: memory\nscope: tooling\nimportance: useful\n"
+            "durability: months\ncreated: 2026-01-05\nschema: 3\n---\nAn idea.\n")
+        self.led.add_idea("live-idea", "A living idea.")
+
+        lens = self.led.run("zamm-compile.sh", "--tree", "backlog")
+        self.assertCode(lens, EXIT_DEGRADED, "the lens must not exit clean")
+        text = self.led.backlog_lens()
+        self.assertIn_("zamm-memory/backlog/<year>/", text)
+        self.assertNotIn_("zamm-memory/knowledge/<year>/", text)
+        self.assertNotEqual(self.led.backlog("check").code, 0)
+
+    def test_the_journal_lens_exits_degraded_and_names_its_own_tree(self):
+        self.led.write(
+            "zamm-memory/archive/journal/2026/2026-01-05-episode-11111.md",
+            "---\ntype: memory\nscope: other\nimportance: useful\n"
+            "durability: weeks\ncreated: 2026-01-05\nschema: 3\n---\nAn episode.\n")
+        self.led.add_episode("live-episode", "A living episode.")
+
+        lens = self.led.run("zamm-compile.sh", "--tree", "journal")
+        self.assertCode(lens, EXIT_DEGRADED)
+        self.assertIn_("zamm-memory/journal/<year>/", self.led.journal_lens())
+        self.assertNotEqual(self.led.journal("check").code, 0)
+
+    # --- seed votes --------------------------------------------------------
+
+    def test_an_archived_seed_vote_needs_the_same_gate_as_a_live_one(self):
+        """PRE-FIX: seed-up rode an archived header unchecked, so the file that
+        is QUARANTINED under knowledge/ (seed without migrated-from) counted a
+        five-figure vote into a live head from archive/knowledge/ — with
+        `memory check` reporting a clean ledger."""
+        pred = self._archived("2026-01-05-pred-11111", "Seeded ancestor.",
+                              extra="seed-up: 9000\n")
+        head = self.led.add("head", "The live head.", date="2026-01-06",
+                            supersedes=pred)
+        self.led.add("alive", "A living record.")
+
+        self.assertCode(self.led.compile(), EXIT_OK)
+        self.assertIn_(f"[{head}]", self.led.digest(),
+                       "an ungated seed contributes nothing, so no vote bracket")
+        self.assertNotIn_(f"{head} +9000", self.led.digest())
+
+    def test_a_properly_migrated_archived_seed_vote_still_counts(self):
+        """The control: the gate is migrated-from, not the archive itself —
+        a seeded ancestor must keep its rank when it is moved."""
+        pred = self._archived("2026-01-05-pred-11111", "Seeded ancestor.",
+                              extra="seed-up: 3\nmigrated-from: B3\n")
+        head = self.led.add("head", "The live head.", date="2026-01-06",
+                            supersedes=pred)
+        self.led.add("alive", "A living record.")
+
+        self.assertCode(self.led.compile(), EXIT_OK)
+        self.assertIn_(f"{head} +3", self.led.digest())
+
+    def test_an_out_of_range_archived_seed_is_refused_like_a_live_one(self):
+        pred = self._archived("2026-01-05-pred-11111", "Seeded ancestor.",
+                              extra="seed-up: 99999\nmigrated-from: B3\n")
+        head = self.led.add("head", "The live head.", date="2026-01-06",
+                            supersedes=pred)
+        self.led.add("alive", "A living record.")
+
+        self.assertCode(self.led.compile(), EXIT_OK)
+        self.assertNotIn_(f"{head} +99999", self.led.digest())
+
+
+class TestBudgetLineSurvivesArchival(ZammTest):
+    """The archive rule proves itself by recompiling and diffing everything
+    BELOW line 1 — line 1 alone is excluded, because its record counts are
+    expected to move. Any other line that derives from those counts smuggles
+    that variance back under the invariant.
+
+    Pre-fix, the `Budget:` total included the length of line 1, so archiving
+    enough records to change a count's digit width (files=14 -> files=7)
+    shortened the header by one char, changed `Budget: 2168` to `2167`, and
+    made `memory archive` roll a correct archive back while blaming itself:
+    "This is a bug in the archive rule ... please report it." Every existing
+    archival fixture was small enough that no digit width moved.
+    """
+
+    def _chains(self, n):
+        """n supersession chains of two: n originals become archivable."""
+        for i in range(n):
+            rec = self.led.add(f"orig{i}", f"Original statement {i}.")
+            self.led.add(f"succ{i}", f"Superseding statement {i}.",
+                         date="2026-01-06", supersedes=rec)
+
+    def _budget(self):
+        return [ln for ln in self.led.digest().splitlines()
+                if ln.startswith("Budget:")][0]
+
+    def test_archiving_across_a_digit_width_boundary_succeeds(self):
+        self._chains(7)                      # files=14 -> files=7
+        self.assertCode(self.led.compile(), EXIT_OK)
+        self.assertIn("files=14", self.led.digest().splitlines()[0])
+        before = self._budget()
+
+        r = self.led.memory_archive()
+        self.assertCode(r, EXIT_OK, "a correct archive must not roll back")
+        self.assertNotIn("bug in the archive rule", r.err)
+
+        self.assertIn("files=7", self.led.digest().splitlines()[0])
+        self.assertEqual(before, self._budget(),
+                         "the budget line is below line 1 and must not move")
+
+
+class TestDegradedListingIsBudgeted(ZammTest):
+    """`say()` is the byte counter as well as the printer, so a bare `print`
+    inside the digest emits bytes the budget never sees. The revived-record
+    listing was the last holdout after its neighbours were converted."""
+
+    def test_revived_records_are_counted_against_the_budget(self):
+        from harness import archived_record
+
+        def budget_total(led):
+            line = [ln for ln in led.digest().splitlines()
+                    if ln.startswith("Budget:")][0]
+            return int(line.split()[1].split("/")[0])
+
+        self.led.add("baseline", "A live statement.")
+        self.assertCode(self.led.compile(), EXIT_OK)
+        plain = budget_total(self.led)
+
+        for i in range(5):
+            p = (self.led.root /
+                 f"zamm-memory/archive/knowledge/2026/2026-01-05-rev{i}-1111{i}.md")
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(archived_record("2026-01-05", f"Revived statement {i}."))
+        self.assertCode(self.led.compile(), EXIT_DEGRADED)
+
+        digest = self.led.digest()
+        listed = [ln for ln in digest.splitlines() if "2026-01-05-rev" in ln]
+        self.assertEqual(5, len(listed), "every revived record is listed")
+        self.assertGreater(
+            budget_total(self.led), plain + sum(len(ln) + 1 for ln in listed) - 1,
+            "the listing costs bytes, so the budget must have grown by them")
+
+
+class TestRevivedListingIsOrdered(ZammTest):
+    """`for (x in arr)` walks awk hash order, which is unspecified. This list
+    is byte-compared by the golden test and by the archive self-check, so it
+    has to be sorted like every other listing in the compiler."""
+
+    def test_revived_records_are_listed_in_sorted_order(self):
+        from harness import archived_record
+
+        for name in ("zulu", "alpha", "mike", "bravo", "yankee"):
+            p = (self.led.root /
+                 f"zamm-memory/archive/knowledge/2026/2026-01-05-{name}-11111.md")
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(archived_record("2026-01-05", f"Revived {name}."))
+        self.assertCode(self.led.compile(), EXIT_DEGRADED)
+
+        listed = [ln.split()[1] for ln in self.led.digest().splitlines()
+                  if ln.startswith("- 2026-01-05-")]
+        self.assertEqual(5, len(listed))
+        self.assertEqual(sorted(listed), listed, "the listing must be sorted")

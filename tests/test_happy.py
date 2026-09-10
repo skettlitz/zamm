@@ -52,7 +52,7 @@ class TestCompileHappy(ZammTest):
             durability="permanent",
         )
         self.led.compile()
-        self.assertIn_("- ! Never delete the audit log.", self.led.digest())
+        self.assertIn_("- ! api: Never delete the audit log.", self.led.digest())
 
 
 class TestSupersessionHappy(ZammTest):

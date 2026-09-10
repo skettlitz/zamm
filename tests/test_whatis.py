@@ -222,7 +222,7 @@ class TestArchive(ZammTest):
         r = self.led.zamm("whatis", f"zamm-memory/archive/knowledge/2026/{t}.md")
         self.assertEqual(r.code, 0, r)
         self.assertIn_("what:      knowledge record (memory), archived", r.out)
-        self.assertIn_("standing:  archived - fully-retired chain", r.out)
+        self.assertIn_(f"standing:  archived - history; retired by tombstone {ts}", r.out)
         self.assertIn_(f"{t}  [archived memory]  A rule that was wrong.  <- this", r.out)
         self.assertIn_(f"{ts}  [archived tombstone]  Retired: it was wrong.", r.out)
         self.assertIn_("live head: none", r.out)
@@ -245,6 +245,37 @@ class TestArchive(ZammTest):
         self.assertEqual(r.code, 0, r)
         self.assertIn_("note without frontmatter (pre-v3), archived", r.out)
         self.assertIn_("headline:  SAND Consolidation - 2026-05-12 20:14", r.out)
+
+    def test_an_archived_superseded_record_names_its_live_head(self):
+        old = self.led.add("evolving", "First version.")
+        head = self.led.add("evolving", "Current version.", date="2026-01-06",
+                            supersedes=old)
+        self.assertEqual(self.led.compile().code, 0)
+        self.assertEqual(self.led.memory_archive().code, 0)
+        r = self.led.zamm("whatis", f"zamm-memory/archive/knowledge/2026/{old}.md")
+        self.assertEqual(r.code, 0, r)
+        self.assertIn_(f"standing:  archived - history; superseded by {head}", r.out)
+        self.assertIn_(f"{old}  [archived memory]  First version.  <- this", r.out)
+        self.assertIn_(f"live head: {head}  Current version.", r.out)
+        self.assertIn_(f"in force now ({head}):\n    Current version.", r.out)
+
+    def test_a_revived_archived_record_is_flagged(self):
+        old = self.led.add("evolving", "First version.")
+        head = self.led.add("evolving", "Current version.", date="2026-01-06",
+                            supersedes=old)
+        self.led.add("keep", "Something live.")
+        self.assertEqual(self.led.compile().code, 0)
+        self.assertEqual(self.led.memory_archive().code, 0)
+        # the successor is erased: in the live tree the ancestor would come
+        # back into the digest; in the archive its content is unread
+        self.led.erase(head, date="2026-01-08")
+        c = self.led.compile()
+        self.assertEqual(c.code, 2, c)
+        self.assertIn_("live again", self.led.digest())
+        self.assertNotEqual(self.led.check().code, 0)
+        r = self.led.zamm("whatis", "--brief", old)
+        self.assertEqual(r.code, 0, r)
+        self.assertIn_("archived but LIVE AGAIN", r.out)
 
     def test_a_qmd_url_with_a_line_suffix_resolves(self):
         t, ts = self.archived_chain()
@@ -318,3 +349,35 @@ class TestPlansAndOtherFiles(ZammTest):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRevivedStandingNamesTheRightCommand(ZammTest):
+    """A standing that ends in advice has to name a command that exists. The
+    revived wording interpolated the TREE name as the verb, so a knowledge
+    record told the reader to run `knowledge check` — the tree is a directory,
+    and only backlog and journal happen to share their name with a command."""
+
+    def _revived(self, tree, relpath):
+        from harness import archived_record
+        p = self.led.root / relpath
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(archived_record("2026-01-05", f"A revived {tree} statement."))
+        self.led.compile()
+        return self.led.zamm("whatis", "2026-01-05-revived-11111")
+
+    def test_a_revived_knowledge_record_says_memory_check(self):
+        r = self._revived(
+            "knowledge",
+            "zamm-memory/archive/knowledge/2026/2026-01-05-revived-11111.md")
+        self.assertEqual(r.code, 0, r)
+        self.assertIn_("LIVE AGAIN", r.out)
+        self.assertIn_("(memory check lists it)", r.out)
+        self.assertNotIn("knowledge check", r.out)
+
+    def test_the_move_target_still_names_the_tree_directory(self):
+        """The directory in the same sentence IS the tree name — the fix must
+        not have swapped both."""
+        r = self._revived(
+            "knowledge",
+            "zamm-memory/archive/knowledge/2026/2026-01-05-revived-11111.md")
+        self.assertIn_("zamm-memory/knowledge/<year>/", r.out)

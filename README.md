@@ -1,57 +1,81 @@
 # Zippy Agentic Memory Mill (ZAMM)
 
-Coding agents forget everything between sessions. The usual fix — one growing memory file — bloats
-until nobody reads it, and merge-conflicts the moment two machines or branches write to it.
+ZAMM is project memory for coding agents that cannot bloat and cannot merge-conflict.
+Every fact is one immutable markdown file. What an agent reads at session start is a
+digest recompiled from all of them, ranked and bounded, so the ledger grows without limit
+while the reading stays a few hundred lines.
 
-ZAMM gives agents durable project memory that prunes itself and merges cleanly, wrapped in a
-lightweight operating workflow that combines three things:
+The mechanics, not the promise:
 
-- task execution through plan directories,
-- an **append-only knowledge ledger** of immutable record files, compiled into a bounded ranked
-  digest at session start,
-- archive hygiene that moves finished plan contexts out of active memory.
+- **One record, one file, never edited.** A record is named by date, slug and a random
+  suffix and lands through one command that validates it first and writes nothing on
+  failure. A correction is a new file carrying `supersedes: <old-id>`; the old one drops
+  out of view and stays in history.
+- **Two writers, two added files.** Branches and machines writing memory never produce a
+  conflicting hunk. When both corrected the same record, the next digest lists the two heads
+  under `Needs reconciliation` and the agent writes one record that supersedes both.
+- **Ranking is declared once and prunes itself.** The author rates importance (`guardrail`,
+  `useful`, `minor`) and durability (`days` to `permanent`); the score decays over that
+  horizon, and plan outcomes vote records up or down. A `days` note retires itself, a
+  `permanent` guardrail never fades, and a decayed record goes dormant: unlisted, still on
+  disk, still greppable.
+- **Four trees, one record format, one boundary test.** Knowledge (what is true), backlog
+  (what we might do), journal (what happened) and plans (what we are doing) share the same
+  immutable records and the same graph; only the lens differs.
+- **Reads never write, and writes fail closed.** Every lens is derived and regenerable;
+  every command either lands a valid record or lands nothing. The contract is written down in
+  `references/invariants.md`: every output is a truthful reading of some state the ledger
+  actually had, every failure is repairable by rerunning, bytes are never destroyed.
+- **No runtime to install.** POSIX sh and awk, one entrypoint, one permission rule for the
+  agent harness. The suite of 600-odd tests runs against the real scripts on stock macOS and
+  Linux in CI.
 
-In short: plan while doing, distill what lasts as immutable records, let the compiler rank the
-rest. The ledger is unbounded; attention is bounded.
+ZAMM memory is advisory: it complements code, tests and documentation and never outranks
+them. Canonical skill name and folder: `zamm`.
 
-ZAMM memory is advisory: it complements code, tests, and documentation and never outranks them.
+## Session start is one command
 
-Canonical skill name/folder is `zamm`.
+```sh
+bash <zamm-skill>/scripts/zamm-run.sh memory digest
+```
 
-## How it works in sixty seconds
+Its output is the whole read. Top to bottom: a `Needs reconciliation` index when a merge
+left two heads; marked backlog ideas; up to a few dozen full entries balanced across
+knowledge areas so one hot topic cannot drown the rest (a leading `!` is a guardrail, `+bg`
+means a Background section exists); a longer list of one-line reminders; counts for the
+unlisted and the dormant; the active plans with status and progress; the recently archived
+plan ids; one backlog line; and, only when journal digestion is due, one `Journal:` line.
+Nothing else has to be discovered. The agent reruns it only after records were written or
+merged.
 
-1. Plans hold current work: mutable files with explicit status transitions and human-approved
-   closure.
-2. Durable learnings become small immutable record files under `zamm-memory/knowledge/<year>/`.
-   Writers only ever add uniquely named files; committed records are never edited.
-3. Corrections do not touch old records: a new record declares `supersedes: <old-id>` and the old
-   file simply drops out of view while staying in history.
-4. Ideas worth keeping but not starting go into a third tree, `zamm-memory/backlog/` — the same
-   immutable records, compiled into a separate on-demand lens (`backlog list`) instead of the
-   session digest. Capture is one sentence (`backlog add`); depth of any size rides below the
-   headline. Ideas cool into dormancy on their own unless superseded or voted up; marking one
-   for implementation pushes it into the digest until it is promoted into a plan or unmarked.
-5. Episodes — things that happened and are worth a trace but imply no action and assert no
-   durable fact (a side quest, an outage, a considered non-action) — go into a fourth tree,
-   `zamm-memory/journal/`: cue-driven capture (`journal add`), a pulled timeline lens, and a
-   digestion trichotomy — compiled period views (`journal digest`, never stored), triage behind a
-   claim watermark (`journal review` / `settle`), and stored digest records (`journal elevate`).
-   Other skills operate it through one predicate grammar and a versioned export seam.
-6. At session start the agent runs `zamm-run.sh memory digest`, which ranks all live records — author-rated
-   importance, decaying over an author-rated shelf-life, corrected by votes from plan outcomes —
-   and emits a bounded digest: an actionable top section balanced across knowledge areas (so one
-   hot topic cannot drown the rest), one-line reminders below it, and counts for everything else.
-   Fully decayed records go dormant: unlisted, but still greppable in the ledger. The digest
-   ends with a compact listing of active plans (status, progress, title) plus the most
-   recently archived plan IDs, a one-line backlog summary and — only when journal digestion is
-   due — one `Journal:` line, so session start needs no separate discovery and a plan that
-   moved to the archive on another machine stays findable after a pull.
-7. Finished plans move to the archive.
+## Four trees, one boundary test
 
-Here is one record file — composed by the agent and landed in one step by
-`zamm-run.sh memory create`, which validates it and writes nothing at all if it fails the
-contract. Immutable once written. Everything above `## Background` is what the digest shows; the
-rest is read on demand:
+Implies action and is current work: a **plan**. Implies action, but not now: the
+**backlog**. Asserts a durable fact: **knowledge**. Implies no action and asserts no fact,
+yet worth a trace: the **journal**. The archive is the exit for all four.
+
+- **Knowledge** — `memory create --scope <area> <slug>` with the body on stdin. The first
+  paragraph is the headline an agent mid-task can act on alone; detail under `## Background`
+  is read on demand. Corrections supersede, retirements are tombstones, votes ride on plan
+  closure. Eight fixed scope areas keep the digest balanced.
+- **Backlog** — `backlog add 'One sentence.'` captures; `backlog list` is the lens, hot to
+  cold. Ideas cool into dormancy on their own unless superseded or voted up; `backlog mark`
+  pushes one into the digest until `backlog promote` turns it into a plan or `unmark` drops
+  it. Never a Draft plan for an idea nobody is starting.
+- **Journal** — `journal add 'One sentence.'` records an episode: a side quest, an outage, a
+  considered non-action. `journal list` is the timeline; `journal digest <period>` compiles a
+  period view and stores nothing; `journal review` and `settle` triage behind a claim
+  watermark; `journal elevate` stores a period summary as a record. Other skills read it
+  through one predicate grammar and a versioned TSV export.
+- **Plans** — `plan create '<title>'` opens a directory with a mutable plan file. Status runs
+  Draft, Implementing, Review, then Done or Abandoned; only a human approves Done. Close-out
+  writes learnings and a votes record into the ledger, and `plan archive` moves the directory
+  out of active memory.
+
+## One record
+
+Composed by the agent, landed in one step. Everything above `## Background` is what the
+digest shows; the rest is read on demand:
 
 ```markdown
 # zamm-memory/knowledge/2026/2026-07-18-awk-posix-only-7k3fq.md
@@ -72,12 +96,8 @@ Applies to scripts/ and any generated hooks.
 Found when gensub() failed on macOS 14 (awk 20200816). ...
 ```
 
-`importance` and `durability` are the whole ranking system, and the agent sets them when it
-writes the record (`--importance guardrail --durability years`). Rank decays over the durability
-horizon, so an honest `days` note retires itself while a `permanent` guardrail never fades.
-
-The digest entry it becomes (`!` marks a guardrail — do not violate; `+bg` flags a Background
-section worth opening before high-impact action; votes join the bracket as they accumulate):
+The digest entry it becomes (`!` marks a guardrail, `+bg` flags the Background section,
+votes join the bracket as they accumulate):
 
 ```markdown
 ### tooling/shell
@@ -86,25 +106,84 @@ section worth opening before high-impact action; votes join the bracket as they 
   Applies to scripts/ and any generated hooks.
 ```
 
-To update this memory later, the agent writes a new record with
-`supersedes: 2026-07-18-awk-posix-only-7k3fq` — the old file never changes. If two branches
-update the same memory independently, git merges cleanly (two added files) and the next digest
-flags both heads under `Needs reconciliation`; the agent resolves them by writing one record
-that supersedes both.
+An idea and an episode are the same file shape with a different root: `backlog add` and
+`journal add` write them from one sentence, and any depth rides below the headline.
+
+The digest is delivered as a **file the agent reads**, not as command output. `memory
+digest` recompiles and hands back a path; reading that file once, whole, is the session
+read. This is not a detail of plumbing. Command output is capped — Claude Code cuts a Bash
+result at 30000 characters and replaces the remainder with a short preview — so a digest
+printed to stdout is truncated silently, and a session that gets a header and one entry
+proceeds believing it read memory. A path cannot be truncated. `--inline` still prints the
+digest for a reader with no file tool, and warns when the output will not survive.
+
+That makes the surface's ceiling an attention budget rather than a plumbing one: what it
+bounds is how much context memory takes from every session before any work starts. The
+surface is bounded twice — by entry counts, which decide WHICH records are listed, and by
+that soft character ceiling, which decides how much each listed record gets to say. When
+the ceiling binds, Digest blocks give up their elaboration and render as their headline
+alone, marked `+el` so a reader knows there is more in the file. No record is ever dropped
+to hit the number: a digest that sheds entries to look small is lying about the ledger, so
+an oversized one goes over its budget and says so instead.
 
 Digest budgets and scoring constants are deliberately not documented here: they are tuning
-knobs, and their single authoritative home is the commented header of `scripts/internal/zamm-compile.sh`.
-The digest itself explains its own entry format at the top of every compile.
+knobs, and their single authoritative home is the commented header of
+`scripts/internal/zamm-compile.sh`. The digest explains its own entry format at the top of
+every compile.
+
+## Finding things
+
+The digest is the read, not a search. When it is silent and the agent needs what was
+written down, the ledger is plain files: `grep -r <term> zamm-memory/` finds dormant and
+unlisted records too, and any markdown search the project happens to have works as well
+(QMD is one example; none is required, and none ever writes a record).
+
+What no search can do is judge standing. It ranks by resemblance, so a superseded record, a
+retired chain or an archived plan scores exactly like the one in force. That is what `whatis`
+is for: hand it whatever the search returned and it says what the thing is and whether it
+still counts.
+
+```sh
+bash <zamm-skill>/scripts/zamm-run.sh whatis --brief zamm-memory/knowledge/2026/2026-01-05-tier-motion-22222.md
+```
+
+```text
+zamm-memory/knowledge/2026/2026-01-05-tier-motion-22222.md
+  what:      knowledge record (memory)
+  standing:  superseded by 2026-02-05-tier-motion-22223 - history; cite the live head below, not this
+  chain (oldest first):
+    2026-01-05-tier-motion-22222  [superseded memory]  Old rule about tier motion.  <- this
+    2026-02-05-tier-motion-22223  [superseded memory]  Newer rule about tier motion.
+    2026-03-05-tier-motion-22224  [live memory]  Current rule about tier motion.
+  live head: 2026-03-05-tier-motion-22224  Current rule about tier motion.
+```
+
+It takes paths in any form, `qmd://` URLs with a line suffix, record ids, plan ids and bare
+slugs, across every tree, live and archived. A dead hit is not dug up: the answer is the
+chain and the live head, with the head's body unless `--brief`. Unlisted and dormant records
+are still true; superseded, retired, erased and archived ones are not. Plans report their
+Status, and an active plan's Status outranks any record.
+
+The path carries the same signal for free. `memory archive` moves superseded and retired
+records into `zamm-memory/archive/` as soon as they die, and the digest header counts what
+is archive-ready. An archived record stays a lineage node, so the live head keeps every
+ancestor vote and the digest is verified byte-identical after the move. `knowledge/` is what
+is, `archive/` is what was: grep the first for the current state, and give a search tool the
+same split, one index with the archive excluded and, if history questions matter, a second
+one rooted at the archive.
 
 ## What the human does
 
 ZAMM runs mostly agent-side. The human:
 
-- approves plan closure (`Review -> Done`) — agents cannot self-approve,
+- approves plan closure (`Review -> Done`); agents cannot self-approve,
 - approves one-time operations before they run: project scaffolding, initialization scans,
   protocol migrations, and any git-history erasure,
-- occasionally answers "is this still true?" when the agent flags suspected-stale knowledge,
-- sees every ledger write in ordinary code review — records are plain markdown files in git.
+- marks the backlog ideas worth doing next, and occasionally answers "is this still true?"
+  when the agent flags suspected-stale knowledge,
+- reads the journal's period views when asked what happened, and lets the agent settle
+  triage rather than treating it as a session ritual,
+- sees every ledger write in ordinary code review: records are plain markdown files in git.
 
 ## What gets added to a project
 
@@ -163,7 +242,7 @@ memory tree.
 
 - Never store secrets, tokens, credentials, or personal data in records. The ledger is
   append-only and lives in git, so true erasure is an exceptional, human-approved operation
-  (see the Erasure section of the protocol).
+  (each tree's `-maintenance.md` has its Erasure section).
 - **Conflict-resistant, not conflict-free.** Normal knowledge writes add uniquely named files,
   so ordinary git content conflicts on memory are rare by construction. Semantic conflicts still
   exist — competing updates survive the merge and are reconciled explicitly — and plan files
@@ -194,7 +273,7 @@ memory publish <slug>
 memory drafts        list hand-written drafts not yet published
 memory discard <slug>
                      show and delete an unpublished draft
-memory archive       move fully-retired chains out of the scan path
+memory archive       move superseded and retired records into archive/
 
 backlog add '<sentence>'
                      capture an idea; one sentence is enough

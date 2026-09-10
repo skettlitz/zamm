@@ -18,13 +18,32 @@
 #                 unretired record, newest first). Read-only.
 #   --check       validate ledger records (naming, schema, references) and exit
 #                 non-zero on violations; writes no digest.
+#   --softmax N   soft character ceiling on the compiled digest (default
+#                 80000, or $ZAMM_DIGEST_SOFTMAX). Remembered in the state
+#                 sidecar and reused by every later run that does not name
+#                 one, so implicit recompiles (a record write, plan block,
+#                 memory archive) rebuild at the same budget instead of
+#                 reverting it; --softmax 80000 restores the default. An
+#                 attention budget, not a
+#                 plumbing one: the digest is read as a file, so nothing
+#                 truncates it, and what this bounds is the context every
+#                 session spends on memory. It buys EXPANSION, not
+#                 membership: the same records are listed either way, and the
+#                 budget decides how many Digest-layer blocks can afford
+#                 their elaboration. What cannot is collapsed to its headline
+#                 and marked +el. Never sheds an entry — a ledger that does
+#                 not fit even fully collapsed goes over and says so.
 #   --list-live   print "id<TAB>primary-scope<TAB>all-tags<TAB>headline" for
 #                 every live memory record, dormant ones included. all-tags is
 #                 the comma-joined scope list (primary + secondaries).
 #                 Read-only.
-#   --list-inert  print the path of every record in a supersede component with
-#                 no live memory record and no live votes record. Read-only;
-#                 these are the records memory archive may move.
+#   --list-inert  print the path of every archivable record: every superseded
+#                 or retired memory record, plus every member of a supersede
+#                 component with no live memory record and no live votes
+#                 record. Read-only; these are the records memory archive
+#                 moves. Archived records keep their place in the graph as
+#                 lineage nodes (see read_archived_header), so moving a dead
+#                 ancestor changes no rank.
 #   --list-state  print one row per record the graph knows, live tree AND
 #                 archive, with the standing the compiler assigned it:
 #                 "id<TAB>state<TAB>class<TAB>primary-scope<TAB>created<TAB>
@@ -49,6 +68,35 @@ LIST_STATE=0
 EXPORT=0
 CANDIDATE=""
 TREE="knowledge"
+# Soft character ceiling on the compiled digest. The digest is delivered as a
+# FILE the agent reads, not as command output, so this is not a plumbing
+# limit — it is an attention limit: how much of every session's context
+# memory is allowed to own. 80000 chars is roughly 20k tokens, reread by
+# every agent at every session start. Raise it with --softmax (or
+# ZAMM_DIGEST_SOFTMAX) when a project can afford more.
+# One validator for BOTH doors into SOFTMAX. The environment variable used to
+# skip the checks the flag applies, so ZAMM_DIGEST_SOFTMAX=abc reached awk as 0
+# and collapsed every entry to its headline while exiting 0 — a corrupt digest
+# reporting success.
+validate_softmax() {
+  case "$2" in
+    "" | *[!0-9]*)
+      echo "ERROR: $1 requires a character count (integer)" >&2
+      exit 1
+      ;;
+  esac
+  if [ "$2" -lt 4000 ]; then
+    echo "ERROR: $1 below 4000 leaves no room for a usable digest" >&2
+    exit 1
+  fi
+}
+SOFTMAX=80000
+SOFTMAX_SET=0
+if [ -n "${ZAMM_DIGEST_SOFTMAX:-}" ]; then
+  validate_softmax ZAMM_DIGEST_SOFTMAX "$ZAMM_DIGEST_SOFTMAX"
+  SOFTMAX="$ZAMM_DIGEST_SOFTMAX"
+  SOFTMAX_SET=1
+fi
 while [ $# -gt 0 ]; do
   case "$1" in
     --project-root)
@@ -72,6 +120,12 @@ while [ $# -gt 0 ]; do
     --check)
       CHECK=1
       shift
+      ;;
+    --softmax)
+      validate_softmax --softmax "${2-}"
+      SOFTMAX="$2"
+      SOFTMAX_SET=1
+      shift 2
       ;;
     --with-candidate)
       if [ $# -lt 2 ] || [ ! -f "$2" ]; then
@@ -224,6 +278,8 @@ else
   : > "$TMP_FILE"
 fi
 PLANS_TMP="$TMP_FILE.plans"
+PLANS_TAIL="$TMP_FILE.tail"
+EXTRA_TAIL="$TMP_FILE.extra"
 MF_FILES="$TMP_FILE.mf"
 MF_LINKS="$TMP_FILE.ml"
 MF_ARCH="$TMP_FILE.ma"
@@ -241,13 +297,31 @@ else
   STATE_FILE="$OUT_DIR/state.tsv"
 fi
 STATE_TMP="$TMP_FILE.state"
+# The budget is a SETTING, not a per-invocation opinion, so it is remembered in
+# the sidecar beside the digest it produced and re-adopted by every run that
+# does not name one. Without this, `--softmax` held only until the next ledger
+# write: `memory create`, `plan block` and `memory archive` all recompile
+# implicitly, none of them can know what the published digest was built at, and
+# each silently rebuilt it at 80000 -- so the digest's own "Raise with
+# --softmax" advice appeared to work and then undid itself. Pass --softmax
+# 80000 to go back to the default. A sidecar written by an older version, or
+# one carrying garbage, simply does not answer: validate_softmax's rules are
+# reapplied here and a value that fails them leaves the default standing,
+# because a corrupt sidecar must never be able to brick the digest.
+if [ "$SOFTMAX_SET" -eq 0 ] && [ -f "$STATE_FILE" ]; then
+  _sm_saved=$(awk -F'\t' '$1 == "softmax" { print $2; exit }' "$STATE_FILE")
+  case "$_sm_saved" in
+    "" | *[!0-9]*) ;;
+    *) [ "$_sm_saved" -ge 4000 ] && SOFTMAX="$_sm_saved" ;;
+  esac
+fi
 # Cleanup releases the lock ONLY while its pid file still names this process:
 # should the lock ever be lost to another owner, exiting must not destroy the
 # new owner's mutual exclusion.
 # set +e first: a failing rm (an unwritable directory, say) must never abort
 # the trap before the lock is released — a leaked lock stalls every later
 # compile and publish for a 60s timeout apiece.
-trap 'set +e; rm -f "$TMP_FILE" "$PLANS_TMP" "$MF_FILES" "$MF_LINKS" "$MF_ARCH" "$MANIFEST" "$STATE_TMP" "$TMP_FILE.pmf"; [ -n "$OVERLAY_DIR" ] && rm -rf "$OVERLAY_DIR"; :' EXIT HUP INT TERM
+trap 'set +e; rm -f "$TMP_FILE" "$PLANS_TMP" "$PLANS_TAIL" "$EXTRA_TAIL" "$MF_FILES" "$MF_LINKS" "$MF_ARCH" "$MANIFEST" "$STATE_TMP" "$TMP_FILE.pmf"; [ -n "$OVERLAY_DIR" ] && rm -rf "$OVERLAY_DIR"; :' EXIT HUP INT TERM
 
 # No lock. The digest is derived, gitignored and regenerable, so it is never
 # protected — only recomputed (references/invariants.md, G2). Each compile
@@ -328,13 +402,384 @@ if [ "$enum_ok" -ne 1 ]; then
   exit 4
 fi
 
+# The plans tail is rendered BEFORE the record pass so its size can be
+# measured and handed to the budget: a ceiling that ignores a section
+# appended after the fact is a ceiling the digest walks straight through.
+# Rendering it first also means a broken plan tree fails before the
+# expensive ledger pass rather than after it.
+# ---- Plans tail: one compact 2-3 line entry per active plan (status line,
+#      title, optional inline scope), derived at compile time (no maintained
+#      index files; zamm-status.sh stays the on-demand verbose view)
+render_plans_section() {
+  # The plan tree enters the digest ONLY through the checked manifest: a glob
+  # here followed symlinked directories into external content and read an
+  # unreadable tree as "no active plans". Enumeration failure aborts before
+  # the digest is published (exit 4, previous digest untouched).
+  pmf="$TMP_FILE.pmf"
+  if ! sh "$PLAN_MANIFEST" --project-root "$PROJECT_ROOT" > "$pmf"; then
+    echo "ERROR: could not enumerate the plan tree; plans are unreadable, not empty." >&2
+    echo "       Previous digest left untouched." >&2
+    exit 4
+  fi
+  tab=$(printf '\t')
+  # A missing plan root is structural damage, never a healthy zero-plan
+  # project: scaffold always creates both roots. Abort before the digest is
+  # renamed into place — same taxonomy as an unreadable tree.
+  if grep -q "^MISSING${tab}" "$pmf"; then
+    grep "^MISSING${tab}" "$pmf" | while IFS="$tab" read -r _ mroot; do
+      echo "ERROR: plan root missing: ${mroot#"$PROJECT_ROOT/"} -- structural damage, not an empty project." >&2
+    done
+    echo "       Restore it ('zamm-run.sh scaffold' recreates the directory), then investigate." >&2
+    echo "       Previous digest left untouched." >&2
+    exit 4
+  fi
+  active_prefix="$PROJECT_ROOT/zamm-memory/active/plans/"
+  plans_tmp="$PLANS_TMP"
+  : > "$plans_tmp"
+  # Structural anomalies render as one-liners derived from the entry NAME
+  # alone — tagged content is never opened, so a symlinked directory cannot
+  # inject external text into the digest.
+  while IFS="$tab" read -r tag p1 p2 p3; do
+    base=${p1##*/}
+    case "$tag" in
+      DEBRIS)
+        case "$p1" in "$active_prefix"*)
+          printf '6\t- Invalid: %s (stray temporary directory inside a plan; raced or interrupted plan create)\n' "$base" >> "$plans_tmp" ;;
+        esac ;;
+      SYMLINK)
+        case "$p1" in "$active_prefix"*)
+          printf '6\t- Invalid: %s (symlinked entry; not rendered)\n' "$base" >> "$plans_tmp" ;;
+        esac ;;
+      NOTDIR)
+        case "$p1" in "$active_prefix"*)
+          printf '6\t- Invalid: %s (not a plan directory)\n' "$base" >> "$plans_tmp" ;;
+        esac ;;
+      UNREADABLE)
+        case "$p1" in "$active_prefix"*)
+          printf '6\t- Unknown: %s (unreadable .plan.md)\n' "$base" >> "$plans_tmp" ;;
+        esac ;;
+      DUP)
+        printf '6\t- Invalid: %s (same plan id active and archived)\n' "$p1" >> "$plans_tmp" ;;
+    esac
+  done < "$pmf"
+  while IFS= read -r pd; do
+    [ -n "$pd" ] || continue
+    slug=$(basename "$pd")
+    # prefer <slug>.plan.md, else the first main candidate the manifest lists
+    pf=$(awk -F"$tab" -v want="$pd/$slug.plan.md" '$1 == "PLANFILE" && $2 == want { print $2; exit }' "$pmf")
+    [ -n "$pf" ] ||
+      pf=$(awk -F"$tab" -v d="$pd/" '$1 == "PLANFILE" && index($2, d) == 1 { print $2; exit }' "$pmf")
+    if [ -z "$pf" ]; then
+      # an unreadable main candidate already rendered above; only a dir with
+      # genuinely no candidate reports "no .plan.md file"
+      nun=$(awk -F"$tab" -v d="$pd/" '$1 == "UNREADABLE" && index($2, d) == 1 { n++ } END { print n + 0 }' "$pmf")
+      [ "$nun" -eq 0 ] && printf '6\t- Unknown: %s (no .plan.md file)\n' "$slug" >> "$plans_tmp"
+      continue
+    fi
+    awk -v slug="$slug" -v today="$TODAY" '
+      function trimv(s) { sub(/\r$/, "", s); sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+      # days-from-civil, the same exact-days algorithm the record side uses for
+      # policy boundaries; a block age is a boundary, not a decay weight.
+      function civildays(d,   y, m, dd, era, yoe, doy, doe) {
+        if (d !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/) return 0
+        y = substr(d, 1, 4) + 0; m = substr(d, 6, 2) + 0; dd = substr(d, 9, 2) + 0
+        if (m <= 2) y--
+        era = int(y / 400); yoe = y - era * 400
+        doy = int((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5) + dd - 1
+        doe = yoe * 365 + int(yoe / 4) - int(yoe / 100) + doy
+        return era * 146097 + doe - 719468
+      }
+      # normalize the LINE too, not just the values read out of it: the
+      # section headings below are compared exactly, so a CRLF plan silently
+      # counted no Done-when items at all
+      { sub(/\r$/, "") }
+      st == "" && /^Status:/              { st = $0; sub(/^Status:/, "", st); st = trimv(st) }
+      cf == "" && /^Complexity-forecast:/ { cf = $0; sub(/^Complexity-forecast:/, "", cf); cf = trimv(cf) }
+      lu == "" && /^Last updated:/        { lu = $0; sub(/^Last updated:/, "", lu); lu = trimv(lu) }
+      ti == "" && /^# /                   { ti = $0; sub(/^# /, "", ti); ti = trimv(ti) }
+      si == "" && /^\* In:/               { si = $0; sub(/^\* In:/, "", si); si = trimv(si) }
+      # exact heading, not a prefix: "## Done-when-not" is a different section
+      $0 == "## Done-when" || $0 ~ /^## Done-when[ \t]/ { dw = 1; bl = 0; next }
+      $0 == "## Blocked-on" || $0 ~ /^## Blocked-on[ \t]/ { bl = 1; dw = 0; next }
+      /^## /          { dw = 0; bl = 0 }
+      dw && /^- \[ \]/    { nopen++ }
+      dw && /^- \[[xX]\]/ { ndone++ }
+      # Block log: `- YYYY-MM-DD [<class>]: <sentence>` opens an entry and an
+      # indented `Resolved YYYY-MM-DD:` line closes it. Only OPEN entries reach
+      # the digest — a resolved one is history, and history belongs in the file.
+      # The separator is tested in the action, not the pattern: a bracket
+      # expression holding both `[` and `:` reads as a character-class opener.
+      bl && /^- [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/ {
+        brest = substr($0, 13)
+        if (brest ~ /^[ \t]*\[/ || brest ~ /^[ \t]*:/) {
+          nb++
+          bdate[nb] = substr($0, 3, 10)
+          bkind[nb] = ""
+          if (match(brest, /^[ \t]*\[[^]]*\][ \t]*:/)) {
+            bk = substr(brest, index(brest, "[") + 1)
+            bkind[nb] = substr(bk, 1, index(bk, "]") - 1)
+            btext[nb] = trimv(substr(brest, RLENGTH + 1))
+          } else {
+            sub(/^[ \t]*:/, "", brest)
+            btext[nb] = trimv(brest)
+          }
+          bres[nb] = 0
+          next
+        }
+      }
+      bl && nb > 0 && /^[[:space:]]*Resolved [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]:/ { bres[nb] = 1 }
+      END {
+        # rank by the leading status word; annotated statuses keep their label
+        rank = 6; label = st
+        # Blocked outranks Review: both want a human, but Review is finished
+        # work awaiting a blessing while Blocked is work that has stopped.
+        if (st ~ /^Blocked/)           rank = 0
+        else if (st ~ /^Review/)       rank = 1
+        else if (st ~ /^Implementing/) rank = 2
+        else if (st ~ /^Draft/)        rank = 3
+        else if (st ~ /^Done/)         { rank = 4; label = st " (archive-ready)" }
+        else if (st ~ /^Abandoned/)    { rank = 5; label = st " (archive-ready)" }
+        else if (st == "")             label = "Unknown"
+        line = "- " label ": " slug
+        if (cf != "" && cf !~ /^</) {
+          if (length(cf) > 32) cf = substr(cf, 1, 29) "..."
+          line = line " [" cf "]"
+        }
+        tot = nopen + ndone + 0
+        if (tot > 0) line = line " done-when " ndone + 0 "/" tot ","
+        if (lu != "" && lu !~ /^</) {
+          split(lu, luw, /[ \t]/)
+          line = line " last " luw[1]
+        }
+        sub(/,$/, "", line)
+        oldest = ""
+        for (i = 1; i <= nb; i++) {
+          if (bres[i]) continue
+          if (oldest == "" || bdate[i] < oldest) oldest = bdate[i]
+        }
+        if (rank == 0 && oldest != "") {
+          age = civildays(today) - civildays(oldest)
+          if (age < 0) age = 0
+          line = line ", blocked " age "d"
+        }
+        out = rank "\t" line
+        if (ti != "" && ti !~ /^</) {
+          if (length(ti) > 100) ti = substr(ti, 1, 97) "..."
+          out = out "\t" ti
+        }
+        # Every open block, in log order, right under the title: the reason a
+        # reader has to act on belongs in the digest, not one file-open away.
+        # The class leads it, because "who clears this" is what tells a reader
+        # whether it is their move. The detail paragraph stays in the plan.
+        # Rendered whatever the status says, so an open block can never hide
+        # behind a stale Implementing.
+        for (i = 1; i <= nb; i++) {
+          if (bres[i] || btext[i] == "") continue
+          bt = btext[i]
+          if (length(bt) > 100) bt = substr(bt, 1, 97) "..."
+          out = out "\tblocked[" (bkind[i] == "" ? "unclassified" : bkind[i]) "]: " bt
+        }
+        if (si != "" && si !~ /^</) {
+          if (length(si) > 100) si = substr(si, 1, 97) "..."
+          out = out "\tin: " si
+        }
+        print out
+      }
+    ' "$pf" >> "$plans_tmp"
+  done <<EOF
+$(awk -F"$tab" '$1 == "PLANDIR" { print $2 }' "$pmf")
+EOF
+  {
+    printf '\n## Plans (active; compact entries)\n\n'
+    if [ -s "$plans_tmp" ]; then
+      sort -n "$plans_tmp" | awk -F'\t' '{
+        print $2
+        for (i = 3; i <= NF; i++) print "  " $i
+        print ""
+      }'
+    else
+      echo "(no active plans)"
+      echo ""
+    fi
+  } >> "$PLANS_TAIL"
+  rm -f "$plans_tmp"
+
+  # Recently archived plan IDs: after a pull, a referenced plan directory may
+  # have moved to archive on another machine — this list keeps the move
+  # visible. Directory mtime sorts fresh arrivals (checkout/closure) first.
+  narch=$(awk -F"$tab" '$1 == "ARCHDIR" { n++ } END { print n + 0 }' "$pmf")
+  if [ "$narch" -gt 0 ]; then
+    {
+      if [ "$narch" -gt 10 ]; then
+        echo "Recently archived (newest 10 of $narch; full list: zamm-memory/archive/plans/):"
+      else
+        echo "Recently archived ($narch; in zamm-memory/archive/plans/):"
+      fi
+      awk -F"$tab" '$1 == "ARCHDIR" { print $2 }' "$pmf" | while IFS= read -r ad; do
+        m=$(stat -f %m "$ad" 2>/dev/null || stat -c %Y "$ad" 2>/dev/null || echo 0)
+        printf '%s\t%s\n' "$m" "${ad##*/}"
+      done | sort -t "$tab" -k1,1rn -k2,2 | head -n 10 | while IFS="$tab" read -r _m nm; do
+        echo "- $nm"
+      done
+    } >> "$PLANS_TAIL"
+  fi
+  rm -f "$pmf"
+}
+
+# ---- Backlog summary: one pushed line (plus the small marked lane) is the
+#      knowledge digest's ENTIRE standing exposure to the backlog. The
+#      backlog tree compiles through a full recursive pass of this same
+#      script, so the counts come from the same validation and graph the
+#      lens itself publishes — never from a shortcut re-parse. Absent tree:
+#      no line at all (absence is data; the feature is simply unused).
+append_backlog_summary() {
+  [ -d "$PROJECT_ROOT/zamm-memory/backlog" ] || return 0
+  brc=0
+  sh "$0" --project-root "$PROJECT_ROOT" --tree backlog >/dev/null || brc=$?
+  # 2 = degraded lens, 3 = nothing live survived: both published-or-refused
+  # states the operator must hear about, but neither may hide the knowledge
+  # digest — the line carries the degradation and the overall exit becomes 2.
+  # Anything else non-zero is an unreadable backlog tree (G3): the digest
+  # compile fails whole, previous digest untouched.
+  if [ "$brc" -eq 2 ] || [ "$brc" -eq 3 ]; then
+    {
+      echo ""
+      echo "Backlog: DEGRADED - run: zamm-run.sh backlog check"
+    } >> "$EXTRA_TAIL"
+    BACKLOG_DEGRADED=1
+    return 0
+  fi
+  if [ "$brc" -ne 0 ]; then
+    echo "ERROR: the backlog tree did not compile (rc=$brc); previous digest left untouched." >&2
+    exit 4
+  fi
+  bstate="$OUT_DIR/backlog-state.tsv"
+  if [ ! -f "$bstate" ]; then
+    echo "ERROR: the backlog pass reported success but left no backlog-state.tsv; previous digest left untouched." >&2
+    exit 4
+  fi
+  tab=$(printf '\t')
+  blive=$(awk -F"$tab" '$1 == "live"   { print $2; exit }' "$bstate")
+  bhot=$(awk  -F"$tab" '$1 == "hot"    { print $2; exit }' "$bstate")
+  bmark=$(awk -F"$tab" '$1 == "marked" { print $2; exit }' "$bstate")
+  {
+    # The marked lane renders BEFORE the one-liner: it is the only backlog
+    # content that earned a pushed seat, and it nags oldest-first until
+    # someone promotes or unmarks. Zero marked = no section and no ", 0
+    # marked" noise on the line.
+    if [ "${bmark:-0}" -gt 0 ]; then
+      echo ""
+      echo "## Marked backlog (implement or unmark)"
+      echo ""
+      grep "^mselect${tab}" "$bstate" | sort -t "$tab" -k2,2 -k3,3 |
+        while IFS="$tab" read -r _ mdate mid mhl; do
+          echo "- $mhl [$mid] (marked $mdate)"
+        done
+      if grep -q "^marked_over${tab}" "$bstate"; then
+        echo "(over the soft cap - promote what is starting, unmark what is not)"
+      fi
+    fi
+    echo ""
+    if [ "${bmark:-0}" -gt 0 ]; then
+      echo "Backlog: ${blive:-0} live (${bhot:-0} hot, ${bmark} marked) - zamm-run.sh backlog list"
+    else
+      echo "Backlog: ${blive:-0} live (${bhot:-0} hot) - zamm-run.sh backlog list"
+    fi
+  } >> "$EXTRA_TAIL"
+}
+
+# ---- Journal line: the knowledge digest's ENTIRE standing exposure to the
+#      journal is one line, present only when digestion is due (triage by
+#      count or age; a practiced elevation kind with a completed period
+#      unelevated) or when the journal pass is degraded. Absent or quiet
+#      tree: no line at all, byte-identical digest. Segments join in the
+#      sidecar's fixed order and the line never wraps.
+append_journal_line() {
+  [ -d "$PROJECT_ROOT/zamm-memory/journal" ] || return 0
+  jrc=0
+  sh "$0" --project-root "$PROJECT_ROOT" --tree journal >/dev/null || jrc=$?
+  if [ "$jrc" -eq 2 ] || [ "$jrc" -eq 3 ]; then
+    {
+      echo ""
+      echo "Journal: DEGRADED - run: zamm-run.sh journal check"
+    } >> "$EXTRA_TAIL"
+    JOURNAL_DEGRADED=1
+    return 0
+  fi
+  if [ "$jrc" -ne 0 ]; then
+    echo "ERROR: the journal tree did not compile (rc=$jrc); previous digest left untouched." >&2
+    exit 4
+  fi
+  jstate="$OUT_DIR/journal-state.tsv"
+  if [ ! -f "$jstate" ]; then
+    echo "ERROR: the journal pass reported success but left no journal-state.tsv; previous digest left untouched." >&2
+    exit 4
+  fi
+  tab=$(printf '\t')
+  jline=$(awk -F"$tab" '
+    $1 == "due_triage" { seg = "triage due (" $2 " undigested, oldest " $3 ")"; segs = segs ((segs == "") ? "" : "; ") seg }
+    $1 == "due_elev"   { seg = $2 " due (" $3 ")"; segs = segs ((segs == "") ? "" : "; ") seg }
+    END { if (segs != "") print "Journal: " segs " - zamm-run.sh journal review" }
+  ' "$jstate")
+  if [ -n "$jline" ]; then
+    {
+      echo ""
+      echo "$jline"
+    } >> "$EXTRA_TAIL"
+  fi
+}
+
+# Only the knowledge digest carries a tail, and only a real compile writes one:
+# --check and the --list-* seams render no digest, so charging them for a tail
+# they never emit would shrink a surface nobody is reading.
+#
+# Everything appended after the awk is rendered and MEASURED here, before the
+# budget runs, because a budget that guesses at a section it never looked at is
+# not a budget. The backlog tail used to be charged a flat 256 bytes as "one or
+# two fixed lines" — true until `## Marked backlog` arrived, which adds a line
+# per marked idea and silently pushed the digest past its ceiling with no OVER
+# BUDGET notice. The sub-compiles run here rather than after the knowledge pass;
+# they publish their own independent lenses either way, and failing early leaves
+# the previous digest untouched exactly as before.
+TAILBYTES=0
+if [ "$TREE" = "knowledge" ] && [ "$CHECK" -eq 0 ] && [ "$LIST_INERT" -eq 0 ] &&
+   [ "$LIST_LIVE" -eq 0 ] && [ "$LIST_VOTES" -eq 0 ] && [ "$LIST_GRAPH" -eq 0 ] &&
+   [ "$LIST_STATE" -eq 0 ] && [ "$EXPORT" -eq 0 ]; then
+  : > "$PLANS_TAIL"
+  : > "$EXTRA_TAIL"
+  render_plans_section
+  append_backlog_summary
+  append_journal_line
+  TAILBYTES=$(( $(wc -c < "$PLANS_TAIL") + $(wc -c < "$EXTRA_TAIL") ))
+fi
+
 set +e
 awk \
-  -v today="$TODAY" -v check="$CHECK" -v listinert="$LIST_INERT" -v listlive="$LIST_LIVE" -v listvotes="$LIST_VOTES" -v listgraph="$LIST_GRAPH" -v liststate="$LIST_STATE" -v candidate="$cid" -v export="$EXPORT" -v root="$PROJECT_ROOT/" -v statefile="$STATE_TMP" -v lens="$TREE" '
+  -v today="$TODAY" -v check="$CHECK" -v listinert="$LIST_INERT" -v listlive="$LIST_LIVE" -v listvotes="$LIST_VOTES" -v listgraph="$LIST_GRAPH" -v liststate="$LIST_STATE" -v candidate="$cid" -v export="$EXPORT" -v root="$PROJECT_ROOT/" -v statefile="$STATE_TMP" -v lens="$TREE" -v softmax="$SOFTMAX" -v tailbytes="$TAILBYTES" '
 BEGIN {
   DIGEST_MAX = 75       # full digest blocks (actionable: headline + elaboration)
   HEADLINE_MAX = 150    # headline-only reminders (topic exists; open if relevant)
                         # ~same space as 100 full entries, ~2.25x coverage
+  SOFTMAX = softmax + 0 # soft ceiling, in characters, on the whole compiled
+                        # digest. It buys EXPANSION, never membership: the two
+                        # count caps above still decide WHICH records are
+                        # listed, and the budget only decides how many of the
+                        # Digest layer can afford their elaboration. A record
+                        # that cannot is collapsed to its headline and marked
+                        # +el — never dropped, because a reader who is told
+                        # less can still open the record, while a reader who
+                        # is told nothing does not know to look.
+                        # Soft in the GUARDRAIL_MAX / MARKED_MAX sense: when
+                        # even the all-collapsed floor does not fit, the
+                        # digest bursts and says so rather than shedding
+                        # entries. The unit that matters is ATTENTION, not
+                        # bytes on a pipe: the digest travels as a file the
+                        # agent reads, so nothing truncates it, and what this
+                        # bounds is how much context memory takes from every
+                        # session before any work starts (~4 chars a token).
+  FOOTER_RESERVE = 500  # space held back for the Budget / Unlisted / Dormant
+                        # footers, which are written after the budget has
+                        # already been spent and so cannot be priced from it
   GROUP_PENALTY = 0.25  # subtracted from log(score) per seat already taken
                         # from the same area: diversity pressure, not a quota
   TAG_COST = 0.25       # subtracted from log(score) per scope tag beyond the
@@ -416,13 +861,18 @@ BEGIN {
   read_record(path, base)
 }
 
-# Frontmatter-only read of an archived record: its id, type and supersedes
-# edges keep their place in the graph as an INERT node (grouping, conflict
-# detection, lineage) while its content, votes and durability stay out of the
-# ranking and the digest. An UNREADABLE archived file is fatal, like an
-# unreadable archived record: its type and supersedes edges are validation
-# authority (an unread type silently waives the type-transition checks, and
-# lost edges split reconciliation groups), so a failing read WOULD widen
+# Frontmatter-only read of an archived record: its id, type, supersedes
+# edges and seed votes keep their place in the graph as a LINEAGE node -
+# grouping, conflict detection, vote routing and chain depth all walk
+# through it exactly as through a dead record in the live tree - while its
+# content, importance and durability stay out of ranking and digest. That
+# is what lets `memory archive` move a superseded record as soon as it is
+# superseded, before its whole chain is dead: the live head keeps every
+# ancestor vote and its depth credit, and the digest is byte-identical
+# (the archiver verifies that). An UNREADABLE archived file is fatal, like
+# an unreadable live record: its type and edges are validation authority
+# (an unread type silently waives the type-transition checks, and lost
+# edges split reconciliation groups), so a failing read WOULD widen
 # validity if compilation continued.
 function read_archived_header(path, aid,   line, state, firstline, pos, key, val) {
   if ((getline line < path) < 0) {
@@ -449,6 +899,9 @@ function read_archived_header(path, aid,   line, state, firstline, pos, key, val
         val = trim(substr(line, pos + 1))
         if      (key == "type")       atype[aid] = val
         else if (key == "supersedes") asupinert[aid] = val
+        else if (key == "seed-up")    aseedup[aid] = val
+        else if (key == "seed-dn")    aseeddn[aid] = val
+        else if (key == "migrated-from") amigfrom[aid] = val
         # erases: travels with the record, so a redaction survives the move
         else if (key == "erases")     aerases[aid] = val
       }
@@ -794,6 +1247,36 @@ function read_record(path, base,   id, line, state, firstline, fmclosed, pos, ke
 
 # ---- helpers ----
 function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
+
+# The archivable set: (a) every superseded or retired memory record - dead,
+# valid, not erased. Archived nodes stay full lineage nodes, so moving one
+# changes nothing a live head can see; the archiver proves that with a
+# byte comparison of the digest. (b) every member of a supersede component
+# with no live memory record, no counted votes record and no live journal
+# elevation or watermark: the tombstones and votes records of a chain that
+# is dead end to end. An erasure record is load-bearing forever - it is the
+# only thing keeping redacted content out of the digest, and the archive
+# tree is read for names and edges, never for erases: - so it is never
+# archivable and pins its component.
+function build_archivable(   i, id, g) {
+  for (i = 1; i <= nrec; i++) {
+    id = order[i]
+    if ((id in erased) || (id in bad)) continue
+    g = group(id)
+    if (rtype[id] == "memory" && (id in live)) keepgrp[g] = 1
+    else if (rtype[id] == "votes" && !(id in dead)) keepgrp[g] = 1
+    else if ((id in elive) || (id in wmlive)) keepgrp[g] = 1
+    else if (rtype[id] == "erasure") keepgrp[g] = 1
+  }
+  narchivable = 0
+  for (i = 1; i <= nrec; i++) {
+    id = order[i]
+    if ((id in erased) || (id in bad)) continue
+    if (rtype[id] == "memory" && (id in dead)) { archivable[id] = 1; narchivable++; continue }
+    if (group(id) in keepgrp) continue
+    archivable[id] = 1; narchivable++
+  }
+}
 function first_body_line(id,   m, bl, t, ln) {
   m = split(rbody[id], bl, "\n")
   for (t = 1; t <= m; t++) { ln = trim(bl[t]); if (ln != "") return ln }
@@ -911,64 +1394,104 @@ function emit_state(   i, j, id, k, pm, cu, mk, mp, g, gp, n, nm2, fs) {
   close(statefile)
 }
 
+# Is the ledger degraded? ONE predicate, because there are seven exits and a
+# rendering guard that must all agree: every zero-live path, every lens, the
+# export seam and the normal digest. Each used to spell out its own subset,
+# and a new degradation kind (revived archived records) reached two of them —
+# so a backlog lens rendered the warning and still exited 0. Add a kind here
+# and every surface reports it.
+# nbad + ndup, never nquar: nquar is a DISPLAY alias assigned on the digest
+# rendering path, so a lens or zero-live path that exits earlier reads it as 0.
+# That ordering is exactly why the old hand-copied subsets differed, and
+# reading it here made every early exit blind to quarantined records.
+function degraded() {
+  return (nbad + ndup > 0 || ndangling > 0 || ndupvote > 0 || nbadvoteref > 0 ||
+          nbadcover > 0 || nrevived > 0)
+}
+
+# The tree this compile is reading, as a path a human can act on. The revival
+# remedy names it: telling someone to move a revived backlog idea into
+# zamm-memory/knowledge/ would corrupt the tree it belongs to.
+function treedir() { return "zamm-memory/" lens "/" }
+
 # The ## Degraded section: quarantined records, dangling supersedes targets,
-# duplicate active votes records, invalid vote references. Rendered on the
-# normal digest path AND on the zero-live path — a ledger holding only (say) a
-# votes record with a ghost target must still read as degraded, not as a
-# clean uninitialized ledger.
-function emit_degraded(   i, id) {
-  if (nquar == 0 && ndangling == 0 && ndupvote == 0 && nbadvoteref == 0 && nbadcover == 0) return
-  print "## Degraded (ledger integrity problems - see below)"
-  print ""
+# duplicate active votes records, invalid vote references, revived archived
+# records. Rendered on the normal digest path AND on the zero-live path — a
+# ledger holding only (say) a votes record with a ghost target must still read
+# as degraded, not as a clean uninitialized ledger.
+function emit_degraded(   i, id, j, k, nrl, rlist) {
+  if (!degraded()) return
+  say("## Degraded (ledger integrity problems - see below)")
+  say("")
+  if (nrevived > 0) {
+    say("Archived records that are live again - nothing supersedes them any more")
+    say("(the successor was quarantined or erased, or the file was moved by hand),")
+    say("and archived content is never read. Move each back into")
+    say(treedir() "<year>/ (git mv), or retire it with a tombstone:")
+    say("")
+    # `for (x in arr)` walks awk hash order, which is unspecified and differs
+    # between awks. Every other listing here walks order[] or sorts; this one
+    # is byte-compared by both the golden test and the archive self-check, so
+    # it sorts too. Insertion sort: asort() is a gawk extension.
+    nrl = 0
+    for (id in revived) rlist[++nrl] = id
+    for (i = 2; i <= nrl; i++) {
+      k = rlist[i]; j = i - 1
+      while (j > 0 && rlist[j] > k) { rlist[j + 1] = rlist[j]; j-- }
+      rlist[j + 1] = k
+    }
+    for (i = 1; i <= nrl; i++) say("- " rlist[i] "  (" relpath(archpath[rlist[i]]) ")")
+    say("")
+  }
   if (nquar > 0) {
-    print "Quarantined records - failed the record contract and were excluded from"
-    print "liveness, supersession, votes and ranking. Fix them and recompile; run"
-    print "--check for the full error list."
-    print ""
+    say("Quarantined records - failed the record contract and were excluded from")
+    say("liveness, supersession, votes and ranking. Fix them and recompile; run")
+    say("--check for the full error list.")
+    say("")
     for (i = 1; i <= nrec; i++) {
       id = order[i]
       if (!(id in bad)) continue
-      print "- " relpath(badmsg[id])
+      say("- " relpath(badmsg[id]))
     }
     for (i = 1; i <= ndup; i++)
-      print "- " relpath(dupfile[i]) ": duplicate record id"
-    print ""
+      say("- " relpath(dupfile[i]) ": duplicate record id")
+    say("")
   }
   if (ndangling > 0) {
-    print "Dangling references - these records are LIVE, but name a supersedes:"
-    print "target that does not exist in the ledger, so that edge was dropped."
-    print "A missing target is usually a typo or a not-yet-committed record."
-    print ""
+    say("Dangling references - these records are LIVE, but name a supersedes:")
+    say("target that does not exist in the ledger, so that edge was dropped.")
+    say("A missing target is usually a typo or a not-yet-committed record.")
+    say("")
     for (i = 1; i <= nrec; i++) {
       id = order[i]
       if (!(id in hasdangling)) continue
-      print "- " id ": supersedes target not found: " danglingtgt[id]
+      say("- " id ": supersedes target not found: " danglingtgt[id])
     }
-    print ""
+    say("")
   }
   if (ndupvote > 0) {
-    print "Duplicate vote records - more than one active votes record names the"
-    print "same plan. Only the newest is counted; supersede the stale ones."
-    print ""
+    say("Duplicate vote records - more than one active votes record names the")
+    say("same plan. Only the newest is counted; supersede the stale ones.")
+    say("")
     for (i = 1; i <= ndupvote; i++)
-      print "- " dupvoteplan[i] ": " nplanvotes[dupvoteplan[i]] " active votes records (counted: " canonvote[dupvoteplan[i]] ")"
-    print ""
+      say("- " dupvoteplan[i] ": " nplanvotes[dupvoteplan[i]] " active votes records (counted: " canonvote[dupvoteplan[i]] ")")
+    say("")
   }
   if (nbadcover > 0) {
-    print "Void coverage claims - a watermark or elevation names records it could"
-    print "not have reviewed, so it covers NOTHING and its entries stay undigested."
-    print ""
+    say("Void coverage claims - a watermark or elevation names records it could")
+    say("not have reviewed, so it covers NOTHING and its entries stay undigested.")
+    say("")
     for (i = 1; i <= nbadcover; i++)
-      print "- " badcover[i]
-    print ""
+      say("- " badcover[i])
+    say("")
   }
   if (nbadvoteref > 0) {
-    print "Invalid vote references - a votes record names a target that does not"
-    print "exist or is not a memory record; that vote was dropped."
-    print ""
+    say("Invalid vote references - a votes record names a target that does not")
+    say("exist or is not a memory record; that vote was dropped.")
+    say("")
     for (i = 1; i <= nbadvoteref; i++)
-      print "- " badvoteref[i]
-    print ""
+      say("- " badvoteref[i])
+    say("")
   }
 }
 
@@ -1584,10 +2107,18 @@ function addvotes(voter, list, sign, w,   m, t, tgt, av) {
   for (t = 1; t <= m; t++) {
     tgt = trim(av[t])
     if (tgt == "") continue
-    # erased or archived target = known inert node: no vote, no error -
-    # archived only when no live copy exists, or a vote on a record caught
-    # mid-archive silently vanished from the ranking instead of counting
-    if ((tgt in erased) || ((tgt in archived) && !(tgt in filepath))) continue
+    # erased target = known inert node: no vote, no error
+    if (tgt in erased) continue
+    # archived target (no live copy - a vote on a record caught mid-archive
+    # lands on the live copy below): the vote counts into the lineage node,
+    # so the live head aggregates it exactly as before the move. An archived
+    # header without a memory type (a pre-v3 note) takes no vote, silently.
+    if ((tgt in archived) && !(tgt in filepath)) {
+      if (atype[tgt] != "memory") continue
+      if (sign > 0) { vup_id[tgt]++; vsc_id[tgt] += w }
+      else          { vdn_id[tgt]++; vsc_id[tgt] -= w }
+      continue
+    }
     if (!(tgt in filepath)) { bad_voteref(voter ": vote target not found: " tgt); continue }
     if (tgt in bad) continue
     # votes rate knowledge, so only memory records can be voted on: a vote on
@@ -1781,10 +2312,16 @@ function analyze(id,   m, t, ln, bl, started, paradone, headseen) {
     started = 1
     blockl[id]++; blockc[id] += length(ln)
     if (!paradone) hl[id] = (hl[id] == "") ? ln : hl[id] " " ln
+    else elab[id] = 1
   }
 }
 
 function headline(id) { analyze(id); return hl[id] }
+
+# does the digest block carry elaboration below its headline paragraph? Only
+# such a record can be collapsed by the budget, and only such a record earns
+# the +el marker when it is.
+function haselab(id) { analyze(id); return (id in elab) }
 
 function pointer(id,   p, u, d) {
   p = id
@@ -1794,6 +2331,11 @@ function pointer(id,   p, u, d) {
   else if (d > 0)     p = p " -" d
   analyze(id)
   if (id in hasbg) p = p " +bg"
+  # +el: this record HAS elaboration in its digest block, but the budget could
+  # not afford to render it here. Distinct from a record that simply has none —
+  # without the marker a reader cannot tell "nothing more to say" from "more to
+  # say, withheld", and the second one is worth opening.
+  if (id in elheld) p = p " +el"
   return "[" p "]"
 }
 
@@ -1807,37 +2349,86 @@ function markpfx(id,   p) {
   return (p == "") ? "" : p " "
 }
 
+# Rendering is split from emission so that the budget can PRICE an entry with
+# the very code that would print it: a cost that is estimated separately from
+# the renderer drifts the moment either side changes, and a budget computed
+# from a drifting cost is worse than no budget at all.
+
 # headline-only entry (Headlines, reconciliation heads); scope = primary tag.
 # nomark: list the record without consuming its digest eligibility — the
 # reconciliation index must not spend the entry it is warning about, or a
 # contested guardrail loses its elaboration exactly when it is most needed.
-function emitline(id, withscope, nomark,   pre) {
-  pre = nomark ? ((rimp[id] == "guardrail") ? "! " : "") : markpfx(id)
-  if (withscope && pscope[id] != "")
-    print "- " pre pscope[id] ": " headline(id) " " pointer(id)
-  else
-    print "- " pre headline(id) " " pointer(id)
-  if (!nomark) printed[id] = 1
-  endedblank = 0
+# The label an entry carries inline. Entries sit under a `### <area>` heading,
+# so the area is context the reader has already been given; what earns a place
+# on the line is the SUBPATH, which names the topic of that one record.
+#   mode 0 = no label
+#   mode 1 = the full scope — for the reconciliation index, which has no area
+#            heading above it
+#   mode 2 = subpath only
+function scopelabel(id, mode,   s) {
+  if (mode == 0) return ""
+  s = pscope[id]
+  if (mode == 2) {
+    if (index(s, "/") == 0) return ""
+    s = substr(s, index(s, "/") + 1)
+  }
+  return (s == "") ? "" : s ": "
 }
 
-# full entry: headline line + elaboration lines (rest of the digest block)
-function emitfull(id, withscope,   pre, m, bl, t, ln, started, paradone, any) {
-  pre = markpfx(id)
-  if (withscope && pscope[id] != "")
-    print "- " pre pscope[id] ": " headline(id) " " pointer(id)
-  else
-    print "- " pre headline(id) " " pointer(id)
+function renderline(id, mode, nomark,   pre) {
+  pre = nomark ? ((rimp[id] == "guardrail") ? "! " : "") : markpfx(id)
+  return "- " pre scopelabel(id, mode) headline(id) " " pointer(id)
+}
+
+# full entry: headline line + elaboration lines (rest of the digest block).
+# rf_any is a side channel, not a return value: awk has no tuples, and the
+# caller needs to know whether elaboration was rendered to decide the trailing
+# blank line (and, when pricing, the byte it costs).
+function renderfull(id, mode,   s, m, bl, t, ln, started, paradone) {
+  rf_any = 0
+  s = renderline(id, mode)
   m = split(rbody[id], bl, "\n")
   for (t = 1; t <= m; t++) {
     ln = trim(bl[t])
     if (ln ~ /^#/) break
     if (ln == "") { if (started) paradone = 1; continue }
     started = 1
-    if (paradone) { print "  " ln; any = 1 }
+    if (paradone) { s = s "\n  " ln; rf_any = 1 }
   }
-  if (any) { print ""; endedblank = 1 } else endedblank = 0
+  return s
+}
+
+function emitline(id, mode, nomark) {
+  say(renderline(id, mode, nomark))
+  if (!nomark) printed[id] = 1
+  endedblank = 0
+}
+
+function emitfull(id, mode,   s) {
+  s = renderfull(id, mode)
+  say(s)
+  if (rf_any) { say(""); endedblank = 1 } else endedblank = 0
   printed[id] = 1
+}
+
+# Byte-counting print. Everything the knowledge digest emits goes through it,
+# so `bytes` is the real size of the surface rather than a guess at it — the
+# budget is only as honest as this counter.
+function say(s) { print s; bytes += length(s) + 1 }
+
+# what one entry costs, in the two forms the budget chooses between
+function costfull(id, mode,   s) {
+  s = renderfull(id, mode)
+  return length(s) + 1 + (rf_any ? 1 : 0)
+}
+function costline(id, mode,   held, n) {
+  # priced as it would actually render: a collapsed entry carries +el, and
+  # forgetting those 5 characters is how a budget quietly overshoots.
+  held = (id in elheld)
+  if (haselab(id)) elheld[id] = 1
+  n = length(renderline(id, mode)) + 1
+  if (!held) delete elheld[id]
+  return n
 }
 
 END {
@@ -2009,15 +2600,28 @@ END {
     for (t = 1; t <= m; t++) {
       tgt = trim(tg[t])
       if (tgt == "") continue
-      # An edge into an erased or archived target applies as GROUPING AND
-      # LINEAGE ONLY: the retired id stays a real graph node (two live
-      # successors of one retired target meet in one union-find group and
-      # surface under Needs reconciliation), but no dead/nsup/asup mutation
-      # happens, so a retired node can never mint ranking credit or route
-      # votes into a live record.
-      if ((tgt in erased) || ((tgt in archived) && !(tgt in filepath))) {
+      # An edge into an ERASED target applies as grouping only: the erased
+      # id stays a real graph node (two live successors of one erased target
+      # meet in one union-find group and surface under Needs reconciliation),
+      # but nothing routes through it - an erased record contributes no
+      # votes and no depth, so a successor can never mint credit from it.
+      if (tgt in erased) {
         uf_union(id, tgt)
         if (!(id in parent)) parent[id] = tgt
+        continue
+      }
+      # An edge into an ARCHIVED target (no live copy) is a full lineage
+      # edge: the archived node is a dead record whose content happens to
+      # live in another directory. Applying it exactly like a live-tree
+      # edge is what keeps the rank of the head byte-identical when `memory
+      # archive` moves a superseded ancestor. adead marks the archived node
+      # as superseded, which the revival check below reads.
+      if ((tgt in archived) && !(tgt in filepath)) {
+        adead[tgt] = 1
+        nsup[id]++
+        if (!(id in parent)) parent[id] = tgt
+        asup[id] = (asup[id] == "") ? tgt : asup[id] "," tgt
+        uf_union(id, tgt)
         continue
       }
       if ((tgt in bad) || !(tgt in filepath)) continue
@@ -2029,17 +2633,59 @@ END {
     }
   }
 
-  # Edges BETWEEN retired nodes, parsed from archived headers, keep whole
-  # retired chains connected: two live successors attached at different
-  # points of one archived chain still meet in one group. Grouping only --
-  # nothing here touches liveness, rank or votes.
+  # Edges FROM archived nodes, parsed from archived headers. Into another
+  # archived node they are lineage (asup/parent/nsup, and the target is
+  # adead), so the vote walk and depth count of a live head continue through a
+  # chain that was moved generation by generation. Into an erased id, or
+  # into a record still in the live tree, they group only: an archived node
+  # never kills a live-tree record (a hand-moved successor must not hide a
+  # the content of a live predecessor), and an erased id routes nothing.
   for (aid in asupinert) {
+    # A live copy wins (mid-archive duplicate), and an ERASED archived node
+    # applies nothing - the same guard the live-tree pass opens with. Without
+    # it an erased successor still marked its predecessor superseded, so the
+    # predecessor was neither live nor reported: its content vanished with
+    # both compile and check exiting 0.
+    if ((aid in filepath) || (aid in erased)) continue
     m = split(asupinert[aid], tg, ",")
     for (t = 1; t <= m; t++) {
       tgt = trim(tg[t])
       if (tgt == "" || tgt == aid) continue
-      if ((tgt in archived) || (tgt in erased) || (tgt in filepath)) uf_union(aid, tgt)
+      if ((tgt in archived) && !(tgt in filepath) && !(tgt in erased)) {
+        adead[tgt] = 1
+        nsup[aid]++
+        if (!(aid in parent)) parent[aid] = tgt
+        asup[aid] = (asup[aid] == "") ? tgt : asup[aid] "," tgt
+        uf_union(aid, tgt)
+      } else if ((tgt in erased) || (tgt in filepath)) {
+        if (!(aid in parent)) parent[aid] = tgt
+        uf_union(aid, tgt)
+      }
     }
+  }
+
+  # Revival: an archived memory record that NO applied edge retires. Archived
+  # content is never read, so such a record is live with invisible content -
+  # the one state this whole change could create silently.
+  #
+  # The test belongs to the graph, not to a bookkeeping set: earlier this asked "did
+  # anything ever claim to supersede it", which is unsound because the claim
+  # lives in the file of the successor. Completing the documented erasure
+  # procedure - write the erasure record, delete the file - deletes the claim
+  # too, so the orphaned predecessor became permanently invisible instead of
+  # reported. Asking adead[] instead makes the answer a property of the
+  # ledger as it now stands, and covers the hand-moved record with nothing
+  # superseding it, which is the same defect arrived at another way.
+  #
+  # Only type: memory is judged: a tombstone, votes or erasure record in the
+  # archive asserts nothing that could go missing, and a pre-v3 note without
+  # frontmatter has no type at all.
+  nrevived = 0
+  for (aid in archived) {
+    if ((aid in filepath) || (aid in erased) || (aid in adead)) continue
+    if (atype[aid] != "memory") continue
+    revived[aid] = 1; nrevived++
+    err(aid ": archived record is live again - nothing supersedes it, and archived content is never read; move it back to " treedir() " or retire it with a tombstone")
   }
 
   # 2a. one active votes record per plan. The votes record for a plan is
@@ -2095,6 +2741,29 @@ END {
         vdn_id[id] += n; vsc_id[id] -= n * w
       }
     }
+  }
+
+  # Seed votes of archived memory records (migration provenance) ride their
+  # header: a live head aggregates them through the lineage walk, so moving a
+  # seeded ancestor changes no rank.
+  #
+  # Under EXACTLY the gate of the live tree, which is the whole point: a seed
+  # without migrated-from, an out-of-range seed, or a junk provenance token
+  # quarantines the record under knowledge/ and must therefore contribute
+  # nothing under archive/knowledge/ either. Without this, moving a file was
+  # a way to launder "seed-up: 10000" past the validator into the score of a
+  # live head. The archive cannot quarantine (the header is all we read), so the
+  # fail-closed equivalent is to count nothing - the same as a quarantined
+  # record contributes in the live tree.
+  for (aid in archived) {
+    if ((aid in filepath) || (aid in erased) || atype[aid] != "memory") continue
+    if (aseedup[aid] == "" && aseeddn[aid] == "") continue
+    if (amigfrom[aid] == "" || amigfrom[aid] !~ /^[A-Za-z0-9][A-Za-z0-9._\/-]*$/) continue
+    if (aseedup[aid] != "" && !validseed(aseedup[aid])) continue
+    if (aseeddn[aid] != "" && !validseed(aseeddn[aid])) continue
+    w = VOTE_WEIGHT * agew((aid ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-/) ? substr(aid, 1, 10) : today)
+    if (aseedup[aid] != "") { n = aseedup[aid] + 0; vup_id[aid] += n; vsc_id[aid] += n * w }
+    if (aseeddn[aid] != "") { n = aseeddn[aid] + 0; vdn_id[aid] += n; vsc_id[aid] -= n * w }
   }
 
   # 3. live set, scores, conflict census
@@ -2312,7 +2981,7 @@ END {
     # dangling record means these rows are SHORT, and an application reading
     # them cannot see the ## Degraded section that would say so. (nquar is
     # computed further down, on the rendering path this exit precedes.)
-    exit ((nbad + ndup > 0 || ndangling > 0 || ndupvote > 0 || nbadvoteref > 0 || nbadcover > 0) ? 2 : 0)
+    exit (degraded() ? 2 : 0)
   }
 
   if (listlive == 1) {
@@ -2367,7 +3036,8 @@ END {
   # supersede targets (comma-joined, "-" when none), path relative to the
   # project root, headline (TAB-sanitized; the quarantine reason for a
   # quarantined record), and the stray body line when the body opens with a
-  # frontmatter key ("-" otherwise). "retired" means a tombstone superseded it.
+  # frontmatter key ("-" otherwise). "retired" means a tombstone superseded
+  # it; "revived" is an archived record whose successor is gone (Degraded).
   if (liststate == 1) {
     for (i = 1; i <= nrec; i++) {
       id = order[i]
@@ -2407,7 +3077,7 @@ END {
     for (aid in archived) {
       if (aid in filepath) continue
       sup = asupinert[aid]; gsub(/[ \t]/, "", sup)
-      printf "%s\t%s\t%s\t-\t%s\t-\t-\t%s\t%s\t-\t-\n", aid, "archived", (atype[aid] == "" ? "-" : atype[aid]), ((aid ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-/) ? substr(aid, 1, 10) : "-"), (sup == "" ? "-" : sup), relpath(archpath[aid])
+      printf "%s\t%s\t%s\t-\t%s\t-\t-\t%s\t%s\t-\t-\n", aid, ((aid in revived) ? "revived" : "archived"), (atype[aid] == "" ? "-" : atype[aid]), ((aid ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-/) ? substr(aid, 1, 10) : "-"), (sup == "" ? "-" : sup), relpath(archpath[aid])
     }
     close("cat 1>&2")
     exit 0
@@ -2443,26 +3113,10 @@ END {
   #     dangle their supersedes: target. Live votes records are equally
   #     load-bearing.
   if (listinert == 1) {
+    build_archivable()
     for (i = 1; i <= nrec; i++) {
       id = order[i]
-      if ((id in erased) || (id in bad)) continue
-      g = group(id)
-      if (rtype[id] == "memory" && (id in live)) keepgrp[g] = 1
-      else if (rtype[id] == "votes" && !(id in dead)) keepgrp[g] = 1
-      # journal: an unretired elevation or watermark is load-bearing
-      else if ((id in elive) || (id in wmlive)) keepgrp[g] = 1
-      # An erasure record is load-bearing forever: it is the only thing
-      # keeping redacted content out of the digest, and the archive tree is
-      # read for names and edges, never for erases:. Moving one therefore
-      # un-redacts what it was written to suppress. It is never inert, no
-      # matter what else its component holds.
-      else if (rtype[id] == "erasure") keepgrp[g] = 1
-    }
-    for (i = 1; i <= nrec; i++) {
-      id = order[i]
-      if ((id in erased) || (id in bad)) continue
-      if (group(id) in keepgrp) continue
-      print filepath[id]
+      if (id in archivable) print filepath[id]
     }
     close("cat 1>&2")
     exit 0
@@ -2504,7 +3158,7 @@ END {
       }
       emit_state()
       close("cat 1>&2")
-      exit ((ndangling > 0 || ndupvote > 0 || nbadvoteref > 0 || nbadcover > 0) ? 2 : 0)
+      exit (degraded() ? 2 : 0)
     }
     print "Entry format: - DD  headline [record-id +bg]; newest first, one section per month."
     print "Episodes, not facts: open the record (+bg) for depth. Digestion: journal review"
@@ -2573,7 +3227,7 @@ END {
     }
     emit_state()
     close("cat 1>&2")
-    exit ((nquar > 0 || ndangling > 0 || ndupvote > 0 || nbadvoteref > 0 || nbadcover > 0) ? 2 : 0)
+    exit (degraded() ? 2 : 0)
   }
 
   # ---- backlog lens rendering ----
@@ -2593,7 +3247,7 @@ END {
       }
       emit_state()
       close("cat 1>&2")
-      exit ((ndangling > 0 || ndupvote > 0 || nbadvoteref > 0 || nbadcover > 0) ? 2 : 0)
+      exit (degraded() ? 2 : 0)
     }
     print "Entry format: - headline [record-id votes +bg]; ~ = variants (parallel forks)."
     print "Hot-to-cold within each area; hot = recently added or voted up. Read the"
@@ -2698,11 +3352,22 @@ END {
     }
     emit_state()
     close("cat 1>&2")
-    exit ((nquar > 0 || ndangling > 0 || ndupvote > 0 || nbadvoteref > 0 || nbadcover > 0) ? 2 : 0)
+    exit (degraded() ? 2 : 0)
   }
 
-  printf "# ZAMM Memory Digest (%s: files=%d parsed=%d live=%d quarantined=%d; generated file - do not edit)\n", today, nfiles, nrec - nbad, nlive, nquar
-  print ""
+  build_archivable()
+  hdrline = sprintf("# ZAMM Memory Digest (%s: files=%d parsed=%d live=%d quarantined=%d archive-ready=%d; generated file - do not edit)", today, nfiles, nrec - nbad, nlive, nquar, narchivable)
+  say(hdrline)
+  # Line 1 is the ONE line the archive self-check excludes, because the record
+  # counts in it are expected to move when a record is archived. The budget
+  # total is printed BELOW line 1, so it must not carry the length of line 1,
+  # or it smuggles that variance back under the invariant: dropping files=14
+  # to files=6 shortened the header by one char, turned "Budget: 2135" into
+  # "2133", and made "memory archive" roll a correct archive back as a bug in
+  # the archive rule. Those ~110 chars are still context an agent pays for,
+  # but a budget that stays honest below the fold is worth 0.1% of the ceiling.
+  headerbytes = length(hdrline) + 1
+  say("")
 
   if (nlive == 0) {
     print "(no live memory records - active memory has not been initialized; ask the human before initializing, never write placeholder records)"
@@ -2712,23 +3377,27 @@ END {
     # refuse-to-publish branch above did not fire). Exiting 0 with a clean
     # "not initialized" digest would hide known graph defects and invite
     # re-seeding, so render ## Degraded and exit 2 like the normal path.
-    if (ndangling > 0 || ndupvote > 0 || nbadvoteref > 0 || nbadcover > 0) {
+    if (degraded()) {
       print ""
       emit_degraded()
     }
     emit_state()
     close("cat 1>&2")
-    exit ((ndangling > 0 || ndupvote > 0 || nbadvoteref > 0 || nbadcover > 0) ? 2 : 0)
+    exit (degraded() ? 2 : 0)
   }
 
-  print "Entry format: - headline [record-id votes +bg]; indented lines = elaboration."
-  print "Digest section: up to " DIGEST_MAX " actionable full blocks (! = guardrail, do not violate;"
-  print "~ = contested head, also listed under Needs reconciliation)."
-  print "Headlines section: up to " HEADLINE_MAX " one-line reminders that knowledge exists;"
-  print "open the record (+bg) when the topic matches. Id doubles as creation date."
-  print "Session read: `memory digest` recompiles and prints this text - one run"
-  print "per session is the whole read; do not open the compiled file as well."
-  print ""
+  say("Entry format: - subpath: headline [record-id votes +bg +el]; indented lines =")
+  say("elaboration. Both record sections group under ### area headings; the subpath on")
+  say("each line names the topic of that one record inside its area.")
+  say("Digest section: up to " DIGEST_MAX " actionable full blocks (! = guardrail, do not violate;")
+  say("~ = contested head, also listed under Needs reconciliation). +el = the block")
+  say("has elaboration the space budget could not render; open the record.")
+  say("Headlines section: up to " HEADLINE_MAX " one-line reminders that knowledge exists;")
+  say("open the record (+bg) when the topic matches. Id doubles as creation date.")
+  say("Session read: `memory digest` recompiles this file and hands back its path.")
+  say("Reading this file once, whole, IS the session read - there is nothing else")
+  say("to run and no second surface to consult.")
+  say("")
 
   # Degraded: ledger integrity problems surfaced in the digest itself, so a
   # broken ledger reads as broken rather than as missing memory. Any kind
@@ -2736,9 +3405,9 @@ END {
   emit_degraded()
 
   if (nother > 0) {
-    print "Other: " nother " record(s) in the catch-all area - refile each via"
-    print "supersession into a real area when touched."
-    print ""
+    say("Other: " nother " record(s) in the catch-all area - refile each via")
+    say("supersession into a real area when touched.")
+    say("")
   }
 
   # One bucketing pass instead of rescanning every record per conflict group:
@@ -2752,17 +3421,17 @@ END {
     if (gcount[r] == 1) grouplist[++ngroups] = r
   }
   if (nconf > 0) {
-    print "## Needs reconciliation (resolve this session)"
-    print ""
-    print "Per group: read the competing record files, then write ONE new record whose"
-    print "supersedes: line lists ALL competing ids. Never edit or delete the files."
-    print "This is an index — each head keeps its full block below, marked ~."
-    print ""
+    say("## Needs reconciliation (resolve this session)")
+    say("")
+    say("Per group: read the competing record files, then write ONE new record whose")
+    say("supersedes: line lists ALL competing ids. Never edit or delete the files.")
+    say("This is an index — each head keeps its full block below, marked ~.")
+    say("")
     for (i = 1; i <= ngroups; i++) {
       r = grouplist[i]
-      print "### Heads of " r
+      say("### Heads of " r)
       for (j = 1; j <= gcount[r]; j++) emitline(gmembers[r, j], 1, 1)
-      print ""
+      say("")
     }
   }
 
@@ -2772,7 +3441,10 @@ END {
   # (tags - 1) up to DIGEST_MAX — weighted ranking vs per-area diversity.
   # Headlines: next HEADLINE_MAX live records by score as one-line reminders.
   # Anything beyond Digests+Headlines stays live in the ledger but unlisted.
-  print "## Digest (actionable; full blocks)"
+  #
+  # Selection decides MEMBERSHIP and runs before anything is emitted, because
+  # the space budget below prices the whole surface at once and cannot price a
+  # layer it has not chosen yet.
   ncore = 0
   for (i = 1; i <= nsort; i++) {
     id = sorted[i]
@@ -2802,35 +3474,158 @@ END {
     corelist[++ncore] = best
     takeseats(best)
   }
+
+  # Headline membership: the next HEADLINE_MAX ranked live records the Digest
+  # layer did not take. Chosen against coretaken rather than printed because
+  # nothing has been emitted yet.
+  nhlsel = 0
+  for (i = 1; i <= nsort; i++) {
+    id = sorted[i]
+    if ((id in printed) || (id in coretaken) || (id in dormant)) continue
+    if (nhlsel >= HEADLINE_MAX) break
+    hllist[++nhlsel] = id
+  }
+
+  # ---- the space budget ----
+  # Membership is settled; all that is left to decide is how much of it can
+  # afford to be expanded. The floor is every listed entry as a single line —
+  # never lower, because dropping an entry costs a reader the one thing a
+  # digest owes them, the knowledge that the record exists. The ceiling is the
+  # Digest layer rendered in full. Between the two, buy elaboration in rank
+  # order until the money runs out.
+  floorbytes = 0
+  for (i = 1; i <= ncore; i++)  floorbytes += costline(corelist[i], 2)
+  for (i = 1; i <= nhlsel; i++) floorbytes += costline(hllist[i], 2)
+
+  # Headings are surface too. Priced at their maximum (heading plus a leading
+  # blank): an expanded entry already ends with a blank that suppresses the
+  # blank of the next heading, over-counting by at most a byte per scope group.
+  # Over-counting spends the budget slightly early, which is the safe
+  # direction for a limit whose entire purpose is not to be crossed.
+  chrome = length("## Digest (actionable; full blocks)") + 2
+  for (i = 1; i <= ncore; i++) {
+    scp = area(corelist[i])
+    if (("d" SUBSEP scp) in seenscope) continue
+    seenscope["d" SUBSEP scp] = 1
+    chrome += length("### " ((scp == "") ? "(no scope)" : scp)) + 2
+  }
+  if (nhlsel > 0) {
+    chrome += length("## Headlines (reminders; open the record when the topic matches)") + 2
+    for (i = 1; i <= nhlsel; i++) {
+      scp = area(hllist[i])
+      if (("h" SUBSEP scp) in seenscope) continue
+      seenscope["h" SUBSEP scp] = 1
+      chrome += length("### " ((scp == "") ? "(no scope)" : scp)) + 2
+    }
+  }
+
+  # bytes = the header, ## Degraded and the reconciliation index, already
+  # emitted and already counted. tailbytes = the Plans and backlog tail the
+  # shell appends after this awk exits, measured there and passed in, because
+  # a budget that ignores a section it cannot see is not a budget.
+  #
+  # headerbytes comes back out for the same reason the printed total excludes
+  # it, and here it matters more: this number decides WHICH blocks expand, so
+  # leaving line 1 in it makes the digest BODY depend on counts that move
+  # whenever a record is archived. At a tight ceiling, archiving one record
+  # shortened the header, freed two chars, expanded one more block, and made
+  # the archive self-check reject a correct batch as a bug in itself.
+  avail = SOFTMAX - (bytes - headerbytes) - chrome - FOOTER_RESERVE - tailbytes
+  spent = floorbytes
+  nexp = 0
+  for (i = 1; i <= ncore; i++) {
+    id = corelist[i]
+    gain = costfull(id, 2) - costline(id, 2)
+    # nothing withheld: a block with no elaboration renders identically either
+    # way, so it is never charged and never marked.
+    if (gain <= 0) { expand[id] = 1; nexp++; continue }
+    # `!` is a safety contract; half of one is not one. Guardrails expand
+    # unconditionally and may push the total past SOFTMAX — that is what makes
+    # this a SOFT max, and the overrun is reported rather than absorbed.
+    if (rimp[id] == "guardrail") { expand[id] = 1; nexp++; spent += gain; continue }
+    # Not a break: a cheaper entry further down the ranking can still fit
+    # where an expensive one could not, and leaving that space unspent would
+    # serve nobody.
+    if (spent + gain > avail) continue
+    expand[id] = 1; nexp++
+    spent += gain
+  }
+  for (i = 1; i <= ncore; i++)
+    if (!(corelist[i] in expand) && haselab(corelist[i])) elheld[corelist[i]] = 1
+
+  # Grouped by AREA, not by full scope. The subpaths in a mature ledger are
+  # nearly unique per record — 66 groups for 75 entries in the ledger this was
+  # measured on — so grouping by them produces headings, not groups. The area
+  # is also the domain the SELECTOR balances across (GROUP_PENALTY x
+  # mintaken), so grouping by it renders the diversity the ranking already
+  # bought, instead of hiding it behind a heading per record.
+  say("## Digest (actionable; full blocks)")
   for (i = 1; i <= ncore; i++) {
     id = corelist[i]
     if (id in printed) continue
-    scp = pscope[id]
-    if (!endedblank) print ""
-    print "### " ((scp == "") ? "(no scope)" : scp)
+    scp = area(id)
+    if (!endedblank) say("")
+    say("### " ((scp == "") ? "(no scope)" : scp))
     endedblank = 0
     for (j = i; j <= ncore; j++) {
-      if (pscope[corelist[j]] == scp && !(corelist[j] in printed))
-        emitfull(corelist[j], 0)
+      if (area(corelist[j]) != scp || (corelist[j] in printed)) continue
+      if (corelist[j] in expand) emitfull(corelist[j], 2)
+      else emitline(corelist[j], 2)
     }
   }
 
-  # Headlines: ranked reminders for the next HEADLINE_MAX not already Digested
+  # Headlines: ranked reminders for the next HEADLINE_MAX not already Digested,
+  # grouped by area like the Digest layer. Rank still decides membership and
+  # the order groups appear in; within a group it decides order. Reading order
+  # follows the job of the layer: "open the record when the topic matches" is a
+  # topical lookup, and a flat ranked list is the one shape that does not
+  # support one.
   nhl = 0; hdr = 0
-  for (i = 1; i <= nsort; i++) {
-    id = sorted[i]
-    if ((id in printed) || (id in dormant)) continue
-    if (nhl >= HEADLINE_MAX) break
+  for (i = 1; i <= nhlsel; i++) {
+    id = hllist[i]
+    if (id in printed) continue
     if (!hdr) {
-      if (!endedblank) print ""
-      print "## Headlines (reminders; open the record when the topic matches)"
+      if (!endedblank) say("")
+      say("## Headlines (reminders; open the record when the topic matches)")
       hdr = 1; endedblank = 0
     }
-    emitline(id, 1)
-    nhl++
+    scp = area(id)
+    if (!endedblank) say("")
+    say("### " ((scp == "") ? "(no scope)" : scp))
+    endedblank = 0
+    for (j = i; j <= nhlsel; j++) {
+      if (area(hllist[j]) != scp || (hllist[j] in printed)) continue
+      emitline(hllist[j], 2)
+      nhl++
+    }
   }
 
-  # Live but below Digests+Headlines budget: counted, not listed
+  # ---- budget report ----
+  # The number the compiler ACTED on: everything it emitted, plus the tail the
+  # shell is about to append, plus the reserve these footer lines are drawn
+  # from. Printed whether or not the budget bound, because a reader deciding
+  # whether to trust this surface needs to see the pressure before it becomes
+  # an outage, not only after.
+  total = bytes - headerbytes + tailbytes + FOOTER_RESERVE
+  if (!endedblank) say("")
+  say(sprintf("Budget: %d/%d chars, ~%dk tokens (soft). %d of %d digest entries expanded;",
+              total, SOFTMAX, int(total / 4000 + 0.5), nexp, ncore))
+  say(sprintf("%d collapsed to their headline (+el) to fit. Raise with --softmax, or supersede",
+              ncore - nexp))
+  say("what has gone stale — this is context every agent pays for at every session start.")
+  endedblank = 0
+  if (total > SOFTMAX) {
+    # Soft in the GUARDRAIL_MAX sense: warn, never shed. A digest that drops
+    # records to hit a number is lying about the ledger; one that overruns and
+    # says so is merely large, and the operator can act on it.
+    say("OVER BUDGET by " total - SOFTMAX " chars: every listed entry is already at its")
+    say("headline floor, so the compiler has no room left to give back. Nothing is")
+    say("truncated — the cost is context: every agent pays this at every session start.")
+    say("Retire or supersede what has gone stale, or raise --softmax deliberately.")
+    printf "zamm-compile: WARNING: digest is %d chars (~%dk tokens), over the %d-char soft budget, with every entry already collapsed to its headline. Nothing was dropped; the cost is context spent by every session. Retire stale records or raise --softmax.\n", total, int(total / 4000 + 0.5), SOFTMAX | "cat 1>&2"
+  }
+
+  # Live but below the Digests+Headlines entry caps: counted, not listed
   nunlist = 0
   for (i = 1; i <= nsort; i++) {
     id = sorted[i]
@@ -2838,8 +3633,8 @@ END {
     nunlist++
   }
   if (nunlist > 0) {
-    if (!endedblank) print ""
-    print "Unlisted live (below Digests+Headlines budget; ledger stays greppable): " nunlist
+    if (!endedblank) say("")
+    say("Unlisted live (below Digests+Headlines entry caps; ledger stays greppable): " nunlist)
     endedblank = 0
   }
 
@@ -2857,8 +3652,8 @@ END {
     s = ""
     for (i = 1; i <= nda; i++)
       s = s ((i > 1) ? ", " : "") dcount[dareas[i]] " " dareas[i]
-    if (!endedblank) print ""
-    print "Dormant (decayed below digest floor; ledger stays greppable): " s
+    if (!endedblank) say("")
+    say("Dormant (decayed below digest floor; ledger stays greppable): " s)
   }
 
   emit_state()
@@ -2867,272 +3662,12 @@ END {
   # (quarantined records, dangling references, duplicate vote records, or
   # invalid vote references). A caller can tell a clean digest from a degraded
   # one by the code alone, without parsing the Markdown.
-  exit ((nquar > 0 || ndangling > 0 || ndupvote > 0 || nbadvoteref > 0 || nbadcover > 0) ? 2 : 0)
+  exit (degraded() ? 2 : 0)
 }
 ' "$MANIFEST" > "$TMP_FILE"
 rc=$?
 set -e
 
-# ---- Plans tail: one compact 2-3 line entry per active plan (status line,
-#      title, optional inline scope), derived at compile time (no maintained
-#      index files; zamm-status.sh stays the on-demand verbose view)
-append_plans_section() {
-  # The plan tree enters the digest ONLY through the checked manifest: a glob
-  # here followed symlinked directories into external content and read an
-  # unreadable tree as "no active plans". Enumeration failure aborts before
-  # the digest is published (exit 4, previous digest untouched).
-  pmf="$TMP_FILE.pmf"
-  if ! sh "$PLAN_MANIFEST" --project-root "$PROJECT_ROOT" > "$pmf"; then
-    echo "ERROR: could not enumerate the plan tree; plans are unreadable, not empty." >&2
-    echo "       Previous digest left untouched." >&2
-    exit 4
-  fi
-  tab=$(printf '\t')
-  # A missing plan root is structural damage, never a healthy zero-plan
-  # project: scaffold always creates both roots. Abort before the digest is
-  # renamed into place — same taxonomy as an unreadable tree.
-  if grep -q "^MISSING${tab}" "$pmf"; then
-    grep "^MISSING${tab}" "$pmf" | while IFS="$tab" read -r _ mroot; do
-      echo "ERROR: plan root missing: ${mroot#"$PROJECT_ROOT/"} -- structural damage, not an empty project." >&2
-    done
-    echo "       Restore it ('zamm-run.sh scaffold' recreates the directory), then investigate." >&2
-    echo "       Previous digest left untouched." >&2
-    exit 4
-  fi
-  active_prefix="$PROJECT_ROOT/zamm-memory/active/plans/"
-  plans_tmp="$PLANS_TMP"
-  : > "$plans_tmp"
-  # Structural anomalies render as one-liners derived from the entry NAME
-  # alone — tagged content is never opened, so a symlinked directory cannot
-  # inject external text into the digest.
-  while IFS="$tab" read -r tag p1 p2 p3; do
-    base=${p1##*/}
-    case "$tag" in
-      DEBRIS)
-        case "$p1" in "$active_prefix"*)
-          printf '6\t- Invalid: %s (stray temporary directory inside a plan; raced or interrupted plan create)\n' "$base" >> "$plans_tmp" ;;
-        esac ;;
-      SYMLINK)
-        case "$p1" in "$active_prefix"*)
-          printf '6\t- Invalid: %s (symlinked entry; not rendered)\n' "$base" >> "$plans_tmp" ;;
-        esac ;;
-      NOTDIR)
-        case "$p1" in "$active_prefix"*)
-          printf '6\t- Invalid: %s (not a plan directory)\n' "$base" >> "$plans_tmp" ;;
-        esac ;;
-      UNREADABLE)
-        case "$p1" in "$active_prefix"*)
-          printf '6\t- Unknown: %s (unreadable .plan.md)\n' "$base" >> "$plans_tmp" ;;
-        esac ;;
-      DUP)
-        printf '6\t- Invalid: %s (same plan id active and archived)\n' "$p1" >> "$plans_tmp" ;;
-    esac
-  done < "$pmf"
-  while IFS= read -r pd; do
-    [ -n "$pd" ] || continue
-    slug=$(basename "$pd")
-    # prefer <slug>.plan.md, else the first main candidate the manifest lists
-    pf=$(awk -F"$tab" -v want="$pd/$slug.plan.md" '$1 == "PLANFILE" && $2 == want { print $2; exit }' "$pmf")
-    [ -n "$pf" ] ||
-      pf=$(awk -F"$tab" -v d="$pd/" '$1 == "PLANFILE" && index($2, d) == 1 { print $2; exit }' "$pmf")
-    if [ -z "$pf" ]; then
-      # an unreadable main candidate already rendered above; only a dir with
-      # genuinely no candidate reports "no .plan.md file"
-      nun=$(awk -F"$tab" -v d="$pd/" '$1 == "UNREADABLE" && index($2, d) == 1 { n++ } END { print n + 0 }' "$pmf")
-      [ "$nun" -eq 0 ] && printf '6\t- Unknown: %s (no .plan.md file)\n' "$slug" >> "$plans_tmp"
-      continue
-    fi
-    awk -v slug="$slug" '
-      function trimv(s) { sub(/\r$/, "", s); sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
-      # normalize the LINE too, not just the values read out of it: the
-      # section headings below are compared exactly, so a CRLF plan silently
-      # counted no Done-when items at all
-      { sub(/\r$/, "") }
-      st == "" && /^Status:/              { st = $0; sub(/^Status:/, "", st); st = trimv(st) }
-      cf == "" && /^Complexity-forecast:/ { cf = $0; sub(/^Complexity-forecast:/, "", cf); cf = trimv(cf) }
-      lu == "" && /^Last updated:/        { lu = $0; sub(/^Last updated:/, "", lu); lu = trimv(lu) }
-      ti == "" && /^# /                   { ti = $0; sub(/^# /, "", ti); ti = trimv(ti) }
-      si == "" && /^\* In:/               { si = $0; sub(/^\* In:/, "", si); si = trimv(si) }
-      # exact heading, not a prefix: "## Done-when-not" is a different section
-      $0 == "## Done-when" || $0 ~ /^## Done-when[ \t]/ { dw = 1; next }
-      /^## /          { dw = 0 }
-      dw && /^- \[ \]/    { nopen++ }
-      dw && /^- \[[xX]\]/ { ndone++ }
-      END {
-        # rank by the leading status word; annotated statuses keep their label
-        rank = 6; label = st
-        if (st ~ /^Review/)            rank = 1
-        else if (st ~ /^Implementing/) rank = 2
-        else if (st ~ /^Draft/)        rank = 3
-        else if (st ~ /^Done/)         { rank = 4; label = st " (archive-ready)" }
-        else if (st ~ /^Abandoned/)    { rank = 5; label = st " (archive-ready)" }
-        else if (st == "")             label = "Unknown"
-        line = "- " label ": " slug
-        if (cf != "" && cf !~ /^</) {
-          if (length(cf) > 32) cf = substr(cf, 1, 29) "..."
-          line = line " [" cf "]"
-        }
-        tot = nopen + ndone + 0
-        if (tot > 0) line = line " done-when " ndone + 0 "/" tot ","
-        if (lu != "" && lu !~ /^</) {
-          split(lu, luw, /[ \t]/)
-          line = line " last " luw[1]
-        }
-        sub(/,$/, "", line)
-        out = rank "\t" line
-        if (ti != "" && ti !~ /^</) {
-          if (length(ti) > 100) ti = substr(ti, 1, 97) "..."
-          out = out "\t" ti
-        }
-        if (si != "" && si !~ /^</) {
-          if (length(si) > 100) si = substr(si, 1, 97) "..."
-          out = out "\tin: " si
-        }
-        print out
-      }
-    ' "$pf" >> "$plans_tmp"
-  done <<EOF
-$(awk -F"$tab" '$1 == "PLANDIR" { print $2 }' "$pmf")
-EOF
-  {
-    printf '\n## Plans (active; compact entries)\n\n'
-    if [ -s "$plans_tmp" ]; then
-      sort -n "$plans_tmp" | awk -F'\t' '{
-        print $2
-        for (i = 3; i <= NF; i++) print "  " $i
-        print ""
-      }'
-    else
-      echo "(no active plans)"
-      echo ""
-    fi
-  } >> "$TMP_FILE"
-  rm -f "$plans_tmp"
-
-  # Recently archived plan IDs: after a pull, a referenced plan directory may
-  # have moved to archive on another machine — this list keeps the move
-  # visible. Directory mtime sorts fresh arrivals (checkout/closure) first.
-  narch=$(awk -F"$tab" '$1 == "ARCHDIR" { n++ } END { print n + 0 }' "$pmf")
-  if [ "$narch" -gt 0 ]; then
-    {
-      if [ "$narch" -gt 10 ]; then
-        echo "Recently archived (newest 10 of $narch; full list: zamm-memory/archive/plans/):"
-      else
-        echo "Recently archived ($narch; in zamm-memory/archive/plans/):"
-      fi
-      awk -F"$tab" '$1 == "ARCHDIR" { print $2 }' "$pmf" | while IFS= read -r ad; do
-        m=$(stat -f %m "$ad" 2>/dev/null || stat -c %Y "$ad" 2>/dev/null || echo 0)
-        printf '%s\t%s\n' "$m" "${ad##*/}"
-      done | sort -t "$tab" -k1,1rn -k2,2 | head -n 10 | while IFS="$tab" read -r _m nm; do
-        echo "- $nm"
-      done
-    } >> "$TMP_FILE"
-  fi
-  rm -f "$pmf"
-}
-
-# ---- Backlog summary: one pushed line (plus the small marked lane) is the
-#      knowledge digest's ENTIRE standing exposure to the backlog. The
-#      backlog tree compiles through a full recursive pass of this same
-#      script, so the counts come from the same validation and graph the
-#      lens itself publishes — never from a shortcut re-parse. Absent tree:
-#      no line at all (absence is data; the feature is simply unused).
-append_backlog_summary() {
-  [ -d "$PROJECT_ROOT/zamm-memory/backlog" ] || return 0
-  brc=0
-  sh "$0" --project-root "$PROJECT_ROOT" --tree backlog >/dev/null || brc=$?
-  # 2 = degraded lens, 3 = nothing live survived: both published-or-refused
-  # states the operator must hear about, but neither may hide the knowledge
-  # digest — the line carries the degradation and the overall exit becomes 2.
-  # Anything else non-zero is an unreadable backlog tree (G3): the digest
-  # compile fails whole, previous digest untouched.
-  if [ "$brc" -eq 2 ] || [ "$brc" -eq 3 ]; then
-    {
-      echo ""
-      echo "Backlog: DEGRADED - run: zamm-run.sh backlog check"
-    } >> "$TMP_FILE"
-    BACKLOG_DEGRADED=1
-    return 0
-  fi
-  if [ "$brc" -ne 0 ]; then
-    echo "ERROR: the backlog tree did not compile (rc=$brc); previous digest left untouched." >&2
-    exit 4
-  fi
-  bstate="$OUT_DIR/backlog-state.tsv"
-  if [ ! -f "$bstate" ]; then
-    echo "ERROR: the backlog pass reported success but left no backlog-state.tsv; previous digest left untouched." >&2
-    exit 4
-  fi
-  tab=$(printf '\t')
-  blive=$(awk -F"$tab" '$1 == "live"   { print $2; exit }' "$bstate")
-  bhot=$(awk  -F"$tab" '$1 == "hot"    { print $2; exit }' "$bstate")
-  bmark=$(awk -F"$tab" '$1 == "marked" { print $2; exit }' "$bstate")
-  {
-    # The marked lane renders BEFORE the one-liner: it is the only backlog
-    # content that earned a pushed seat, and it nags oldest-first until
-    # someone promotes or unmarks. Zero marked = no section and no ", 0
-    # marked" noise on the line.
-    if [ "${bmark:-0}" -gt 0 ]; then
-      echo ""
-      echo "## Marked backlog (implement or unmark)"
-      echo ""
-      grep "^mselect${tab}" "$bstate" | sort -t "$tab" -k2,2 -k3,3 |
-        while IFS="$tab" read -r _ mdate mid mhl; do
-          echo "- $mhl [$mid] (marked $mdate)"
-        done
-      if grep -q "^marked_over${tab}" "$bstate"; then
-        echo "(over the soft cap - promote what is starting, unmark what is not)"
-      fi
-    fi
-    echo ""
-    if [ "${bmark:-0}" -gt 0 ]; then
-      echo "Backlog: ${blive:-0} live (${bhot:-0} hot, ${bmark} marked) - zamm-run.sh backlog list"
-    else
-      echo "Backlog: ${blive:-0} live (${bhot:-0} hot) - zamm-run.sh backlog list"
-    fi
-  } >> "$TMP_FILE"
-}
-
-# ---- Journal line: the knowledge digest's ENTIRE standing exposure to the
-#      journal is one line, present only when digestion is due (triage by
-#      count or age; a practiced elevation kind with a completed period
-#      unelevated) or when the journal pass is degraded. Absent or quiet
-#      tree: no line at all, byte-identical digest. Segments join in the
-#      sidecar's fixed order and the line never wraps.
-append_journal_line() {
-  [ -d "$PROJECT_ROOT/zamm-memory/journal" ] || return 0
-  jrc=0
-  sh "$0" --project-root "$PROJECT_ROOT" --tree journal >/dev/null || jrc=$?
-  if [ "$jrc" -eq 2 ] || [ "$jrc" -eq 3 ]; then
-    {
-      echo ""
-      echo "Journal: DEGRADED - run: zamm-run.sh journal check"
-    } >> "$TMP_FILE"
-    JOURNAL_DEGRADED=1
-    return 0
-  fi
-  if [ "$jrc" -ne 0 ]; then
-    echo "ERROR: the journal tree did not compile (rc=$jrc); previous digest left untouched." >&2
-    exit 4
-  fi
-  jstate="$OUT_DIR/journal-state.tsv"
-  if [ ! -f "$jstate" ]; then
-    echo "ERROR: the journal pass reported success but left no journal-state.tsv; previous digest left untouched." >&2
-    exit 4
-  fi
-  tab=$(printf '\t')
-  jline=$(awk -F"$tab" '
-    $1 == "due_triage" { seg = "triage due (" $2 " undigested, oldest " $3 ")"; segs = segs ((segs == "") ? "" : "; ") seg }
-    $1 == "due_elev"   { seg = $2 " due (" $3 ")"; segs = segs ((segs == "") ? "" : "; ") seg }
-    END { if (segs != "") print "Journal: " segs " - zamm-run.sh journal review" }
-  ' "$jstate")
-  if [ -n "$jline" ]; then
-    {
-      echo ""
-      echo "$jline"
-    } >> "$TMP_FILE"
-  fi
-}
 
 if [ "$CHECK" -eq 1 ]; then
   # name the tree in the verdict: `check` runs this once per record tree,
@@ -3194,9 +3729,12 @@ else
     exit "$rc"
   fi
   if [ "$TREE" = "knowledge" ]; then
-    append_plans_section
-    append_backlog_summary
-    append_journal_line
+    # every byte below was rendered and measured above, so the budget knew
+    # the size of the surface it was budgeting for
+    cat "$PLANS_TAIL" >> "$TMP_FILE"
+    if [ -f "$EXTRA_TAIL" ]; then
+      cat "$EXTRA_TAIL" >> "$TMP_FILE"
+    fi
   fi
   # The digest and the sidecar are two separate renames that cannot be one
   # atomic step, and rename ORDER alone only chooses which mismatched pairing
@@ -3210,6 +3748,9 @@ else
   printf '<!-- zamm-generation: %s -->\n' "$gen" >> "$TMP_FILE"
   if [ -f "$STATE_TMP" ]; then
     printf 'generation\t%s\n' "$gen" >> "$STATE_TMP"
+    # the budget this digest was actually built at, so the next implicit
+    # recompile rebuilds the same digest instead of reverting it
+    printf 'softmax\t%s\n' "$SOFTMAX" >> "$STATE_TMP"
     mv "$STATE_TMP" "$STATE_FILE"
   fi
   mv "$TMP_FILE" "$OUT_FILE"

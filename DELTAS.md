@@ -1483,3 +1483,248 @@ consumer's real ledger with its search tool's hits. Folded in:
   paragraph names grep first and "any markdown search you happen to have"
   (QMD as the example, `qmd search` rather than the model-backed `query`),
   and adds that unlisted and dormant records are still true.
+
+## Locked 2026-09-09 (archive early: dead records leave the live tree)
+
+`memory archive` moved only chains that were dead end to end, because a
+superseded ancestor of a live head was load-bearing: votes aggregate over
+the ancestor chain and chain depth earns rank, and the compiler read an
+archived header for grouping only - no vote, no depth, no edge applied.
+That kept `knowledge/` full of history a search tool ranks like current
+records, and made the path useless as a signal.
+
+Archived records are lineage nodes now. The compiler reads id, type,
+`supersedes:` and seed votes from the header; an edge from a live record
+into an archived target applies exactly like a live-tree edge (parent,
+depth, adjacency for the vote walk), edges between archived nodes do too,
+and a vote naming an archived memory record counts into it. Content,
+importance and durability stay unread, which changes nothing: a dead record
+is never scored. An archived node never kills a live-tree record (a
+hand-moved successor must not hide a live predecessor), and an erased id
+still routes nothing.
+
+The archivable set is therefore every superseded or retired memory record
+plus every member of a chain with nothing live in it; erasure records still
+pin their component. The archiver keeps its proof: the digest below the
+header must be byte-identical after the move, or the batch rolls back. The
+golden digest body did not move by a byte; only its header gained
+`archive-ready=N`, which `status` repeats.
+
+One new degraded state. An archived memory record whose successor is
+quarantined or erased is live again with unread content; the compiler
+lists it under `## Degraded`, `check` fails, `--list-state` reports it as
+`revived` and `whatis` says so. The fix is `git mv` back into
+`knowledge/<year>/` or a new superseding record. An archived record nobody
+names is left alone: a hand tidy-up, not a defect.
+
+Why now: with a search tool beside the ledger, the directory is the one
+signal every consumer sees without running anything. `knowledge/` is what
+is, `archive/` is what was; memory-reading.md gives the two-collection
+recipe (exclude `archive/`, `.compiled/` and plan `workdir/` from the
+current index; root a second one at the archive for history), and `whatis`
+stays the last word for records that died since the last archive run.
+
+Review round, same day. Six defects, all in the newly widened authority of a
+tree whose content is never read:
+
+- **One degradation predicate.** Seven exits and a rendering guard each spelled
+  out their own subset of the degradation kinds, so `nrevived` reached two of
+  them: a zero-live knowledge ledger printed "active memory has not been
+  initialized" and exited 0 while an archived record was live again, and the
+  backlog and journal lenses rendered the warning and still exited 0. There is
+  now one `degraded()`, and it reads `nbad + ndup` rather than `nquar` —
+  `nquar` is a display alias assigned on the rendering path, which is exactly
+  why the early exits had omitted it and why unifying on it would have made
+  them blind to quarantined records instead.
+- **An erased archived node applies no edges.** The loop over archived headers
+  lacked the `erased` guard its live-tree twin opens with, so an erased
+  successor still marked its predecessor superseded: the predecessor was
+  neither live nor reported, and compile and check both exited 0.
+- **Revival is a graph question.** It asked "did anything ever claim to
+  supersede this", which is unsound because the claim lives in the file of the
+  successor: completing the documented erasure procedure (erasure record, then
+  delete the file) deleted the claim too and orphaned the archived predecessor
+  permanently and silently. It now asks whether any applied edge retires the
+  record, which also covers a record hand-moved into the archive with nothing
+  retiring it — the same defect reached another way. Only `type: memory` is
+  judged; a tombstone, votes or erasure record in the archive asserts nothing
+  that could go missing.
+- **Archived seed votes pass the live gate.** `seed-up` rode an archived header
+  unchecked, so the file that is quarantined under `knowledge/` (a seed with no
+  `migrated-from`) counted a five-figure vote into a live head from
+  `archive/knowledge/`, with `check` reporting clean. The header now needs
+  `migrated-from`, a valid provenance token and an in-range seed, or it counts
+  nothing — the fail-closed equivalent of the quarantine the archive cannot
+  perform.
+- **The remedy names the tree it is talking about.** The revival message
+  hardcoded `zamm-memory/knowledge/<year>/` in every lens, telling the reader
+  to move a revived backlog idea into the knowledge tree. Compiler and `whatis`
+  both derive it from the lens now.
+
+Eleven locks in `test_archival.py`; seven fail against the pre-fix tree and the
+four controls pass both ways, so the fixes are not just "report everything".
+629 tests green. Two `test_failclosed.py` fixtures gained a successor for their
+hand-written archived record: an archived memory record that nothing retires is
+itself a degradation now, and those tests are about staleness detection.
+
+Locked 2026-09-09 — the digest gets a size, not just a count: the two
+attention budgets (75 full blocks, 150 headlines) bounded how many records
+were listed and never how many characters that took, so the surface grew with
+the ledger's prose. A consumer ledger reached 134KB, and the reader it is
+written for cannot hold that: Claude Code caps inline command output at 30000
+characters and replaces anything longer with a 2000-character preview plus a
+file path. That failure is silent in the worst way — the session sees a
+header, one guardrail and an ellipsis, and proceeds believing it read memory.
+The observed run did it three times in one session.
+
+`SOFTMAX` (default 28000, `--softmax N` or `$ZAMM_DIGEST_SOFTMAX`) is a soft
+character ceiling on the whole compiled digest, in the GUARDRAIL_MAX and
+MARKED_MAX family: warn, never fail, never shed. It buys EXPANSION rather
+than membership. Selection is unchanged and still runs first; then every
+listed entry is priced twice, as a full block and as a single line, and the
+difference is bought in rank order until the money runs out. What cannot
+afford its elaboration collapses to its headline and is marked `+el`, which
+is `+bg` for a different shortfall: `+bg` says depth exists in the file,
+`+el` says depth exists in the digest block and this surface could not
+render it. A block with no elaboration is never marked, so `+el` always
+means there is more to read.
+
+Guardrails expand unconditionally and may push the total past the ceiling —
+that overrun is precisely what makes this a soft max, and it is reported
+rather than absorbed. When even the fully-collapsed floor does not fit, the
+digest goes over and prints `OVER BUDGET`, naming the reader limit it will
+trip and telling the operator to read `.compiled/memory.md` directly. The
+alternative — dropping entries to hit a number — was rejected outright: a
+reader told less about a record can still open it, while a reader told
+nothing does not know to look, and a digest that quietly delists to stay
+small is lying about the ledger.
+
+Pricing is done by the renderer itself (`renderline` / `renderfull` return
+strings; `emitline` / `emitfull` print them), because a cost estimated
+alongside a renderer drifts the moment either side changes. Everything the
+knowledge digest emits goes through a counting `say()`, and the Plans tail is
+now rendered and measured BEFORE the record pass so the budget can see a
+section the shell appends after it — a ceiling that ignores part of the
+surface is not a ceiling. Moving that render earlier also fails a broken plan
+tree before the expensive ledger pass rather than after it.
+
+A `Budget:` footer now reports the spend on every compile, not only when it
+binds: the whole defect being fixed was invisibility, and pressure has to be
+legible before it becomes an outage. The unlisted-count wording changed from
+"below Digests+Headlines budget" to "entry caps", since "budget" now names
+the character ceiling.
+
+Not done, and the reason it matters: the headline layer is still uncapped per
+entry. `HEADLINE_MAX` bounds the count at 150 while the compiler treats
+headline length as a soft authoring guide (~300 chars), and the consumer
+ledger runs a median of 447 and a maximum of 1231 — 72KB of "one-line
+reminders". The budget correctly refuses to fix that by truncating a trigger
+mid-thought, so on that ledger it collapses all 46 collapsible blocks, lands
+at 116KB and reports OVER BUDGET. The remaining levers are authoring
+(shorter headlines), a lower HEADLINE_MAX, or a render-site clip — a
+decision about the record contract, not about the budget.
+
+Locked 2026-09-09 — the session read becomes a file read: the budget above
+made the digest fit a number, but the number was the wrong shape. `memory
+digest` printed the digest to stdout, and stdout is capped by the harness —
+Claude Code replaces a Bash result over 30000 characters with a
+2000-character preview and a file path. So the ceiling was never really an
+attention decision; it was an attempt to squeeze a memory surface through a
+pipe that was too narrow for it, and losing that fight is silent by
+construction.
+
+The compiled digest was already a file. What was missing was permission to
+read it: the digest's own header said "do not open the compiled file as
+well". That line is now inverted. `memory digest` recompiles, prints a short
+handoff — the path, the header line, the budget line, the read's token cost,
+and any DEGRADED or OVER BUDGET state — and the agent opens the file with a
+file tool. The handoff is deliberately not the digest: it says so in its
+first line, it carries no entries, and it stays under 4000 characters no
+matter how large the ledger grows, which is the property the old protocol
+lacked. `--inline` restores printing for a reader with no file tool, and
+warns when the output will not survive the trip.
+
+Measured first, because the mechanism only works if the reader has no limit
+of its own: Claude Code's Read tool declares `maxResultSizeChars: Infinity`,
+which exempts it from persistence AND from the 200000-character per-message
+tool-result budget. Its ceiling is 2000 lines, well above a digest that
+reaches 555 lines at 116KB.
+
+With nothing truncating it, SOFTMAX stops being a plumbing constant and
+becomes an attention one: how much context memory may take from every
+session before any work starts. Default 28000 -> 80000 (~20k tokens), and
+the Budget line and OVER BUDGET warning now quote tokens and talk about
+context cost rather than about a tool that cuts output.
+
+The risk this trades for is real and should be named: the read is now two
+steps, and step two can be skipped. The old protocol could not be skipped,
+only silently truncated. That is the better failure — a skipped read is
+visible in what the agent does next, while a truncated one is indistinguishable
+from a read that worked.
+
+Locked 2026-09-09 — grouping moves from full scope to area: the Digest layer
+grouped entries under `### area/subpath` headings, which reads as grouping
+until you count it. On the ledger this was measured against it produced 66
+groups for 75 entries, 58 of them singletons — a heading per record, not a
+grouping. Subpaths in a mature ledger are nearly unique by construction
+(`tooling/cutravo-audio-workbench`, `internals/restart-readiness`), so they
+were functioning as a second per-record label while being charged for as an
+index.
+
+Grouping is now by AREA, the fixed set of eight, and the subpath moves onto
+the entry as its inline label. 66 groups become 8 (mean 1.1 entries -> 9.4),
+104 become 8 in the Headlines layer (mean 1.4 -> 18.8), and the surface gets
+1,902 characters SHORTER rather than longer, because one `### internals` costs
+less than nine headings that each carry `internals/` again.
+
+Two things made the area the right key rather than a compromise. The selector
+already balances across areas — GROUP_PENALTY multiplies `mintaken`, which
+walks `areaof()` over the tag list — so area grouping renders the diversity
+the ranking already bought instead of hiding it. And `area()` carries the
+comment "diversity domain of a record for display/dormant grouping = primary
+area": display grouping by area was the documented intent all along, and the
+renderer simply used `pscope` instead.
+
+The Headlines layer is now grouped too, where it used to be a flat ranked
+list. Rank still decides membership and the order the groups appear in; within
+a group it decides order. The change is reading order, and it follows the job
+of the layer: "open the record when the topic matches" is a topical lookup,
+and a flat ranked list is the one shape that does not support one.
+
+Rejected on the way: giving subpath-less records a subpath so they would
+group. The measurement says the opposite — subpaths are already too fine to
+group, and adding more would produce more singletons. A bare area is not the
+defect it looked like.
+
+Locked 2026-09-10 — the interrupt test holds its window instead of racing for
+it: `Rev3PublishInterrupt` polled until it saw the pending copy appear, then
+sent SIGINT and hoped the publish was still inside its validation window,
+widening the odds with 60 throwaway records. Under full-suite load — 653
+tests, process-spawn bound — the TEST process can be descheduled past the
+whole window, and it then fails its own premise rather than the invariant. It
+did exactly that once during this round of work, and passed on every rerun.
+
+It now uses the barrier the suite already owns (`test_writes.py`
+`_paused_creator`, `test_digest.py`): an `awk` shim blocks on the first awk to
+run while the pending copy exists — inside `zamm_validate_candidate`, which
+runs the compiler twice — signals `paused`, and waits for a `go` that never
+comes, because the signal is what releases the publish. Reaching the window is
+now a fact the test observes rather than a bet it places. The 60 records are
+gone with the race that needed them: 0.4s instead of a full ledger build.
+
+A suite that occasionally cries wolf is worse than a slower one, which
+`test_slow.py` already argues in its own comment ("a load-flaky failure
+teaches the suite to be ignored") — this was the one place the argument had
+not been applied.
+
+Audited the rest while there. The six `sleep(1.1)` calls are mtime-granularity
+waits and cannot flake: sleeping longer than needed never breaks a `-newer`
+comparison. `test_archival.py` fault injection is deterministic in the same
+way the barrier is — its `mv` shim CAUSES the signal on reaching the target
+move rather than racing into a window. The perf ceilings are skipped by
+default and set 10x above measured. This was the only genuine race.
+
+Honest limit: synthetic load (8-core spin, fork storm) did not reproduce the
+original failure, so the fix is justified by construction — the window is held
+rather than raced — not by a falsified repro.
+

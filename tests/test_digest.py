@@ -530,3 +530,90 @@ class Rev6WarningSeverity(ZammTest):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDigestIsDeliveredAsAFile(ZammTest):
+    """The session read is a FILE read, not command output.
+
+    Command output is capped by the harness — Claude Code replaces a Bash
+    result over 30000 characters with a 2000-character preview — and a digest
+    delivered that way is truncated SILENTLY: the session sees a header and
+    one entry and proceeds believing it read memory. A path cannot be
+    truncated, so `memory digest` hands back a path.
+    """
+
+    def test_stdout_carries_the_path_and_not_the_digest(self):
+        self.led.add("rule", "A statement that must not appear on stdout.")
+
+        r = self.led.compile()
+
+        self.assertIn_("zamm-memory/.compiled/memory.md", r.out)
+        self.assertNotIn_("A statement that must not appear on stdout.", r.out)
+        self.assertNotIn_("## Digest (actionable", r.out)
+
+    def test_stdout_says_plainly_that_it_is_not_the_digest(self):
+        """An agent that mistakes the handoff for the digest has read nothing,
+        so the disclaimer is load-bearing, not decoration."""
+        self.led.add_many(5)
+
+        r = self.led.compile()
+
+        self.assertIn_("NOT THE DIGEST", r.out)
+        self.assertIn_("Read this file now", r.out)
+
+    def test_the_handoff_stays_small_whatever_the_ledger_does(self):
+        """The whole point: this output must be immune to the cap that broke
+        the old protocol. 300 fat records must not grow it."""
+        for i in range(300):
+            self.led.add(f"rec-{i}", f"Headline {i}.\n\n" + ("Elaboration. " * 60))
+
+        r = self.led.compile()
+
+        self.assertLess(len(r.out), 4000, "the handoff must never approach an output cap")
+
+    def test_inline_is_available_as_an_escape_hatch(self):
+        """A reader with no file tool, or a human at a terminal, can still
+        get the digest itself."""
+        self.led.add("rule", "A statement that inline mode must print.")
+
+        r = self.led.compile("--inline")
+
+        self.assertIn_("A statement that inline mode must print.", r.out)
+        self.assertIn_("## Digest (actionable", r.out)
+        self.assertNotIn_("NOT THE DIGEST", r.out)
+
+    def test_inline_warns_when_it_exceeds_what_output_can_carry(self):
+        """Printing it is allowed; printing it silently past the cap is not."""
+        for i in range(300):
+            self.led.add(f"rec-{i}", f"Headline {i}.\n\n" + ("Elaboration. " * 60))
+
+        r = self.led.compile("--inline")
+
+        self.assertIn_("--inline printed", r.err)
+        self.assertIn_("read the file", r.err)
+
+    def test_a_degraded_ledger_is_visible_without_opening_the_file(self):
+        """Degradation must reach the operator even if the read never happens."""
+        self.led.add("good", "A fine record.")
+        self.led.write("zamm-memory/knowledge/2026/2026-01-05-broken-99999.md", "no frontmatter\n")
+
+        r = self.led.compile()
+
+        self.assertIn_("DEGRADED", r.out)
+        self.assertIn_("memory check", r.out)
+
+    def test_an_over_budget_ledger_says_so_in_the_handoff(self):
+        for i in range(120):
+            self.led.add(f"rec-{i}", f"Headline {i}.\n\n" + ("Elaboration. " * 40))
+
+        r = self.led.compile("--softmax", "4000")
+
+        self.assertIn_("OVER BUDGET", r.out)
+
+    def test_the_handoff_reports_what_the_read_will_cost(self):
+        """Context is the scarce thing now, so the price is quoted up front."""
+        self.led.add_many(30)
+
+        r = self.led.compile()
+
+        self.assertRegex(r.out, r"\d+ chars to read \(~\d+k tokens\)")
