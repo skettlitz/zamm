@@ -453,10 +453,19 @@ class TestTailIsMeasuredNotEstimated(ZammTest):
     line per marked idea. Nine marked ideas produced a 4142-char digest
     reporting `Budget: 1746/4000` and no OVER BUDGET notice."""
 
+    # Bytes per idea, not ideas: every `backlog add`/`mark` pair recompiles
+    # both the lens and the digest (~0.6s), while the length of the sentence
+    # is free. Reaching the same tail size through longer sentences instead
+    # of more of them cut this class from 18s to 8s and changed nothing it
+    # asserts — the claim is about bytes the compiler must measure, and it
+    # never cared where they came from.
+    SENTENCE = ("Marked idea {} with a deliberately long sentence that spends a great "
+                "many bytes in the marked lane, so the rendered tail is unmistakably "
+                "larger than the flat estimate the compiler used to charge for it.")
+
     def _mark(self, n):
         for i in range(n):
-            r = self.led.backlog(
-                "add", f"Marked idea {i} with a deliberately long sentence to spend bytes.")
+            r = self.led.backlog("add", self.SENTENCE.format(i))
             mid = r.out.strip().splitlines()[-1].split("/")[-1].replace(".md", "")
             self.led.backlog("mark", mid)
 
@@ -467,7 +476,7 @@ class TestTailIsMeasuredNotEstimated(ZammTest):
 
     def test_the_marked_section_is_inside_the_reported_total(self):
         self.led.add_many(3)
-        self._mark(9)
+        self._mark(3)
         self.assertEqual(0, self.led.compile("--softmax", "4000").code)
         digest = self.led.digest()
         self.assertIn("## Marked backlog", digest)
@@ -481,7 +490,7 @@ class TestTailIsMeasuredNotEstimated(ZammTest):
 
     def test_a_digest_over_the_ceiling_says_so(self):
         self.led.add_many(3)
-        self._mark(20)
+        self._mark(10)
         self.assertEqual(0, self.led.compile("--softmax", "4000").code)
         digest = self.led.digest()
         self.assertGreater(len(digest), 4000)

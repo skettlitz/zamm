@@ -33,4 +33,7 @@ jobs:
           # skip on every platform forever and guard nothing.
           ZAMM_REQUIRE_CASE_SENSITIVE: ${{ matrix.os == 'ubuntu-latest' && '1' || '' }}
         working-directory: tests
-        run: python3 -m unittest discover -s . -t . -v
+        # run.py schedules the same unittest files across workers and prints
+        # the full output of any file that fails (or times out), which is
+        # more useful on a red build than -v over every passing test.
+        run: python3 run.py -j 4

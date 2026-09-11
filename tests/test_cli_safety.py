@@ -11,7 +11,6 @@ import os
 import re
 import shutil
 import subprocess
-import time
 
 from harness import (
     EXIT_CONTRACT, EXIT_OK, EXIT_VERSION, HELP_PATHS, RUN, ZammTest,
@@ -244,15 +243,13 @@ class TestDriftDetection(ZammTest):
     def test_staleness_watches_active_plans_too(self):
         """A plan edited after the last compile makes the digest stale, since
         the digest embeds the active plans."""
-        import time
-
         self.led.add("a-rule", "A statement.")
         self.led.add_plan("2026-01-05-open", status="Implementing")
         self.led.compile()
-        time.sleep(1.1)
         # edit the plan file after the digest was built
         p = "zamm-memory/active/plans/2026-01-05-open/2026-01-05-open.plan.md"
         self.led.write(p, self.led.read(p) + "\nAn edit after compiling.\n")
+        self.led.written_after_compile(p)
 
         self.assertIn_("STALE", self.led.status().out)
 

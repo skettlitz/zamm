@@ -9,7 +9,6 @@ See references/invariants.md for the guarantees these suites protect.
 
 import os
 import shutil
-import time
 
 from harness import (
     EXIT_CONTRACT, EXIT_OK, EXIT_UNREADABLE, ShimTest, ZammTest,
@@ -47,8 +46,9 @@ class PlanWorkdirIsNotLedgerState(ZammTest):
         self.assertNotIn_("STALE", self.led.status().out,
                           "a freshly compiled ledger is not stale")
 
-        time.sleep(1.1)          # mtime granularity: make "newer" unambiguous
-        (workdir / "scratch-notes.md").write_text("Transient working notes.\n")
+        scratch = workdir / "scratch-notes.md"
+        scratch.write_text("Transient working notes.\n")
+        self.led.written_after_compile(scratch)
 
         self.assertNotIn_(
             "STALE", self.led.status().out,
@@ -62,9 +62,9 @@ class PlanWorkdirIsNotLedgerState(ZammTest):
         plan = (self.led.root / "zamm-memory/active/plans/2026-01-05-working"
                 / "2026-01-05-working.plan.md")
 
-        time.sleep(1.1)
         with open(plan, "a") as fh:
             fh.write("\nAn edit to the plan itself.\n")
+        self.led.written_after_compile(plan)
 
         self.assertIn_("STALE", self.led.status().out,
                        "an edited plan file must still make the digest stale")
@@ -396,9 +396,9 @@ class Rev7SelfFoundGaps(ShimTest):
 
         target = (self.led.root /
                   "zamm-memory/archive/knowledge/2025/2025-03-05-old-88888.md")
-        time.sleep(1.1)          # mtime granularity: make "newer" unambiguous
         with open(target, "a") as fh:
             fh.write("An edit to the archived record.\n")
+        self.led.written_after_compile(target)
 
         st = self.led.status()
         self.assertIn_("STALE", st.out,

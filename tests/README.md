@@ -5,14 +5,26 @@ virtualenv, no install step.
 
 ```sh
 cd tests
-python3 -m unittest discover -s . -t .        # fast suite
-ZAMM_SLOW=1 python3 -m unittest discover -s . -t .   # adds perf checks
-python3 -m unittest test_regressions -v       # one file, verbose
+python3 run.py                                # the whole suite, 4 workers
+ZAMM_SLOW=1 python3 run.py                    # adds perf checks
+python3 run.py test_digest test_budgets       # just these files
+python3 run.py --serial                       # one at a time, bisecting a flake
+python3 -m unittest test_regressions -v       # one file, unittest directly
 ```
 
 The suite shells out to real scripts for nearly every assertion, so it is
-process-spawn bound: expect a couple of minutes for the ~390 tests on a
-laptop, and one file in a few seconds. Run one file while iterating.
+process-spawn bound, not CPU bound: ~750 tests at ~0.25s each is about four
+minutes of mostly waiting on `sh` and `awk`. Nothing in it is
+parallel-unsafe — every test builds its own throwaway project root under
+`TMPDIR` and never touches the repository — so `run.py` spreads the files
+across workers and the wait divides: about a minute on a laptop at the
+default `-j 4`. `python3 -m unittest discover -s . -t .` still works and is
+still the serial truth; `run.py` only schedules it.
+
+`run.py` gives every file a timeout (`--timeout`, default 300s) and reports a
+file that blows it as a failure, with its partial output. A shell toolchain
+that blocks on stdin hangs forever rather than failing, and a suite that can
+hang teaches you to kill it on a stopwatch instead of reading it.
 
 CI runs the full suite on ubuntu-latest and macos-latest — that matrix is
 what actually verifies the README's portability claim, since the tests shell
