@@ -58,7 +58,7 @@ zamm_verify_roots "$PROJECT_ROOT" || exit 4
 # covered by an automated test rather than a one-off manual sabotage. Unset in
 # normal use.
 COMPILE="${ZAMM_COMPILE:-$SCRIPT_DIR/zamm-compile.sh}"
-DIGEST="$PROJECT_ROOT/zamm-memory/.compiled/memory.md"
+DIGEST="$PROJECT_ROOT/zamm-memory/.compiled/zamm-digest.md"
 ARCHIVE_ROOT="$PROJECT_ROOT/zamm-memory/archive/knowledge"
 
 echo "ZAMM: memory archive"

@@ -27,7 +27,7 @@ deliberately does not. Read it before reporting a defect or hardening anything: 
 outside its three guarantees is out of scope by design.
 
 Drift: the `SKILL-BLOCK:zamm:BEGIN version=...` stamp in `AGENTS.md` records the skill version
-that rendered it. `memory digest` reports a mismatch; offer `zamm-run.sh scaffold` before
+that rendered it. `startup` reports a mismatch; offer `zamm-run.sh scaffold` before
 proceeding under the old rules.
 
 ## Dispatch by repository state
@@ -37,7 +37,7 @@ proceeding under the old rules.
 | no `zamm-memory/`, user asked for ZAMM | run scaffold; report the files it touched | — |
 | no `zamm-memory/`, no explicit request | do not scaffold; offer it | — |
 | a command refuses with exit 5 (protocol version) | do what its message says; never scaffold over a pre-v3 tree | `references/migrations/` |
-| session start | one `memory digest` run, then READ THE FILE it names, whole, with your file tool. Its stdout is a handoff, not the digest — an agent that stops at the stdout has read nothing. Never `cat` the file: command output is capped and it would be cut silently. ONCE per session — do not reread after writing a record: the write reports what it changed, and you already know what you wrote | nothing further: the router's paragraph is the whole rule. `references/memory-reading.md` only when a marker in the digest is unclear; spine `Session Start` only for an empty ledger or a plan decision |
+| session start | one `startup` run, then READ THE FILE it names, whole, with your file tool. Its stdout is two lines plus anything needing action — a handoff, not the digest; an agent that stops at the stdout has read nothing. Never `cat` the file: command output is capped and it would be cut silently. ONCE per session — do not reread after writing a record: the write reports what it changed, and you already know what you wrote | nothing further: the router's paragraph is the whole rule. `references/memory-reading.md` only when a marker in the digest is unclear; spine `Session Start` only for an empty ledger or a plan decision |
 | digest shows `Needs reconciliation` | resolve it this session | `references/memory-maintenance.md` |
 | digest shows no live records | ask before initialization; never write placeholder records | `references/initialization/existing-project.md` |
 | the digest is silent and you need what was written down (a citation, a prior decision) | search the ledger — grep, or any markdown search you have (QMD is one) — then `whatis <hit>...` before citing or acting: a hit is a lead, not a standing; history hands you its live head | `references/memory-reading.md` |

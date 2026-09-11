@@ -561,7 +561,7 @@ echo "ZAMM scaffold complete."
 echo "Next steps (commands are safe from any cwd):"
 echo "  1. Review .cursor/rules/zamm.mdc, AGENTS.md, .cursorignore, .cursorindexingignore, .gitignore, .gitattributes"
 echo "  2. Compile the (empty) digest and confirm the toolchain works:"
-echo "     bash \"$SKILL_DIR/scripts/zamm-run.sh\" --project-root \"$PROJECT_ROOT\" memory digest"
+echo "     bash \"$SKILL_DIR/scripts/zamm-run.sh\" --project-root \"$PROJECT_ROOT\" startup"
 echo "  3. If the digest reports no live records, ask whether to run"
 echo "     \"$SKILL_DIR/references/initialization/existing-project.md\""
 # a lone single quote is easier to name than to escape inside these echoes

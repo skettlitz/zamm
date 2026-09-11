@@ -8,7 +8,7 @@ Digest section: up to 75 actionable full blocks (! = guardrail, do not violate;
 has elaboration the space budget could not render; open the record.
 Headlines section: up to 150 one-line reminders that knowledge exists;
 open the record (+bg) when the topic matches. Id doubles as creation date.
-Session read: `memory digest` recompiles this file and hands back its path.
+Session read: `zamm-run.sh startup` recompiles this file and hands back its path.
 Reading this file once, whole, IS the session read - there is nothing else
 to run and no second surface to consult.
 
@@ -58,7 +58,7 @@ This is an index — each head keeps its full block below, marked ~.
 ### domain
 - audience: Domain rule in an otherwise empty area; it should enter early on diversity. [2026-07-12-sparse-domain-2222a]
 
-Budget: 3916/80000 chars, ~1k tokens (soft). 16 of 16 digest entries expanded;
+Budget: 3922/80000 chars, ~1k tokens (soft). 16 of 16 digest entries expanded;
 0 collapsed to their headline (+el) to fit. Raise with --softmax, or supersede
 what has gone stale — this is context every agent pays for at every session start.
 
@@ -68,4 +68,4 @@ Dormant (decayed below digest floor; ledger stays greppable): 1 meta
 
 (no active plans)
 
-<!-- zamm-generation: 4156462358-3852 -->
+<!-- zamm-generation: 1344333901-3858 -->

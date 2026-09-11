@@ -46,8 +46,8 @@ needs_permission_bits = unittest.skipIf(
     "(geteuid()==0 bypasses chmod 000)",
 )
 
-# memory digest prints the digest, so tests that assert on stdout use
-# Ledger.digest() (the file) rather than the command output.
+# startup names the digest rather than printing it, so tests that assert on
+# digest content use Ledger.digest() (the file), not the command output.
 
 # Exit codes carry three distinct meanings; conflating 1 and 3 would hide the
 # difference between "invalid records" and "refused to publish".
@@ -375,10 +375,15 @@ class Ledger:
     # --- the documented surface, one helper per command ---
 
     def compile(self, *args, **kw) -> Result:
-        """memory digest — kept as compile() because most tests only care
-        that the digest was rebuilt, not that it was printed."""
-        r = self.zamm("memory", "digest", *args, **kw)
+        """zamm-run.sh startup — kept as compile() because most tests only
+        care that the digest was rebuilt, not what the report said."""
+        r = self.zamm("startup", *args, **kw)
         return r
+
+    def compile_legacy(self, *args, **kw) -> Result:
+        """`memory digest`, the pre-rename name for startup. Only the tests
+        that assert the alias still works should use this."""
+        return self.zamm("memory", "digest", *args, **kw)
 
     def check(self, **kw) -> Result:
         return self.zamm("memory", "check", **kw)
@@ -454,8 +459,30 @@ class Ledger:
     def check_all(self, *args, **kw) -> Result:
         return self.zamm("check", *args, **kw)
 
+    def written_after_compile(self, *paths, seconds=5):
+        """Stamp these files as written after the last compile.
+
+        Staleness is `find <trees> -newer <the compiled artifact>`, so a test
+        about it needs one fact: this file is newer than that one. The tests
+        used to get it by sleeping 1.1s before writing, which is a guess —
+        enough for a 1-second-granularity filesystem, and nothing promises the
+        next one is not coarser. Stamping the file says it exactly, costs
+        nothing, and stays local: backdating the compiled artifact instead
+        would make every OTHER pre-existing file newer too, which is a
+        different precondition and quietly breaks the tests that assert
+        nothing is stale.
+        """
+        import os
+
+        newest = max((f.stat().st_mtime for f
+                      in (self.root / "zamm-memory/.compiled").iterdir()
+                      if f.is_file()), default=0)
+        for path in paths:
+            f = path if isinstance(path, Path) else self.root / path
+            os.utime(f, (newest + seconds, newest + seconds))
+
     def digest(self) -> str:
-        return self.read("zamm-memory/.compiled/memory.md")
+        return self.read("zamm-memory/.compiled/zamm-digest.md")
 
     def digest_section(self, name) -> str:
         """Text of one '## <name>' section, up to the next '## '."""

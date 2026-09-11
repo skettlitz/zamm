@@ -252,7 +252,7 @@ class TestCompilerTargetAuthority(ZammTest):
 
 
 class Rev3Generation(ZammTest):
-    """PRE-FIX: memory.md and state.tsv are two separate renames; a compile
+    """PRE-FIX: the digest and state.tsv are two separate renames; a compile
     dying between them paired a fresh sidecar with a stale digest, and memory
     list served records the published digest never surfaced."""
 
@@ -264,7 +264,7 @@ class Rev3Generation(ZammTest):
         self.assertCode(self.led.compile(), EXIT_OK)
         # simulate a compile interrupted between the renames: the digest is
         # from the previous generation, the sidecar from the new one
-        self.led.write("zamm-memory/.compiled/memory.md", old_digest)
+        self.led.write("zamm-memory/.compiled/zamm-digest.md", old_digest)
         r = self.led.memory_list()
         self.assertCode(r, EXIT_CONTRACT)
         self.assertIn_("different compiles", r.err)
@@ -277,7 +277,7 @@ class Rev3Generation(ZammTest):
         old_digest = self.led.digest()
         self.led.add("two", "Second.", date="2026-01-06")
         self.assertCode(self.led.compile(), EXIT_OK)
-        self.led.write("zamm-memory/.compiled/memory.md", old_digest)
+        self.led.write("zamm-memory/.compiled/zamm-digest.md", old_digest)
         r = self.led.status()
         self.assertCode(r, EXIT_OK)
         self.assertIn_("counts unavailable", r.out)
@@ -348,7 +348,7 @@ class Rev2SidecarNoBuggyFallback(ZammTest):
         (self.led.root / "zamm-memory/.compiled/state.tsv").unlink()
         r = self.led.memory_list()
         self.assertNotEqual(r.code, 0)
-        self.assertIn_("memory digest", r.err)
+        self.assertIn_("zamm-run.sh startup", r.err)
         # --all does not depend on the sidecar
         self.assertCode(self.led.memory_list("--all"), EXIT_OK)
 
@@ -357,7 +357,7 @@ class Rev2SidecarNoBuggyFallback(ZammTest):
         self.led.compile()
         (self.led.root / "zamm-memory/.compiled/state.tsv").unlink()
         out = self.led.status().out
-        self.assertIn_("memory digest", out)
+        self.assertIn_("zamm-run.sh startup", out)
 
 
 class ConcurrentPublishesKeepBothRecords(ZammTest):
@@ -539,7 +539,12 @@ class TestDigestIsDeliveredAsAFile(ZammTest):
     result over 30000 characters with a 2000-character preview — and a digest
     delivered that way is truncated SILENTLY: the session sees a header and
     one entry and proceeds believing it read memory. A path cannot be
-    truncated, so `memory digest` hands back a path.
+    truncated, so `startup` hands back a path.
+
+    The report is two lines on the happy path — what the project holds, and
+    where the digest is — because HOW to read it belongs in the rendered
+    router the same agent read from AGENTS.md, not in output repeated every
+    session. Anything needing action expands below those two lines.
     """
 
     def test_stdout_carries_the_path_and_not_the_digest(self):
@@ -547,19 +552,74 @@ class TestDigestIsDeliveredAsAFile(ZammTest):
 
         r = self.led.compile()
 
-        self.assertIn_("zamm-memory/.compiled/memory.md", r.out)
+        self.assertIn_("zamm-memory/.compiled/zamm-digest.md", r.out)
         self.assertNotIn_("A statement that must not appear on stdout.", r.out)
         self.assertNotIn_("## Digest (actionable", r.out)
 
-    def test_stdout_says_plainly_that_it_is_not_the_digest(self):
-        """An agent that mistakes the handoff for the digest has read nothing,
-        so the disclaimer is load-bearing, not decoration."""
+    def test_a_healthy_startup_is_exactly_two_lines(self):
+        """The budget for session start is two lines: one saying what the
+        project holds, one naming the file to read. Anything else has to earn
+        its place by being something the agent must DO."""
         self.led.add_many(5)
 
         r = self.led.compile()
 
-        self.assertIn_("NOT THE DIGEST", r.out)
-        self.assertIn_("Read this file now", r.out)
+        lines = [ln for ln in r.out.splitlines() if ln.strip()]
+        self.assertEqual(len(lines), 2, r)
+        self.assertTrue(lines[0].startswith("ZAMM v"), r)
+        self.assertTrue(lines[1].startswith("digest updated: "), r)
+
+    def test_line_one_says_what_the_project_holds(self):
+        """One segment per tree, so a session can tell a loaded project from
+        a fresh one without opening anything."""
+        self.led.add_many(5)
+        self.led.zamm("backlog", "add", "An idea worth keeping.")
+        self.led.zamm("journal", "add", "Something happened.")
+
+        first = self.led.compile().out.splitlines()[0]
+
+        self.assertIn_("5 live", first)
+        self.assertIn_("no active plan", first)
+        self.assertIn_("1 idea", first)
+        self.assertIn_("1 episode", first)
+
+    def test_an_unused_tree_contributes_no_segment(self):
+        """Absence is data: a project that has never used the backlog is not
+        a project with zero ideas, and a zero is not worth a segment."""
+        self.led.add_many(3)
+
+        first = self.led.compile().out.splitlines()[0]
+
+        self.assertNotIn_("ideas", first)
+        self.assertNotIn_("episodes", first)
+
+    def test_the_path_is_relative_to_the_project_root(self):
+        """Shorter, and it keeps a home directory out of every transcript."""
+        self.led.add("rule", "A statement.")
+
+        r = self.led.compile()
+
+        self.assertIn_("digest updated: zamm-memory/.compiled/zamm-digest.md", r.out)
+        self.assertNotIn_(str(self.led.root), r.out)
+
+    def test_the_report_does_not_reteach_the_protocol(self):
+        """How to read the file is in the router, read once per session from
+        AGENTS.md. Repeating it here spends output on a reader who knows."""
+        self.led.add_many(5)
+
+        out = self.led.compile().out
+
+        for reteaching in ("file-reading tool", "Do NOT cat", "whole"):
+            self.assertNotIn_(reteaching, out)
+
+    def test_the_report_does_not_quote_the_price_of_the_read(self):
+        """The read is not optional, so a size only invites haggling."""
+        self.led.add_many(30)
+
+        out = self.led.compile().out
+
+        self.assertNotIn_("chars to read", out)
+        self.assertNotIn_("tokens", out)
 
     def test_the_handoff_stays_small_whatever_the_ledger_does(self):
         """The whole point: this output must be immune to the cap that broke
@@ -580,7 +640,7 @@ class TestDigestIsDeliveredAsAFile(ZammTest):
 
         self.assertIn_("A statement that inline mode must print.", r.out)
         self.assertIn_("## Digest (actionable", r.out)
-        self.assertNotIn_("NOT THE DIGEST", r.out)
+        self.assertNotIn_("digest updated:", r.out)
 
     def test_inline_warns_when_it_exceeds_what_output_can_carry(self):
         """Printing it is allowed; printing it silently past the cap is not."""
@@ -599,7 +659,7 @@ class TestDigestIsDeliveredAsAFile(ZammTest):
 
         r = self.led.compile()
 
-        self.assertIn_("DEGRADED", r.out)
+        self.assertIn_("## Degraded", r.out)
         self.assertIn_("memory check", r.out)
 
     def test_an_over_budget_ledger_says_so_in_the_handoff(self):
@@ -608,12 +668,64 @@ class TestDigestIsDeliveredAsAFile(ZammTest):
 
         r = self.led.compile("--softmax", "4000")
 
-        self.assertIn_("OVER BUDGET", r.out)
+        self.assertIn_("over its soft budget", r.out)
 
-    def test_the_handoff_reports_what_the_read_will_cost(self):
-        """Context is the scarce thing now, so the price is quoted up front."""
-        self.led.add_many(30)
+    def test_an_exception_block_names_the_command_that_fixes_it(self):
+        """An exception the reader cannot act on is noise. Every block that
+        HAS a mechanical remedy names it; the one that does not (an empty
+        ledger, where the next move is to ask a human) says that instead."""
+        self.led.add("good", "A fine record.")
+        self.led.write("zamm-memory/knowledge/2026/2026-01-05-broken-99999.md", "no frontmatter\n")
+
+        blocks = [b for b in self.led.compile().out.split("\n\n") if b.startswith("!")]
+
+        self.assertTrue(blocks, "the broken record must raise an exception")
+        for block in blocks:
+            self.assertIn_("zamm-run.sh", block,
+                           "an exception must name the command that fixes it")
+
+    def test_the_contested_block_names_the_write_that_resolves_it(self):
+        """Reconciliation is the one exception an agent must finish this
+        session, so the block carries the verb, not just the diagnosis."""
+        self.led.add("root", "The original statement.", date="2026-01-02")
+        for branch in ("alpha", "beta"):
+            self.led.add(branch, f"Branch {branch}.", date="2026-01-06",
+                         supersedes="2026-01-02-root-22222")
 
         r = self.led.compile()
 
-        self.assertRegex(r.out, r"\d+ chars to read \(~\d+k tokens\)")
+        self.assertIn_("contested", r.out.splitlines()[0])
+        self.assertIn_("memory create --supersedes", r.out)
+
+    def test_the_old_name_still_works_and_says_what_it_is_now(self):
+        """Every project scaffolded before the rename has `memory digest`
+        written into its AGENTS.md and will not learn otherwise until someone
+        re-scaffolds, so the alias must keep working — and must say so once."""
+        self.led.add("rule", "A statement.")
+
+        r = self.led.compile_legacy()
+
+        self.assertCode(r, EXIT_OK)
+        self.assertIn_("digest updated:", r.out, "the alias runs the same report")
+        self.assertIn_("startup", r.err, "and names what replaced it")
+
+    def test_a_blocked_plan_is_visible_on_line_one(self):
+        """A blocked plan is the first thing to act on or route, so it cannot
+        wait for the file read. (PRE-FIX the status tally listed five of the
+        six statuses and left Blocked out, so a project whose every plan was
+        blocked reported no active plans at all — the one state that must
+        never look idle.)"""
+        self.led.add("rule", "A statement.")
+        self.led.add_plan("2026-01-05-stuck", status="Blocked")
+
+        first = self.led.compile().out.splitlines()[0]
+
+        self.assertIn_("1 plan", first)
+        self.assertIn_("1 blocked", first)
+
+    def test_an_empty_ledger_asks_before_initializing(self):
+        """A fresh project must not be seeded with placeholder records."""
+        r = self.led.compile()
+
+        self.assertIn_("ledger empty", r.out.splitlines()[0])
+        self.assertIn_("Ask the human before initializing", r.out)

@@ -36,10 +36,22 @@ them. Canonical skill name and folder: `zamm`.
 ## Session start is one command
 
 ```sh
-bash <zamm-skill>/scripts/zamm-run.sh memory digest
+bash <zamm-skill>/scripts/zamm-run.sh startup
 ```
 
-Its output is the whole read. Top to bottom: a `Needs reconciliation` index when a merge
+It prints two lines — what the project holds, and the path of the digest:
+
+```
+ZAMM v3 · 34 live · 3 guardrails · 2 plans (1 blocked) · 11 ideas (2 hot) · 47 episodes
+digest updated: zamm-memory/.compiled/zamm-digest.md
+```
+
+Below them, one `!` block per thing needing action this session, each naming the command
+that fixes it; a healthy project prints nothing there. How to read the digest is not
+repeated — the rendered router in `AGENTS.md` carries it, and the same agent read that
+minutes earlier.
+
+Reading that file, whole, is the whole read. Top to bottom: a `Needs reconciliation` index when a merge
 left two heads; marked backlog ideas; up to a few dozen full entries balanced across
 knowledge areas so one hot topic cannot drown the rest (a leading `!` is a guardrail, `+bg`
 means a Background section exists); a longer list of one-line reminders; counts for the
@@ -262,6 +274,7 @@ Everything runs through one entrypoint, which finds the project root itself
 (nearest ancestor holding `zamm-memory/`, else the git top level):
 
 ```
+startup              session start: rebuild every tree, name the digest to read
 scaffold             install ZAMM here, or refresh the rendered surfaces
 status               health overview: ledger, backlog, journal, plans, drift
 check                validate everything (memory + backlog + journal + plans)
@@ -269,7 +282,6 @@ whatis <ref>...      what a path, qmd:// URL, id or slug is, and whether it
                      still counts: standing, supersede chain, the live head
 help [<topic>]       this text, or help for one command
 
-memory digest        rebuild and print the digest
 memory list          index of live records, slug first
 memory show <slug>   one record in full
 memory check         validate the ledger

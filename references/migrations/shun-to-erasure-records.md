@@ -54,7 +54,7 @@ a mechanism I no longer implement".
    ```sh
    rm zamm-memory/knowledge/shun.md
    bash <zamm-skill>/scripts/zamm-run.sh memory check
-   bash <zamm-skill>/scripts/zamm-run.sh memory digest
+   bash <zamm-skill>/scripts/zamm-run.sh startup
    ```
 
    `memory check` must pass and the digest must not contain the erased

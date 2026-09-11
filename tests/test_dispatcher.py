@@ -23,7 +23,7 @@ class TestRouting(ZammTest):
     def test_each_subcommand_reaches_its_script(self):
         self.led.add("a-rule", "A statement.")
         for args, expect in [
-            (["memory", "digest"], "ZAMM Memory Digest"),  # digest prints, not just builds
+            (["startup"], "digest updated:"),  # startup reports, not just builds
             (["memory", "check"], "check passed"),
             (["plan", "list"], "plan status snapshot"),
             (["plan", "archive"], "plan archive helper"),
@@ -42,7 +42,7 @@ class TestRouting(ZammTest):
 
         self.assertCode(r, EXIT_OK)
         self.assertFalse(
-            self.led.exists("zamm-memory/.compiled/memory.md"),
+            self.led.exists("zamm-memory/.compiled/zamm-digest.md"),
             "check must not publish a digest",
         )
 
@@ -56,14 +56,14 @@ class TestRouting(ZammTest):
     def test_help_paths_exit_zero(self):
         for args in ([], ["help"], ["help", "memory"], ["help", "plan"],
                      ["memory"], ["plan"], ["help", "scaffold"],
-                     ["help", "memory", "digest"]):
+                     ["help", "startup"], ["help", "memory", "digest"]):
             with self.subTest(args=args):
                 r = self.led.zamm(*args)
                 self.assertCode(r, EXIT_OK, f"zamm-run.sh {' '.join(args)}")
                 self.assertIn_("Usage", r.output)
 
     def test_help_forwards_to_the_underlying_script(self):
-        r = self.led.zamm("help", "memory", "digest")
+        r = self.led.zamm("help", "memory", "check")
         self.assertIn_("zamm-compile.sh", r.output)
 
     def test_group_help_lists_that_groups_commands(self):
@@ -81,7 +81,7 @@ class TestArgumentHandling(ZammTest):
             "---\ntype: memory\nscope: contracts/api\nimportance: useful\n"
             "durability: years\ncreated: 2026-01-05\n---\nNo schema.\n",
         )
-        self.assertCode(self.led.zamm("memory", "digest"), EXIT_REFUSED_PUBLISH)
+        self.assertCode(self.led.zamm("startup"), EXIT_REFUSED_PUBLISH)
         self.assertCode(self.led.zamm("memory", "check"), EXIT_CONTRACT)
 
         self.led.add("good", "A valid statement.")
@@ -121,7 +121,7 @@ class TestArgumentHandling(ZammTest):
     def test_environment_seams_pass_through(self):
         """ZAMM_TODAY must survive the hop, or every golden test rots."""
         self.led.add("a-rule", "A statement.")
-        self.led.zamm("memory", "digest", today="2026-01-01")
+        self.led.zamm("startup", today="2026-01-01")
         self.assertIn_("2026-01-01", self.led.digest().splitlines()[0])
 
 
@@ -223,15 +223,13 @@ class TestStatusView(ZammTest):
 
         self.assertCode(r, EXIT_OK)
         self.assertIn_("no compiled digest", r.out)
-        self.assertFalse(self.led.exists("zamm-memory/.compiled/memory.md"))
+        self.assertFalse(self.led.exists("zamm-memory/.compiled/zamm-digest.md"))
 
     def test_reports_a_stale_digest(self):
-        import time
-
         self.led.add("a-rule", "A statement.")
         self.led.compile()
-        time.sleep(1.1)
-        self.led.add("later", "Written after the digest.", date="2026-01-06")
+        later = self.led.add("later", "Written after the digest.", date="2026-01-06")
+        self.led.written_after_compile(f"zamm-memory/knowledge/2026/{later}.md")
 
         self.assertIn_("STALE", self.led.status().out)
 

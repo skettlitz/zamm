@@ -54,6 +54,8 @@ usage() {
 Usage: zamm-run.sh [--project-root <path>] <command> [args...]
 
 Project
+  startup              session start: recompile, then READ the digest it names
+                       [--inline] print it instead  [--softmax N] attention cap
   scaffold             install ZAMM here, or refresh the rendered surfaces
   status               health overview: ledger, backlog, journal, plans, drift
   check                validate everything (memory + backlog + journal + plans)
@@ -62,8 +64,6 @@ Project
   help [<topic>]       this text, or help for one command
 
 Memory
-  memory digest        recompile the digest; READ the file it names
-                       [--inline] print it instead  [--softmax N] attention cap
   memory list          index of live records, slug first
   memory show <slug>   one record in full
   memory check         validate the ledger
@@ -136,17 +136,8 @@ group_usage() {
     memory) cat <<'EOF'
 Usage: zamm-run.sh memory <command> [args...]
 
-  digest [--softmax N] [--inline]
-                       recompile the digest and hand back its path. READ THAT
-                       FILE - this output is not the digest. --inline prints
-                       it instead, for a reader with no file tool (command
-                       output is capped; a real ledger gets cut). --softmax is
-                       the soft character ceiling (default 80000, or
-                       $ZAMM_DIGEST_SOFTMAX) - an attention budget. Past it,
-                       Digest blocks collapse to their headline (+el); no
-                       record is ever dropped. It STICKS: the value is
-                       remembered beside the digest, so later writes rebuild
-                       at it; --softmax 80000 goes back to the default.
+  digest               the old name for `zamm-run.sh startup`; still works,
+                       see `zamm-run.sh help startup`
   list [--all] [--scope <area>]
                        index of live records (default: those in the digest)
   show <slug|id>       one record in full
@@ -446,63 +437,156 @@ installed_stamp() {
   sh "$INTERNAL/zamm-skill-stamp.sh" 2>/dev/null || true
 }
 
-# Session start runs `memory digest` and nothing else, so this is the only
-# place a skill update can be noticed without the agent going looking for it.
+# Session start runs `startup` and nothing else, so this is the only place a
+# skill update can be noticed without the agent going looking for it.
 # It is a NOTICE, not a refusal: a moved stamp means the rendered instructions
 # are stale, not that the ledger parses differently — the protocol version is
 # what governs that, and it refuses. The stamp hashes every skill file, so a
 # comment edit moves it; refusing here would break the project on a doc-only
-# update. Goes to stderr so the digest on stdout stays clean and pipeable.
-# ---- The session read is a FILE READ. `memory digest` recompiles and hands
-#      back a path; the agent opens it with its file tool. Command output is
-#      capped by the harness (30000 chars in Claude Code, the remainder
-#      replaced by a short preview), and a digest delivered that way is
-#      truncated SILENTLY — the session sees a header and one entry and
-#      proceeds believing it read memory. A path cannot be truncated.
+# update.
+# ---- The session read is a FILE READ. `startup` recompiles and names the
+#      file; the agent opens it with its file tool. Command output is capped
+#      by the harness (30000 chars in Claude Code, the remainder replaced by
+#      a short preview), and a digest delivered that way is truncated
+#      SILENTLY — the session sees a header and one entry and proceeds
+#      believing it read memory. A path cannot be truncated.
 #
-#      Everything below is deliberately NOT the digest: it is short, it says
-#      so, and it carries only what an operator must see even if the file is
-#      never opened (degradation, and what the read will cost).
-memory_digest_handoff() {
-  d="$ROOT/zamm-memory/.compiled/memory.md"
-  sz=$(wc -c < "$d" | tr -d ' ')
-  echo "ZAMM memory recompiled. THIS OUTPUT IS NOT THE DIGEST."
-  echo ""
-  echo "Read this file now, whole. It is the entire session memory read:"
-  echo ""
-  echo "  $d"
-  echo ""
-  echo "Open it with your file-reading tool. Do NOT cat/head/tail it: command"
-  echo "output is capped by the harness and the digest would be cut silently."
-  echo ""
-  sed -n '1p' "$d"
-  # The budget line is two or three lines in the file; echo just the first,
-  # which carries the size and the collapse count.
-  grep -m1 '^Budget: ' "$d" || :
-  printf '%s chars to read (~%sk tokens).\n' "$sz" "$((sz / 4000))"
-  if grep -q '^## Degraded' "$d"; then
-    echo ""
-    echo "DEGRADED: the ledger has integrity problems. The file opens with a"
-    echo "## Degraded section listing them; run: zamm-run.sh memory check"
+#      The report is therefore deliberately NOT the digest, and just as
+#      deliberately NOT a second copy of the protocol. HOW to read the file
+#      (whole, with a file tool, never `cat`) is in the rendered router the
+#      same agent read from AGENTS.md moments earlier; repeating it every
+#      session spends output re-teaching a reader who already knows.
+#
+#      Happy path is exactly two lines: what the project holds, and where the
+#      digest is. Anything that needs doing expands below them, worst first,
+#      each carrying its own remedy. Nothing that the file itself carries is
+#      quoted here — not the size (the read is not optional, so a price only
+#      invites haggling), not the entry counts, not the reconciliation
+#      groups. The agent is about to read all of it.
+startup_report() {
+  _sr_rel="zamm-memory/.compiled/zamm-digest.md"
+  _sr_d="$ROOT/$_sr_rel"
+  _sr_st="$ROOT/zamm-memory/.compiled/state.tsv"
+  _sr_bs="$ROOT/zamm-memory/.compiled/backlog-state.tsv"
+  _sr_js="$ROOT/zamm-memory/.compiled/journal-state.tsv"
+  _sr_v=$(sed -n '1p' "$ROOT/zamm-memory/VERSION" 2>/dev/null | tr -d '[:space:]')
+
+  # ---- line 1: one segment per tree, in the order a session consumes them.
+  _sr_live=$(num "$(tsv_field "$_sr_st" live)")
+  if [ "$_sr_live" -gt 0 ]; then
+    _sr_l="ZAMM v${_sr_v:-?} · $_sr_live live"
+  else
+    _sr_l="ZAMM v${_sr_v:-?} · ledger empty"
   fi
-  if grep -q '^OVER BUDGET' "$d"; then
-    echo ""
-    echo "OVER BUDGET: every entry is already collapsed to its headline and the"
-    echo "digest still exceeds its soft ceiling. Nothing was dropped; the cost is"
-    echo "context spent by every session. Retire or supersede what has gone stale."
+  _sr_g=$(num "$(tsv_field "$_sr_st" guardrails)")
+  [ "$_sr_g" -gt 0 ] && _sr_l="$_sr_l · $(plural "$_sr_g" guardrail guardrails)"
+  _sr_c=$(num "$(tsv_field "$_sr_st" contested)")
+  [ "$_sr_c" -gt 0 ] && _sr_l="$_sr_l · $_sr_c contested"
+
+  # Plans come from the checked manifest, never a glob: a startup line that
+  # reported "no active plan" over an unreadable tree would hide the failure.
+  _sr_plans=1
+  plan_tally || _sr_plans=0
+  if [ "$_sr_plans" -eq 0 ]; then
+    _sr_l="$_sr_l · plans unreadable"
+  elif [ "$PT_TOTAL" -eq 0 ]; then
+    if [ "$PT_ARCH" -gt 0 ]; then
+      _sr_l="$_sr_l · no active plan ($PT_ARCH archived)"
+    else
+      _sr_l="$_sr_l · no active plan"
+    fi
+  else
+    _sr_l="$_sr_l · $(plural "$PT_TOTAL" plan plans)"
+    [ "$PT_BLOCKED" -gt 0 ] && _sr_l="$_sr_l ($PT_BLOCKED blocked)"
   fi
+
+  # Backlog and journal are optional trees: no tree, no segment. Absence is
+  # data (the feature is unused), not a zero worth printing.
+  if [ -f "$_sr_bs" ]; then
+    _sr_bl=$(num "$(tsv_field "$_sr_bs" live)")
+    _sr_l="$_sr_l · $(plural "$_sr_bl" idea ideas)"
+    _sr_bh=$(num "$(tsv_field "$_sr_bs" hot)")
+    [ "$_sr_bh" -gt 0 ] && _sr_l="$_sr_l ($_sr_bh hot)"
+  fi
+  if [ -f "$_sr_js" ]; then
+    _sr_je=$(num "$(tsv_field "$_sr_js" entries)")
+    _sr_l="$_sr_l · $(plural "$_sr_je" episode episodes)"
+  fi
+
+  printf '%s\n' "$_sr_l"
+  # ---- line 2: the only thing the agent has to act on. Relative to the
+  #      project root, which is where it is already standing: shorter, and it
+  #      keeps a home directory out of every transcript.
+  printf 'digest updated: %s\n' "$_sr_rel"
+
+  # ---- exceptions, worst first. Each says what is wrong and what fixes it.
+  if [ "$_sr_c" -gt 0 ]; then
+    startup_note "$(plural "$_sr_c" "contested group needs" "contested groups need") reconciliation — resolve this session." \
+      '  The digest opens with "## Needs reconciliation" and lists each group.' \
+      '  Read the competing records, then write ONE new record naming them all:' \
+      '  zamm-run.sh memory create --supersedes <id>,<id> ...' \
+      '  Never edit or delete the competing files.'
+  fi
+  if grep -q '^## Degraded' "$_sr_d"; then
+    _sr_q=$(num "$(tsv_field "$_sr_st" quarantined)")
+    startup_note "the ledger has integrity problems; the digest opens with \"## Degraded\"." \
+      "  $(plural "$_sr_q" "record is" "records are") quarantined — invisible to the digest until fixed." \
+      '  zamm-run.sh memory check     names each file and its violation'
+  fi
+  if grep -q '^OVER BUDGET' "$_sr_d"; then
+    startup_note 'the digest is over its soft budget with every entry already collapsed' \
+      '  to its headline. Nothing was dropped — the cost is context, paid by every' \
+      '  agent at every session start. Retire or supersede what has gone stale,' \
+      '  or raise the ceiling deliberately (--softmax).' \
+      '  zamm-run.sh memory list     what the digest is currently spending it on'
+  fi
+  if [ "$_sr_live" -eq 0 ]; then
+    startup_note 'no live memory records. Ask the human before initializing, and never' \
+      '  write placeholder records.'
+  fi
+  if [ "$_sr_plans" -eq 0 ]; then
+    startup_note 'the plan tree could not be enumerated (unreadable, not empty).' \
+      '  zamm-run.sh plan check      says which entry refuses to be read'
+  else
+    if [ -n "$PT_MISSING" ]; then
+      startup_note 'a plan root is missing — structural damage, not an empty project:' \
+        "$(printf '%s\n' "$PT_MISSING" | sed 's/^/    /')" \
+        '  zamm-run.sh scaffold        recreates the directory; then investigate'
+    fi
+    [ "$PT_ANOM" -gt 0 ] &&
+      startup_note "$(plural "$PT_ANOM" "invalid plan entry" "invalid plan entries") in the active tree." \
+        '  zamm-run.sh plan check      names each one'
+  fi
+  startup_stale_note
+  return 0
 }
 
-warn_if_surfaces_stale() {
+# One exception: a headline (prefixed `! `) plus any number of already-indented
+# continuation lines, separated from what came before by a blank line. The
+# separator belongs to the note, not to the report, so a clean startup really
+# is two lines and not two lines plus padding.
+startup_note() {
+  echo ""
+  printf '! %s\n' "$1"
+  shift
+  for _sn_l in "$@"; do printf '%s\n' "$_sn_l"; done
+}
+
+# Stale rendered surfaces, as a startup exception rather than a stderr aside.
+# It used to go to stderr to keep stdout pipeable when stdout WAS the digest;
+# now stdout is a two-line report, and the one warning that says "your
+# instructions are out of date" must not be the one an agent's harness files
+# away separately — or drops.
+startup_stale_note() {
   _rs=$(rendered_stamp)
   [ -n "$_rs" ] || return 0
   _is=$(installed_stamp)
   [ -n "$_is" ] || return 0
   [ "$_rs" != "$_is" ] || return 0
-  echo "zamm: the ZAMM skill has changed since this project was scaffolded" >&2
-  echo "  rendered surfaces: $_rs, installed skill: $_is" >&2
-  echo "  refresh them (and tell the human) before relying on the rendered protocol:" >&2
-  echo "    zamm-run.sh scaffold" >&2
+  startup_note 'the ZAMM skill changed since this project was scaffolded, so the' \
+    '  rendered protocol in AGENTS.md may no longer be the one in force.' \
+    "  rendered $_rs, installed $_is" \
+    '  zamm-run.sh scaffold        refresh the surfaces, and tell the human'
 }
 
 # ---------------- built-in read-only views ----------------
@@ -534,8 +618,65 @@ pair_coherent() {
 
 state_coherent() { pair_coherent "$DIGEST" "$STATE"; }
 
+# A field from ANY compiler state sidecar (state_field is the same read fixed
+# to $STATE). Absent file or absent key both yield the empty string; num()
+# turns that into the 0 an arithmetic test can use, so a torn or missing
+# sidecar degrades to "0" in a report line instead of aborting it under set -u.
+tsv_field() {
+  [ -f "$1" ] || return 0
+  awk -F'\t' -v k="$2" '$1==k{print $2; exit}' "$1"
+}
+num() { case "${1-}" in '' | *[!0-9]*) echo 0 ;; *) echo "$1" ;; esac; }
+
+# Plans tallied from the CHECKED manifest, never a glob: a count taken over an
+# unreadable tree that reads as "none active" hides exactly the failure worth
+# reporting. Sets PT_TOTAL PT_BLOCKED PT_TERMINAL PT_ARCH PT_ANOM PT_SUMMARY
+# PT_MISSING; returns 1 if the manifest itself could not be built.
+#
+# One definition, two readers (startup and status). Blocked is in the status
+# list because it IS a status: leaving it out (it arrived after this tally was
+# first written) made a project whose every plan was blocked report "none
+# active" — the one state that must never look idle.
+plan_tally() {
+  PT_TOTAL=0; PT_BLOCKED=0; PT_TERMINAL=0; PT_ARCH=0; PT_ANOM=0
+  PT_SUMMARY=""; PT_MISSING=""
+  _pt_f=$(mktemp "${TMPDIR:-/tmp}/zamm-plan-tally.XXXXXX")
+  if ! sh "$INTERNAL/zamm-plan-manifest.sh" --project-root "$ROOT" > "$_pt_f"; then
+    rm -f "$_pt_f"
+    return 1
+  fi
+  _pt_tab=$(printf '\t')
+  PT_MISSING=$(awk -F"$_pt_tab" -v r="$ROOT/" '$1 == "MISSING" { p = $2; sub(r, "", p); print p }' "$_pt_f")
+  _pt_st=""
+  while IFS= read -r _pt_d; do
+    [ -n "$_pt_d" ] || continue
+    _pt_pf=$(awk -F"$_pt_tab" -v d="$_pt_d/" '$1 == "PLANFILE" && index($2, d) == 1 { print $2; exit }' "$_pt_f")
+    [ -n "$_pt_pf" ] || continue
+    _pt_s=$(sed -n 's/^Status:[[:space:]]*//p' "$_pt_pf" | head -1 | awk '{print $1}')
+    _pt_st="$_pt_st$_pt_s
+"
+  done <<EOF
+$(awk -F"$_pt_tab" '$1 == "PLANDIR" { print $2 }' "$_pt_f")
+EOF
+  for _pt_k in Draft Implementing Blocked Review Done Abandoned; do
+    _pt_n=$(printf '%s' "$_pt_st" | grep -c "^$_pt_k\$" || true)
+    PT_TOTAL=$((PT_TOTAL + _pt_n))
+    [ "$_pt_n" -gt 0 ] &&
+      PT_SUMMARY="$PT_SUMMARY$_pt_n $(echo "$_pt_k" | tr 'A-Z' 'a-z'), "
+    case "$_pt_k" in
+      Blocked) PT_BLOCKED=$_pt_n ;;
+      Done|Abandoned) PT_TERMINAL=$((PT_TERMINAL + _pt_n)) ;;
+    esac
+  done
+  PT_SUMMARY=$(printf '%s' "$PT_SUMMARY" | sed 's/, $//')
+  PT_ANOM=$(awk -F"$_pt_tab" '$1 ~ /^(SYMLINK|NOTDIR|UNREADABLE|DUP|DEBRIS)$/ { n++ } END { print n + 0 }' "$_pt_f")
+  PT_ARCH=$(awk -F"$_pt_tab" '$1 == "ARCHDIR" { n++ } END { print n + 0 }' "$_pt_f")
+  rm -f "$_pt_f"
+  return 0
+}
+
 print_status() {
-  DIGEST="$ROOT/zamm-memory/.compiled/memory.md"
+  DIGEST="$ROOT/zamm-memory/.compiled/zamm-digest.md"
   STATE="$ROOT/zamm-memory/.compiled/state.tsv"
   version=$(sed -n '1p' "$ROOT/zamm-memory/VERSION" 2>/dev/null | tr -d '[:space:]')
   stamp=$(rendered_stamp)
@@ -598,7 +739,7 @@ print_status() {
 
   if [ ! -f "$DIGEST" ]; then
     echo 'Ledger    no compiled digest'
-    echo '          run: zamm-run.sh memory digest'
+    echo '          run: zamm-run.sh startup'
   else
     # files/live/quarantined come from the compiler's own digest header (a
     # structured line it emits, not reverse-parsed prose), so they are reliable
@@ -637,10 +778,10 @@ print_status() {
       sfiles=$(state_field files)
       if [ -n "$sfiles" ] && [ "${ondisk:-0}" -ne "$sfiles" ]; then
         printf '          STALE: %s record file(s) on disk but the last compile saw %s\n' "$ondisk" "$sfiles"
-        echo '          run: zamm-run.sh memory digest'
+        echo '          run: zamm-run.sh startup'
       fi
     else
-      echo '          (guardrail/reconciliation counts unavailable: run zamm-run.sh memory digest)'
+      echo '          (guardrail/reconciliation counts unavailable: run zamm-run.sh startup)'
     fi
     # The digest embeds active plans as well as knowledge records, so a plan
     # edited after the last compile makes it stale too — watch both trees.
@@ -671,7 +812,7 @@ print_status() {
     newer=$(printf '%s\n%s\n' "$_nwl" "$_nwp" | grep -c . || true)
     if [ "${newer:-0}" -gt 0 ]; then
       printf '          STALE: %s file(s) newer than the digest\n' "$newer"
-      echo '          run: zamm-run.sh memory digest'
+      echo '          run: zamm-run.sh startup'
     fi
     # The inert probe is a compiler run over the whole graph, archived
     # headers included: silencing it turned "the ledger could not be read"
@@ -715,7 +856,7 @@ print_status() {
     _bstate="$ROOT/zamm-memory/.compiled/backlog-state.tsv"
     if [ ! -f "$_blens" ]; then
       printf 'Backlog   lens not yet compiled\n'
-      printf '          run: zamm-run.sh memory digest\n'
+      printf '          run: zamm-run.sh startup\n'
     elif ! pair_coherent "$_blens" "$_bstate" ||
          ! _bvals=$(awk -F"$(printf '\t')" '
              $1 == "live"   { l = $2 }
@@ -730,7 +871,7 @@ print_status() {
       # mid-output under set -e with no diagnostic at all, and the single
       # guarded read closes the check-then-read window a per-key read left.
       printf 'Backlog   lens/state pair incoherent (interrupted compile, or a deleted sidecar)\n'
-      printf '          run: zamm-run.sh memory digest\n'
+      printf '          run: zamm-run.sh startup\n'
     else
       _btab=$(printf '\t')
       _blive=${_bvals%%"$_btab"*}
@@ -747,7 +888,7 @@ print_status() {
       _bnewer=$(printf '%s\n' "$_bnw" | grep -c . || true)
       if [ "${_bnewer:-0}" -gt 0 ]; then
         printf '          STALE: %s file(s) newer than the lens\n' "$_bnewer"
-        echo '          run: zamm-run.sh memory digest'
+        echo '          run: zamm-run.sh startup'
       fi
     fi
     echo
@@ -759,7 +900,7 @@ print_status() {
     _jstate="$ROOT/zamm-memory/.compiled/journal-state.tsv"
     if [ ! -f "$_jlens" ]; then
       printf 'Journal   lens not yet compiled\n'
-      printf '          run: zamm-run.sh memory digest\n'
+      printf '          run: zamm-run.sh startup\n'
     elif ! pair_coherent "$_jlens" "$_jstate" ||
          ! _jvals=$(awk -F"$(printf '\t')" '
              $1 == "entries"    { e = $2 }
@@ -769,7 +910,7 @@ print_status() {
              END { print e "\t" u "\t" l "\t" w }
            ' "$_jstate" 2>/dev/null); then
       printf 'Journal   lens/state pair incoherent (interrupted compile, or a deleted sidecar)\n'
-      printf '          run: zamm-run.sh memory digest\n'
+      printf '          run: zamm-run.sh startup\n'
     else
       _jtab=$(printf '\t')
       _jent=${_jvals%%"$_jtab"*}; _jrest=${_jvals#*"$_jtab"}
@@ -789,7 +930,7 @@ print_status() {
       _jnewer=$(printf '%s\n' "$_jnw" | grep -c . || true)
       if [ "${_jnewer:-0}" -gt 0 ]; then
         printf '          STALE: %s file(s) newer than the lens\n' "$_jnewer"
-        echo '          run: zamm-run.sh memory digest'
+        echo '          run: zamm-run.sh startup'
       fi
     fi
     echo
@@ -797,54 +938,32 @@ print_status() {
 
   # Plans enumerate through the checked manifest, never a glob: a status that
   # reported "none active" over an unreadable tree would hide the failure.
-  pmf=$(mktemp "${TMPDIR:-/tmp}/zamm-status-pmf.XXXXXX")
-  if ! sh "$INTERNAL/zamm-plan-manifest.sh" --project-root "$ROOT" > "$pmf"; then
-    rm -f "$pmf"
+  # plan_tally does the enumeration (shared with startup, so the two surfaces
+  # cannot drift on what counts as an active plan); status owns the reporting,
+  # including the exit codes an overview is expected to raise.
+  if ! plan_tally; then
     echo 'Plans     ERROR: cannot enumerate the plan tree (unreadable, not empty)'
     exit 4
   fi
-  tab=$(printf '\t')
   # a missing plan root is structural damage (scaffold always creates both),
   # never a healthy zero-plan project
-  if grep -q "^MISSING${tab}" "$pmf"; then
-    grep "^MISSING${tab}" "$pmf" | while IFS="$tab" read -r _ mroot; do
-      printf 'Plans     ERROR: plan root missing: %s -- structural damage, not an empty project\n' "${mroot#"$ROOT/"}"
+  if [ -n "$PT_MISSING" ]; then
+    printf '%s\n' "$PT_MISSING" | while IFS= read -r mroot; do
+      printf 'Plans     ERROR: plan root missing: %s -- structural damage, not an empty project\n' "$mroot"
     done
     echo '          restore it (zamm-run.sh scaffold recreates the directory), then investigate'
-    rm -f "$pmf"
     exit 4
   fi
-  stlist=""
-  while IFS= read -r pd; do
-    [ -n "$pd" ] || continue
-    pf=$(awk -F"$tab" -v d="$pd/" '$1 == "PLANFILE" && index($2, d) == 1 { print $2; exit }' "$pmf")
-    [ -n "$pf" ] || continue
-    s=$(sed -n 's/^Status:[[:space:]]*//p' "$pf" | head -1 | awk '{print $1}')
-    stlist="$stlist$s
-"
-  done <<EOF
-$(awk -F"$tab" '$1 == "PLANDIR" { print $2 }' "$pmf")
-EOF
-  total=0; terminal=0; summary=""
-  for st in Draft Implementing Review Done Abandoned; do
-    n=$(printf '%s' "$stlist" | grep -c "^$st\$" || true)
-    total=$((total + n))
-    [ "$n" -gt 0 ] && summary="$summary$n $(echo "$st" | tr 'A-Z' 'a-z'), "
-    case "$st" in Done|Abandoned) terminal=$((terminal + n)) ;; esac
-  done
-  if [ "$total" -eq 0 ]; then
+  if [ "$PT_TOTAL" -eq 0 ]; then
     echo 'Plans     none active'
   else
-    printf 'Plans     %s\n' "$(echo "$summary" | sed 's/, $//')"
-    [ "$terminal" -gt 0 ] &&
-      printf '          ARCHIVE-READY: %s (zamm-run.sh plan archive)\n' "$terminal"
+    printf 'Plans     %s\n' "$PT_SUMMARY"
+    [ "$PT_TERMINAL" -gt 0 ] &&
+      printf '          ARCHIVE-READY: %s (zamm-run.sh plan archive)\n' "$PT_TERMINAL"
   fi
-  nanom=$(awk -F"$tab" '$1 ~ /^(SYMLINK|NOTDIR|UNREADABLE|DUP|DEBRIS)$/ { n++ } END { print n + 0 }' "$pmf")
-  [ "$nanom" -gt 0 ] &&
-    printf '          INVALID ENTRIES: %s (zamm-run.sh plan check)\n' "$nanom"
-  narch=$(awk -F"$tab" '$1 == "ARCHDIR" { n++ } END { print n + 0 }' "$pmf")
-  printf '          archived: %s\n' "$narch"
-  rm -f "$pmf"
+  [ "$PT_ANOM" -gt 0 ] &&
+    printf '          INVALID ENTRIES: %s (zamm-run.sh plan check)\n' "$PT_ANOM"
+  printf '          archived: %s\n' "$PT_ARCH"
 }
 
 memory_list() {
@@ -864,7 +983,7 @@ memory_list() {
       *) die "memory list: unknown argument: $1" ;;
     esac
   done
-  DIGEST="$ROOT/zamm-memory/.compiled/memory.md"
+  DIGEST="$ROOT/zamm-memory/.compiled/zamm-digest.md"
   STATE="$ROOT/zamm-memory/.compiled/state.tsv"
   # Default view is what is actually influencing the agent: the records the
   # digest SELECTED. Those ids come from the compiler's state sidecar, not from
@@ -879,9 +998,9 @@ memory_list() {
     # the digest also scooped up ids embedded in the appended Plans tail (a
     # record named in a plan title leaked into the list), so a missing sidecar
     # asks for a recompile rather than returning a wrong set.
-    [ -f "$STATE" ] || die "no state sidecar yet; run: zamm-run.sh memory digest (or use --all)"
+    [ -f "$STATE" ] || die "no state sidecar yet; run: zamm-run.sh startup (or use --all)"
     state_coherent ||
-      die "digest and state sidecar are from different compiles (interrupted compile?); run: zamm-run.sh memory digest (or use --all)"
+      die "digest and state sidecar are from different compiles (interrupted compile?); run: zamm-run.sh startup (or use --all)"
     filter=$(awk -F'\t' '$1=="select"{print $2}' "$STATE" | sort -u)
   fi
   tab=$(printf '\t')
@@ -1100,7 +1219,7 @@ memory_publish() {
     echo "      run 'zamm-run.sh memory check' to see them." >&2
   elif [ "$crc" -ne 0 ]; then
     echo "zamm: the record was published, but the digest could not be rebuilt (rc=$crc);" >&2
-    echo "      run 'zamm-run.sh memory digest' to refresh it." >&2
+    echo "      run 'zamm-run.sh startup' to refresh it." >&2
   fi
   echo "Published: ${final#"$ROOT/"}"
   exit 0
@@ -1383,7 +1502,7 @@ plan_recompile_tail() {
   sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" >/dev/null 2>&1 || _prt_rc=$?
   if [ "$_prt_rc" != "0" ] && [ "$_prt_rc" != "2" ]; then
     echo "zamm: WARNING: the plan file is written, but the digest recompile failed (rc=$_prt_rc)." >&2
-    echo "  Run 'zamm-run.sh memory digest' and fix what it reports, or the Plans tail stays stale." >&2
+    echo "  Run 'zamm-run.sh startup' and fix what it reports, or the Plans tail stays stale." >&2
     return 0
   fi
   echo "Digest recompiled." >&2
@@ -1836,7 +1955,7 @@ backlog_list() {
     echo "ZAMM backlog: empty - no zamm-memory/backlog/ tree yet ('backlog add' creates it)."
     exit 0
   fi
-  # like memory digest: recompile, print the artifact, propagate the code —
+  # like startup: recompile, print the artifact, propagate the code —
   # a degraded lens (2) is still printed, a refusal or unreadable tree is not
   rc=0
   sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" --tree backlog >/dev/null || rc=$?
@@ -1853,7 +1972,7 @@ backlog_list() {
     if [ "$_bl_all" -eq 0 ]; then
       _bl_state="$ROOT/zamm-memory/.compiled/backlog-state.tsv"
       pair_coherent "$ROOT/zamm-memory/.compiled/backlog.md" "$_bl_state" ||
-        die "lens and state sidecar are from different compiles; run: zamm-run.sh memory digest (or use --all)"
+        die "lens and state sidecar are from different compiles; run: zamm-run.sh startup (or use --all)"
       _bl_filter=$(awk -F"$_bl_tab" '$1 == "select" { print $2 }' "$_bl_state" | sort -u)
     fi
     sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" --tree backlog --list-live |
@@ -3639,6 +3758,30 @@ wants_help() {
 do_help() {
   case "${1:-}" in
     "") usage 0 ;;
+    startup) cat <<'EOF'
+Usage: zamm-run.sh startup [--softmax N] [--inline]
+
+Session start, run once. Recompiles every tree, then prints two lines: what
+the project holds, and the path of the digest to read. READ THAT FILE, whole,
+with a file tool - this output is not the digest, and `cat` would be cut
+silently by the harness output cap.
+
+Anything needing action expands below those two lines, worst first, each with
+its remedy: reconciliation, ledger degradation, an over-budget digest, plan
+tree damage, rendered surfaces that no longer match the installed skill.
+
+  --inline     print the digest itself instead of its path, for a reader with
+               no file tool. Command output is capped; a real ledger gets cut.
+  --softmax N  the soft character ceiling (default 80000, or
+               $ZAMM_DIGEST_SOFTMAX) - an attention budget. Past it, Digest
+               blocks collapse to their headline (+el); no record is ever
+               dropped. It STICKS: the value is remembered beside the digest,
+               so later writes rebuild at it; --softmax 80000 restores the
+               default.
+
+`memory digest` is the old name for this command and still works.
+EOF
+      exit 0 ;;
     memory)
       case "${2:-}" in
         digest|check) exec sh "$INTERNAL/zamm-compile.sh" --help ;;
@@ -3667,6 +3810,51 @@ do_help() {
 
 [ $# -gt 0 ] || usage 0
 
+# Session start: recompile every tree, then hand back the digest path.
+# Reached as `startup` (and as the `memory digest` it used to be).
+run_startup() {
+  require_root; require_version
+  # Propagate the compiler's exit code instead of flattening it. set -e would
+  # otherwise abort before the report is printed: a degraded publish (exit 2)
+  # still produced a digest and must be reported AND signalled; a refusal (3)
+  # or an unreadable ledger (4) produced none.
+  #
+  # --inline restores the old behaviour of printing the digest itself. It is
+  # an escape hatch for a reader with no file tool and for humans at a
+  # terminal, NOT the session protocol: command output is capped (30000 chars
+  # in Claude Code, and the rest replaced by a short preview), so a real
+  # ledger piped this way is silently truncated.
+  inline=0
+  _n=$#; _i=0
+  while [ "$_i" -lt "$_n" ]; do
+    _a="$1"; shift; _i=$((_i + 1))
+    if [ "$_a" = "--inline" ]; then inline=1; else set -- "$@" "$_a"; fi
+  done
+  DIGEST="$ROOT/zamm-memory/.compiled/zamm-digest.md"
+  rc=0
+  sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" "$@" >/dev/null || rc=$?
+  if [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ]; then
+    if [ "$inline" -eq 1 ]; then
+      cat "$DIGEST"
+      sz=$(wc -c < "$DIGEST" | tr -d ' ')
+      [ "$sz" -gt 28000 ] && {
+        echo "zamm: WARNING: --inline printed $sz chars; output past ~30000 is cut" >&2
+        echo "      by the tool, not by ZAMM. Drop --inline and read the file." >&2
+      }
+      # --inline owns stdout, so the stale-surfaces notice cannot join the
+      # report there without landing inside piped digest content: stderr.
+      _rs=$(rendered_stamp); _is=$(installed_stamp)
+      if [ -n "$_rs" ] && [ -n "$_is" ] && [ "$_rs" != "$_is" ]; then
+        echo "zamm: the ZAMM skill changed since this project was scaffolded" >&2
+        echo "      rendered $_rs, installed $_is -- run: zamm-run.sh scaffold" >&2
+      fi
+    else
+      startup_report
+    fi
+  fi
+  exit "$rc"
+}
+
 # `help`, `--help`, `-h` at the top route to the read-only help printer and
 # never fall through to dispatch — see do_help for why the old rewrite was
 # unsafe.
@@ -3679,6 +3867,13 @@ INTERP="sh"
 TARGET=""
 
 case "$cmd" in
+  startup)
+    # --help must reach the user, not the /dev/null the compile output goes to
+    case "${1-}" in
+      -h|--help) exec sh "$INTERNAL/zamm-compile.sh" --help ;;
+    esac
+    run_startup "$@"
+    ;;
   memory)
     [ $# -gt 0 ] || group_usage memory 0
     verb="$1"; shift
@@ -3687,45 +3882,18 @@ case "$cmd" in
     wants_help "$@" && do_help memory "$verb"
     case "$verb" in
       digest)
-        # --help must reach the user, not the /dev/null the compile output goes to
+        # The old name for `startup`. The verb moved because session start
+        # reads all four trees, not just knowledge, and because `digest` was
+        # already spoken for: `journal digest <period>` compiles a view and
+        # PRINTS it, while this one compiles and refuses to. Kept working, and
+        # kept quiet about it beyond one line, because every project scaffolded
+        # before the rename has `memory digest` written into its AGENTS.md and
+        # will not learn otherwise until someone re-scaffolds.
         case "${1-}" in
           -h|--help) exec sh "$INTERNAL/zamm-compile.sh" --help ;;
         esac
-        require_root; require_version
-        # Propagate the compiler's exit code instead of flattening it. set -e
-        # would otherwise abort here before the digest is printed: a degraded
-        # publish (exit 2) still produced a digest and must be shown AND
-        # signalled; a refusal (3) or unreadable ledger (4) produced none.
-        # --inline restores the old behaviour of printing the digest itself.
-        # It is an escape hatch for a reader with no file tool and for humans
-        # at a terminal, NOT the session protocol: command output is capped
-        # (30000 chars in Claude Code, and the rest replaced by a short
-        # preview), so a real ledger piped this way is silently truncated.
-        inline=0
-        _n=$#; _i=0
-        while [ "$_i" -lt "$_n" ]; do
-          _a="$1"; shift; _i=$((_i + 1))
-          if [ "$_a" = "--inline" ]; then inline=1; else set -- "$@" "$_a"; fi
-        done
-        DIGEST="$ROOT/zamm-memory/.compiled/memory.md"
-        rc=0
-        sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" "$@" >/dev/null || rc=$?
-        if [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ]; then
-          if [ "$inline" -eq 1 ]; then
-            cat "$DIGEST"
-            sz=$(wc -c < "$DIGEST" | tr -d ' ')
-            [ "$sz" -gt 28000 ] && {
-              echo "zamm: WARNING: --inline printed $sz chars; output past ~30000 is cut" >&2
-              echo "      by the tool, not by ZAMM. Drop --inline and read the file." >&2
-            }
-          else
-            memory_digest_handoff
-          fi
-          # after the digest, so it is the last thing on the way out, and on
-          # stderr so it never lands inside piped digest content
-          warn_if_surfaces_stale
-        fi
-        exit "$rc"
+        echo "zamm: 'memory digest' is now 'startup' (still works; update AGENTS.md with: zamm-run.sh scaffold)" >&2
+        run_startup "$@"
         ;;
       list)    require_root; require_version; memory_list "$@"; exit 0 ;;
       show)    require_root; require_version; memory_show "$@"; exit 0 ;;

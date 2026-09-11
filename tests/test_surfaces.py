@@ -124,7 +124,7 @@ class TestScaffoldRefresh(ZammTest):
         """The Cursor Agent Sandbox maps every .cursorignore path to EPERM,
         and ZAMM enumerates its trees with checked find(1) calls that fail
         closed on an unreadable path (invariants G3). So no zamm-memory rule
-        may live here AT ALL — not archive/** (which broke `memory digest`),
+        may live here AT ALL — not archive/** (which broke session start),
         and not the plan workdir rules (which broke `status` and, because the
         self-containment scan must walk workdir/ to enforce G5, `plan
         archive`). Everything is hidden from search via .cursorindexingignore
@@ -345,6 +345,13 @@ class TestHelpCoversEveryRoutedVerb(ZammTest):
             with self.subTest(verb=verb):
                 self.assertIn_(verb, help_text, f"top-level `{verb}` is undocumented")
 
+    # Deprecated aliases stay routed so projects scaffolded under the old name
+    # keep working, but they must NOT be advertised at the top level: `help`
+    # is where a user starts, and starting them on a name we are retiring is
+    # how a rename never finishes. The group help still carries them, with a
+    # pointer to the current name (asserted below).
+    DEPRECATED = {("memory", "digest")}
+
     def test_top_level_help_lists_every_group_verb(self):
         """The group help is not enough: `help` is where a user starts."""
         help_text = self.led.zamm("help").output
@@ -352,11 +359,23 @@ class TestHelpCoversEveryRoutedVerb(ZammTest):
             verbs = self._group_verbs(group)
             self.assertTrue(verbs, f"parsed no {group} verbs; the dispatch shape changed")
             for verb in sorted(verbs):
+                if (group, verb) in self.DEPRECATED:
+                    continue
                 with self.subTest(group=group, verb=verb):
                     self.assertIn_(
                         f"{group} {verb}", help_text,
                         f"`{group} {verb}` is routed but missing from top-level help",
                     )
+
+    def test_a_deprecated_alias_points_at_its_replacement(self):
+        """Keeping an old name working is only half the job; the other half
+        is telling whoever used it what the name is now."""
+        for group, verb in self.DEPRECATED:
+            with self.subTest(group=group, verb=verb):
+                group_text = self.led.zamm(group, "--help").output
+                self.assertIn_(verb, group_text)
+                self.assertIn_("startup", group_text,
+                               "the alias must name what replaced it")
 
     def test_group_help_lists_every_verb_of_its_group(self):
         for group in self.GROUPS:
@@ -434,8 +453,8 @@ class TestRoutingFromTheRouter(ZammTest):
 
 
 class TestDigestReportsSkillDrift(ZammTest):
-    """Session start runs `memory digest` and nothing else, so that is the
-    only place a skill update can be noticed without the agent going looking.
+    """Session start runs `startup` and nothing else, so that is the only
+    place a skill update can be noticed without the agent going looking.
 
     PRE-FIX only `status` reported drift, and `status` is not part of the
     session-start ritual — so a project kept operating under rendered
@@ -453,39 +472,52 @@ class TestDigestReportsSkillDrift(ZammTest):
         agents.write_text(re.sub(r"version=sha:[0-9a-f]+",
                                  "version=sha:deadbeef0000", agents.read_text()))
 
-    def test_digest_is_silent_when_surfaces_are_current(self):
+    def test_startup_is_silent_when_surfaces_are_current(self):
         self.led.add("rule", "A statement.")
         self.led.scaffold()
 
-        r = self.led.zamm("memory", "digest")
+        r = self.led.compile()
 
         self.assertCode(r, EXIT_OK)
-        self.assertNotIn("skill has changed", r.err,
+        self.assertNotIn("skill changed", r.output,
                          "no nagging when nothing drifted")
 
-    def test_digest_reports_drift_without_failing(self):
+    def test_startup_reports_drift_without_failing(self):
+        """On stdout, with the other exceptions: a warning that says "your
+        instructions are out of date" must not be the one an agent's harness
+        files away on a separate stream — or drops."""
         self.led.add("rule", "A statement.")
         self.led.scaffold()
         self._make_stale()
 
-        r = self.led.zamm("memory", "digest")
+        r = self.led.compile()
 
         self.assertCode(r, EXIT_OK, "drift is a notice, never a refusal")
-        self.assertIn_("skill has changed", r.err)
-        self.assertIn_("scaffold", r.err)
+        self.assertIn_("skill changed", r.out)
+        self.assertIn_("scaffold", r.out)
 
     def test_the_notice_never_contaminates_the_digest(self):
-        """stdout is the digest itself and gets piped and read as content;
-        the file is what the agent reads at session start."""
+        """The report is not the digest; the file is what the agent reads at
+        session start, and a notice inside it would outlive the run."""
         self.led.add("rule", "A statement.")
         self.led.scaffold()
         self._make_stale()
 
-        r = self.led.zamm("memory", "digest")
+        self.led.compile()
 
-        self.assertNotIn("skill has changed", r.out,
-                         "the notice must not enter piped digest content")
         self.assertNotIn(
-            "skill has changed",
-            self.led.read("zamm-memory/.compiled/memory.md"),
+            "skill changed",
+            self.led.read("zamm-memory/.compiled/zamm-digest.md"),
             "the notice must not enter the digest file")
+
+    def test_inline_keeps_the_notice_off_piped_digest_content(self):
+        """--inline hands stdout to the digest itself, so the notice goes to
+        stderr there rather than landing inside piped content."""
+        self.led.add("rule", "A statement.")
+        self.led.scaffold()
+        self._make_stale()
+
+        r = self.led.compile("--inline")
+
+        self.assertNotIn("skill changed", r.out)
+        self.assertIn_("skill changed", r.err)

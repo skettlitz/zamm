@@ -101,7 +101,7 @@ reconstructed from at closure rather than remembered.
 
 Keep `Last updated:` current on every touched plan. Other status changes
 are picked up by the digest recompile of the next ledger write; creating or
-archiving a plan directory recompiles on its own or needs `memory digest`.
+archiving a plan directory recompiles on its own or needs `startup`.
 
 ## Archive
 

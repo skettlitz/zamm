@@ -65,7 +65,7 @@ class TestRecords(ZammTest):
     def test_whatis_writes_nothing(self):
         self.chain()
         self.led.zamm("whatis", "tier-motion")
-        self.assertFalse(self.led.exists("zamm-memory/.compiled/memory.md"))
+        self.assertFalse(self.led.exists("zamm-memory/.compiled/zamm-digest.md"))
         self.assertFalse(self.led.exists("zamm-memory/.compiled/state.tsv"))
 
     def test_retired_names_the_tombstone_and_its_reason(self):
@@ -324,7 +324,7 @@ class TestPlansAndOtherFiles(ZammTest):
         self.led.add("keep", "Something.")
         self.led.compile()
         self.led.write("docs/guide.md", "# guide\n")
-        r = self.led.zamm("whatis", "zamm-memory/.compiled/memory.md",
+        r = self.led.zamm("whatis", "zamm-memory/.compiled/zamm-digest.md",
                           "zamm-memory/VERSION", "docs/guide.md")
         self.assertEqual(r.code, 0, r)
         self.assertIn_("generated lens", r.out)

@@ -5,11 +5,13 @@ changes the ledger.
 
 ## The digest
 
-`bash <zamm-skill>/scripts/zamm-run.sh memory digest` recompiles the digest
+`bash <zamm-skill>/scripts/zamm-run.sh startup` recompiles the digest
 and hands back its path. **Reading that file, whole, is the session read.**
-The command's own output is a handoff — a few lines naming the file, what it
-will cost, and whether the ledger is degraded. It is not the digest, it says
-so, and an agent that stops there has read nothing.
+The command's own output is a handoff: two lines — what the project holds and
+where the digest is — plus one `!` block per thing that needs doing this
+session, each naming its own remedy. It is not the digest, and an agent that
+stops there has read nothing. How to read the file is not repeated there; it
+is in the router the same agent read from `AGENTS.md` moments earlier.
 
 Open the file with a file-reading tool. Do NOT `cat`, `head` or `tail` it:
 command output is capped by the harness (Claude Code cuts a Bash result at
@@ -57,7 +59,7 @@ Its anatomy, top to bottom:
 - `Budget:` — the digest's size against its soft character ceiling, and how
   many blocks kept their elaboration. `OVER BUDGET` means the surface is
   large enough that a tool capping command output will silently cut it:
-  read `.compiled/memory.md` directly, and say so — the ledger needs
+  read `.compiled/zamm-digest.md` directly, and say so — the ledger needs
   pruning, and only a human can decide what goes.
 - Trailing counts: live records below the entry caps (unlisted) and dormant
   ones (decayed below the floor). Both stay in the ledger, greppable.
@@ -113,7 +115,7 @@ rank by resemblance, so a superseded record, a retired chain or an
 archived plan scores like the one in force. The rules ZAMM owns, whatever
 the tool:
 
-- Session start is still `memory digest`; a search is never a digest, and
+- Session start is still `startup`; a search is never a digest, and
   `.compiled/` is never read through a search tool.
 - After a hit under `zamm-memory/`, `whatis` the path before citing or
   acting on it, and cite what it names as live. Unlisted and dormant

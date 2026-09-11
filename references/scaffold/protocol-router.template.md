@@ -6,9 +6,9 @@ The `zamm` skill directory is `<zamm-skill>`; every `<zamm-skill>` token below s
 
 **Session start (MUST):** once per session, run
 
-    bash <zamm-skill>/scripts/zamm-run.sh memory digest
+    bash <zamm-skill>/scripts/zamm-run.sh startup
 
-and read what it prints: that output is the whole read. Rerun only after records are written or merged. A leading `!` marks a guardrail — do not violate it. Records are advisory: verify before a high-impact action. A `Needs reconciliation` section must be resolved this session (full protocol).
+It prints two lines: what the project holds, and the path of the digest. **Open that file with your file tool and read it whole — that file is the session read, and the command output is not it.** Never `cat`/`head`/`tail` it: command output is capped and the digest would be cut silently, leaving you certain you read memory when you read a header. Lines starting `!` below the two are things to act on this session, each naming its own remedy. Rerun only after records are written or merged. In the digest itself, a leading `!` marks a guardrail — do not violate it. Records are advisory: verify before a high-impact action. A `Needs reconciliation` section must be resolved this session (full protocol).
 
 **Memory (ZAMM owns it):** when something is worth remembering — a correction, a standing rule, a hard-won result — write a record:
 

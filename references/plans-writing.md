@@ -20,7 +20,7 @@ by best match and ask only when ambiguity remains.
 - The agent picking the work up next session reads `plan show`. Scope
   (`In` / `Out`) says what is and is not this plan. `## Done-when` is the
   checklist it works from: write outcomes that can be checked, not
-  activities — `- [ ] memory digest under 200ms on the 500-record fixture`,
+  activities — `- [ ] startup under 200ms on the 500-record fixture`,
   not `- [ ] optimize`. `## Approach` is the sketch it follows.
 - The human approving Review → Done reads Done-when (all checked),
   `## Learnings`, and the approval evidence.
@@ -37,7 +37,7 @@ by best match and ask only when ambiguity remains.
 `zamm-memory/active/plans/<YYYY-MM-DD-slug>/<same>.plan.md` from
 `references/templates/plan.template.md` and says what to fill next;
 `backlog promote <id>` does the same from an idea, with `Origin-idea:`
-provenance. Then recompile the digest (`memory digest`) so the Plans tail
+provenance. Then recompile the digest (`startup`) so the Plans tail
 lists it.
 
 Layout: one directory is one plan context; the main file carries the

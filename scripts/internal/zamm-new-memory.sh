@@ -821,7 +821,7 @@ if [ "$VALIDATE" -eq 1 ]; then
     echo "      pre-existing problems; run 'zamm-run.sh memory check' to see them." >&2
   elif [ "$crc" -ne 0 ]; then
     echo "note: the record was written, but the digest could not be rebuilt (rc=$crc);" >&2
-    echo "      run 'zamm-run.sh memory digest' to refresh it." >&2
+    echo "      run 'zamm-run.sh startup' to refresh it." >&2
   fi
   if [ "$crc" -eq 0 ] || [ "$crc" -eq 2 ]; then
     # Did this write leave a fork unresolved? Superseding ONE of two live heads
@@ -832,7 +832,7 @@ if [ "$VALIDATE" -eq 1 ]; then
     if [ "$_ca" -gt "$_cb" ]; then
       echo "note: this write left $_ca reconciliation group(s) open - two live heads of" >&2
       echo "      the same chain. Read the '## Needs reconciliation' section of" >&2
-      echo "      zamm-memory/.compiled/memory.md and resolve it this session." >&2
+      echo "      zamm-memory/.compiled/zamm-digest.md and resolve it this session." >&2
     fi
     # Did it land somewhere anyone will see? A record below the entry caps stays
     # greppable and can rank back in later, but no session is handed it, and a

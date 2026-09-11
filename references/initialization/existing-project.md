@@ -8,7 +8,7 @@ Initialization is a broad evidence-gathering pass that seeds the knowledge ledge
 
 The compiled digest is the initialization signal:
 
-- If `zamm-memory/.compiled/memory.md` reports zero live memory records, active memory is not initialized.
+- If `zamm-memory/.compiled/zamm-digest.md` reports zero live memory records, active memory is not initialized.
 - Ask the human whether to run this initialization guide.
 - Do not create placeholder records to silence the prompt.
 - If the human declines, continue with the requested work and leave the ledger empty.
@@ -91,7 +91,7 @@ Rating rubric (these two fields are the whole ranking system):
 
 A completed initialization should normally create at least one guardrail record. Initialization seed records are exempt from the plan-closure votes flow because there is no plan context; capture the seed rationale in the initialization record instead.
 
-After seeding, run `bash <zamm-skill>/scripts/zamm-run.sh memory digest` and confirm the digest reflects the seeds.
+After seeding, run `bash <zamm-skill>/scripts/zamm-run.sh startup` and confirm the digest reflects the seeds.
 
 ## Initialization Record
 

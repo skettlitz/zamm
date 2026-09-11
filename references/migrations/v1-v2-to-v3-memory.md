@@ -9,7 +9,7 @@ points; v1 projects migrate directly to v3 without passing through v2.
 Memory v3 replaces the four tier card files with an append-only ledger of
 immutable record files under `zamm-memory/knowledge/<YYYY>/`. Tier thresholds,
 `Next ID` counters, in-place vote counters, and consolidation rituals are
-removed. A gitignored digest (`zamm-memory/.compiled/memory.md`) is compiled
+removed. A gitignored digest (`zamm-memory/.compiled/zamm-digest.md`) is compiled
 from the ledger by `zamm-compile.sh`.
 
 **Transfer live cards only.** Migrate every card still present in the active
@@ -164,7 +164,7 @@ archive tree) as a migration source.
    overwrites it.)
 6. Run `bash <zamm-skill>/scripts/zamm-run.sh memory check` and fix any
    reported naming/schema violations.
-7. Run `bash <zamm-skill>/scripts/zamm-run.sh memory digest` and verify:
+7. Run `bash <zamm-skill>/scripts/zamm-run.sh startup` and verify:
    - the digest's live-record count equals the total live card count from
      step 2,
    - former Boulder/Bedrock cards appear as `!` guardrails in ## Digest,

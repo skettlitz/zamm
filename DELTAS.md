@@ -1853,3 +1853,67 @@ note that fires on 100% of instrument writes teaches the reader to skip it
 where it is true. This is the same mistake as the per-tree sidecar fix above,
 one axis over: that one asked the wrong file, this one asked about the wrong
 kind of record.
+
+Locked 2026-09-11 — session start gets its own verb, and the digest gets a
+name of its own: `memory digest` becomes `zamm-run.sh startup`, and
+`.compiled/memory.md` becomes `.compiled/zamm-digest.md`. The report it
+prints shrinks from fourteen lines to two.
+
+**The verb was filed under the wrong noun, and the noun was already taken.**
+Session start reads all four trees and reports on all four, so scoping it
+under `memory` mis-described it from the day the backlog arrived — `SKILL.md`
+had to write "one `memory digest` run" to mean "session start". Worse,
+`digest` already meant something else in the same CLI: `journal digest
+<period>` compiles a view and PRINTS it, while `memory digest` compiles a
+digest and deliberately refuses to. One word, two opposite contracts, on
+adjacent commands. `startup` names the occasion instead of the artifact,
+which is what the router instruction is actually about ("once per session,
+run this"). `memory digest` stays routed — every project scaffolded before
+the rename carries it in its `AGENTS.md` and will not learn otherwise until
+someone re-scaffolds — and prints one line naming its replacement. It is
+kept out of top-level help: starting new users on a name being retired is how
+a rename never finishes.
+
+**Three files called memory.md, and the one that matters is the least
+familiar.** An agent at session start typically already holds its harness's
+own memory index (`MEMORY.md`) in context, and the skill ships
+`references/memory.md`; the digest was the third. A path is the one thing the
+handoff has to get across, so it should be unmistakable at a glance:
+`zamm-digest.md` is greppable in a transcript and cannot be confused with
+either. It also reads correctly beside `.compiled/backlog.md` and
+`.compiled/journal.md` — those are per-tree lenses, and the one WITHOUT a
+tree in its name is the cross-tree digest. The file is generated and
+gitignored, so nothing had to migrate; a leftover `memory.md` is swept on the
+publish that supersedes it, because a frozen digest that still reads like a
+live one is worse than no digest at all.
+
+**The handoff was re-teaching a reader who already knew.** Of its fourteen
+lines, four explained how to use a file tool and why `cat` truncates — the
+same paragraph the rendered router in `AGENTS.md` had put in front of the
+same agent minutes earlier. Repeating the protocol every session buys nothing
+and costs output; the router now carries the file-read rule in full (it had
+been left saying "read what it prints", stale since the session read became a
+file read), and the report carries none of it. The size went too: the read is
+not optional, so quoting a price only invites an agent to negotiate with it.
+What is left is two lines — one segment per tree, then the path — and, below
+them, one block per thing that needs doing this session, worst first, each
+naming the command that fixes it. A clean project prints two lines; a project
+in trouble prints as much as the trouble is worth. Previously the two were
+indistinguishable at a glance.
+
+**One stream.** The stale-surfaces notice moves from stderr to stdout with
+the other exceptions. Splitting streams was right while stdout WAS the
+digest and had to stay pipeable; now stdout is a two-line report, and the one
+warning that says "the instructions you are operating under are out of date"
+must not be the one an agent's harness files away separately, or drops.
+`--inline` still hands stdout to the digest, so there the notice stays on
+stderr.
+
+**`Blocked` was counted by nothing.** Extracting the plan tally so `startup`
+and `status` could share one definition surfaced a bug in the older one: it
+iterated five statuses and `Blocked`, added later, was not among them. A
+blocked plan contributed zero to the total, so a project whose only plan was
+stuck waiting on a human reported `Plans     none active` — the one state
+that must never look idle. Both surfaces now count it, and `startup` puts it
+on line one, where a blocked plan belongs: it is the first thing to act on or
+route.

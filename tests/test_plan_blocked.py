@@ -609,3 +609,29 @@ class TestBlockedToAbandoned(ZammTest):
         r = led.plan_check()
         self.assertCode(r, EXIT_CONTRACT)
         self.assertIn_("Abandoned", r.err)
+
+
+class TestBlockedIsCountedLikeEveryOtherStatus(ZammTest):
+    """Blocked arrived after the status tally was written, and the tally
+    listed the five statuses it knew. A blocked plan therefore counted as
+    nothing: `status` reported "none active" over a project whose only plan
+    was stuck waiting on a human — the one state that must never look idle.
+    """
+
+    def test_status_counts_a_blocked_plan(self):
+        self.led.add_plan("2026-01-05-stuck", status="Blocked")
+
+        r = self.led.status()
+
+        self.assertCode(r, EXIT_OK)
+        self.assertIn_("1 blocked", r.out)
+        self.assertNotIn("none active", r.out)
+
+    def test_status_counts_blocked_alongside_the_others(self):
+        self.led.add_plan("2026-01-05-stuck", status="Blocked")
+        self.led.add_plan("2026-01-06-going", status="Implementing")
+
+        out = self.led.status().out
+
+        self.assertIn_("1 implementing", out)
+        self.assertIn_("1 blocked", out)

@@ -1,11 +1,11 @@
-# SKILL-BLOCK:zamm:BEGIN version=sha:a8ece54db54f date=2026-09-05
+# SKILL-BLOCK:zamm:BEGIN version=sha:7fd1fb54941a date=2026-09-11
 # ZAMM deliberately lists NOTHING here.
 #
 # The Cursor Agent Sandbox maps every .cursorignore-matched path to EPERM,
 # and the ZAMM toolchain enumerates its trees with checked find(1) calls that
 # fail closed on an unreadable path (references/invariants.md, G3: absent is
 # data, unreadable is an error). Any zamm-memory rule in this file therefore
-# breaks a ZAMM command inside the sandbox: archive/** broke `memory digest`,
+# breaks a ZAMM command inside the sandbox: archive/** broke `startup`,
 # and the plan workdir rules broke `status` and `plan archive`, whose
 # self-containment scan must walk workdir/ to enforce G5.
 #

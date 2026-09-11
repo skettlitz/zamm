@@ -137,7 +137,7 @@ file_headline() {
 # sidecar is missing or from another compile than the lens (unknown).
 listed() {
   case "$1" in
-    knowledge) _ls_d="$MEM/.compiled/memory.md";  _ls_s="$MEM/.compiled/state.tsv" ;;
+    knowledge) _ls_d="$MEM/.compiled/zamm-digest.md";  _ls_s="$MEM/.compiled/state.tsv" ;;
     backlog)   _ls_d="$MEM/.compiled/backlog.md"; _ls_s="$MEM/.compiled/backlog-state.tsv" ;;
     *)         _ls_d="$MEM/.compiled/journal.md"; _ls_s="$MEM/.compiled/journal-state.tsv" ;;
   esac
@@ -256,7 +256,7 @@ describe_record() {
       else
         if listed "$_dr_t" "$_dr_id"; then _dr_l="listed in $(lens_name "$_dr_t")"
         elif [ $? -eq 1 ]; then _dr_l="unlisted (below the budget of $(lens_name "$_dr_t")) - still true"
-        else _dr_l="listing unknown (recompile: memory digest)"; fi
+        else _dr_l="listing unknown (recompile: zamm-run.sh startup)"; fi
         echo "  standing:  live - counts now; $_dr_l"
       fi ;;
     dormant)
@@ -534,7 +534,7 @@ by_path() {
   case "$_bp_rel" in
     zamm-memory/.compiled/*)
       echo "$_bp_rel"
-      echo "  what:      generated lens (rebuilt by every compile) - never a source; cite the records it names, and read it only through memory digest / backlog list / journal digest" ;;
+      echo "  what:      generated lens (rebuilt by every compile) - never a source; cite the records it names, and read it only through startup / backlog list / journal digest" ;;
     zamm-memory/knowledge/*.md.draft|zamm-memory/backlog/*.md.draft|zamm-memory/journal/*.md.draft)
       echo "$_bp_rel"
       echo "  what:      unpublished hand-written draft - not a record yet; memory publish lands it, memory discard drops it" ;;

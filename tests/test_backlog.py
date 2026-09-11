@@ -12,7 +12,6 @@ digest coupling, and the promote flow's rerun convergence (guarantee 2).
 import os
 import re
 import shutil
-import time
 
 from harness import (
     EXIT_DEGRADED,
@@ -863,8 +862,8 @@ class TestBacklogStatusAndCheck(ZammTest):
         self.assertIn_("Backlog", r.out)
         self.assertNotIn_("STALE: 1 file(s) newer than the lens", r.out)
 
-        time.sleep(1.1)  # mtime granularity: make "newer" unambiguous
-        self.led.add_idea("late-idea", "A later thought.", date="2026-07-19")
+        late = self.led.add_idea("late-idea", "A later thought.", date="2026-07-19")
+        self.led.written_after_compile(f"zamm-memory/backlog/2026/{late}.md")
         r = self.led.status()
         self.assertIn_("newer than the lens", r.out)
 
@@ -882,7 +881,7 @@ class TestBacklogStatusAndCheck(ZammTest):
 
         self.assertCode(r, EXIT_OK, "status must complete, not die mid-output")
         self.assertIn_("incoherent", r.out)
-        self.assertIn_("memory digest", r.out, "the remedy must be named")
+        self.assertIn_("zamm-run.sh startup", r.out, "the remedy must be named")
         self.assertIn_("Plans", r.out, "the sections after the backlog "
                                        "block must still render")
 

@@ -1,5 +1,5 @@
 #!/bin/sh
-# ZAMM compile — builds the gitignored memory digest from the append-only
+# ZAMM compile — builds the gitignored ZAMM digest from the append-only
 # knowledge ledger. Deterministic, read-only over the ledger, safe to rerun.
 # POSIX sh + POSIX awk only: runs on stock macOS, Linux, and git-bash.
 #
@@ -184,8 +184,14 @@ if [ "$TREE" = "backlog" ]; then
 elif [ "$TREE" = "journal" ]; then
   OUT_FILE="$OUT_DIR/journal.md"
 else
-  OUT_FILE="$OUT_DIR/memory.md"
+  # zamm-digest.md, not memory.md: this is the CROSS-TREE digest (knowledge,
+  # plans, and the backlog/journal tails), and an agent opening it already
+  # carries one or two other memory.md files in context — its harness memory
+  # index and the skill's own references/memory.md. A path it cannot confuse
+  # with either is worth more than a name that matches the tree it grew from.
+  OUT_FILE="$OUT_DIR/zamm-digest.md"
 fi
+OUT_BASE=$(basename "$OUT_FILE")
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 # ZAMM_PLAN_MANIFEST overrides the plan-manifest path (test-only DI seam,
 # like ZAMM_TODAY).
@@ -272,9 +278,9 @@ fi
 if [ "$READ_ONLY" -eq 1 ]; then
   TMP_FILE=$(mktemp "${TMPDIR:-/tmp}/zamm-compile.XXXXXX")
 elif command -v mktemp >/dev/null 2>&1; then
-  TMP_FILE=$(mktemp "$OUT_DIR/memory.md.XXXXXX")
+  TMP_FILE=$(mktemp "$OUT_DIR/$OUT_BASE.XXXXXX")
 else
-  TMP_FILE="$OUT_DIR/memory.md.tmp.$$"
+  TMP_FILE="$OUT_DIR/$OUT_BASE.tmp.$$"
   : > "$TMP_FILE"
 fi
 PLANS_TMP="$TMP_FILE.plans"
@@ -284,7 +290,7 @@ MF_FILES="$TMP_FILE.mf"
 MF_LINKS="$TMP_FILE.ml"
 MF_ARCH="$TMP_FILE.ma"
 MANIFEST="$TMP_FILE.manifest"
-# Machine-readable compilation state, published beside memory.md. status and
+# Machine-readable compilation state, published beside the digest. status and
 # `memory list` read THIS rather than reverse-parsing the rendered Markdown —
 # grepping the digest counted a contested guardrail twice (once in the Digest,
 # once under reconciliation) and mistook a record id embedded in a plan title
@@ -330,7 +336,7 @@ trap 'set +e; rm -f "$TMP_FILE" "$PLANS_TMP" "$PLANS_TAIL" "$EXTRA_TAIL" "$MF_FI
 # the other, never a torn one. Two concurrent compiles both publish a truthful
 # reading of some real ledger state and the last one wins, which may leave the
 # digest one record behind until the next compile. That is ordinary staleness
-# under eventual consistency, not damage: `memory digest` fixes it.
+# under eventual consistency, not damage: `zamm-run.sh startup` fixes it.
 
 # Enumerate the ledger into a manifest, checking every step. A find that cannot
 # descend a directory (permissions, a vanished path, an I/O fault) exits
@@ -1283,7 +1289,7 @@ function first_body_line(id,   m, bl, t, ln) {
   return ""
 }
 
-# Machine-readable compilation state, written beside memory.md. Downstream
+# Machine-readable compilation state, written beside the digest. Downstream
 # commands (status, memory list) read THIS instead of grepping the rendered
 # digest. select rows are the record ids the digest actually surfaced (Digest
 # blocks + Headlines), i.e. what memory list should show by default. Guardrail
@@ -3394,7 +3400,7 @@ END {
   say("has elaboration the space budget could not render; open the record.")
   say("Headlines section: up to " HEADLINE_MAX " one-line reminders that knowledge exists;")
   say("open the record (+bg) when the topic matches. Id doubles as creation date.")
-  say("Session read: `memory digest` recompiles this file and hands back its path.")
+  say("Session read: `zamm-run.sh startup` recompiles this file and hands back its path.")
   say("Reading this file once, whole, IS the session read - there is nothing else")
   say("to run and no second surface to consult.")
   say("")
@@ -3754,6 +3760,14 @@ else
     mv "$STATE_TMP" "$STATE_FILE"
   fi
   mv "$TMP_FILE" "$OUT_FILE"
+  # The digest used to publish as .compiled/memory.md. It is a generated,
+  # gitignored artifact, so the rename needs no migration — but a leftover
+  # memory.md from a pre-rename compile is a FROZEN digest that still reads
+  # like a live one, and any agent (or grep) that finds it first reads memory
+  # that stopped updating. Sweep it on the publish that supersedes it.
+  if [ "$TREE" != "backlog" ] && [ "$TREE" != "journal" ]; then
+    rm -f "$OUT_DIR/memory.md"
+  fi
   # A degraded backlog pass degrades the DIGEST run too: exit 2 must always
   # pair with a visible degradation notice in the published output, and the
   # published digest carries the "Backlog: DEGRADED" line.

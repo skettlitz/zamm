@@ -32,7 +32,7 @@ from harness import (
 
 class TestCompilerIntegrity(ZammTest):
     def test_concurrent_compiles_leave_a_complete_digest(self):
-        """PRE-FIX: 12 parallel compiles shared one memory.md.tmp path.
+        """PRE-FIX: 12 parallel compiles shared one digest .tmp path.
         5 failed with `mv: ... No such file or directory` and the surviving
         digest was 56 bytes: a '## Plans' section, zero records.
         """
@@ -50,10 +50,10 @@ class TestCompilerIntegrity(ZammTest):
         self.assertIn_("files=40 parsed=40 live=40 quarantined=0", self.header())
         self.assertEqual(len(self.led.entries()), 40)
 
-        # no shared temp file may survive a run; memory.md and the state.tsv
+        # no shared temp file may survive a run; the digest and the state.tsv
         # sidecar are the two published artifacts, everything else is a stray.
         compiled = self.led.root / "zamm-memory/.compiled"
-        published = {"memory.md", "state.tsv"}
+        published = {"zamm-digest.md", "state.tsv"}
         strays = [p.name for p in compiled.iterdir() if p.name not in published]
         self.assertEqual(strays, [], "temp files left behind")
 
@@ -448,7 +448,7 @@ class TestScaffoldSafety(ZammTest):
         release wrote .cursorignore as a whole marker-less file) still had a
         bare `zamm-memory/archive/**` line ABOVE it. Re-running scaffold —
         the remedy the drift notice prescribes — reported success and left
-        `memory digest` failing closed in the Cursor sandbox exactly as
+        session start failing closed in the Cursor sandbox exactly as
         before.
 
         Those exact lines are ZAMM's own past output, so scaffold reclaims

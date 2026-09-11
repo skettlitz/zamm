@@ -4,7 +4,7 @@
 # and the ZAMM toolchain enumerates its trees with checked find(1) calls that
 # fail closed on an unreadable path (references/invariants.md, G3: absent is
 # data, unreadable is an error). Any zamm-memory rule in this file therefore
-# breaks a ZAMM command inside the sandbox: archive/** broke `memory digest`,
+# breaks a ZAMM command inside the sandbox: archive/** broke `startup`,
 # and the plan workdir rules broke `status` and `plan archive`, whose
 # self-containment scan must walk workdir/ to enforce G5.
 #
