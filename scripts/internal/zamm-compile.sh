@@ -238,6 +238,24 @@ if [ "$LIST_INERT" -eq 1 ] || [ "$LIST_LIVE" -eq 1 ] || [ "$LIST_VOTES" -eq 1 ] 
 fi
 [ "$READ_ONLY" -eq 1 ] || mkdir -p "$OUT_DIR"
 
+# The defect report describes the ledger as of the compile that wrote it, and
+# `zamm-run.sh startup` is the only thing that can write it (skill drift and
+# the plan tally are not compiler facts). Every other compile — a record write,
+# a plan status change, an archive — therefore obsoletes it, and a stale report
+# saying "none" over a ledger that has since gone contested is worse than no
+# report at all: it is the one file whose whole job is to be believed. Removing
+# it makes the staleness unmistakable, and the next startup writes it back;
+# writers announce their own damage as they go.
+#
+# BEFORE the compile, not after it, and before any fail-closed exit: a run that
+# aborts on an unreadable ledger (4) or refuses to publish a ledger with nothing
+# live left (3) is exactly when a report claiming "none" would be most wrong,
+# and it never reaches the publish block. --check and the read-only seams change
+# nothing and invalidate nothing.
+if [ "$READ_ONLY" -eq 0 ] && [ "$CHECK" -eq 0 ] && [ "$TREE" = "knowledge" ]; then
+  rm -f "$OUT_DIR/zamm-defects.md"
+fi
+
 # Candidate overlay: the draft is validated under its FINAL id by staging a
 # private copy named <id>.md and enumerating that copy with the manifest. The
 # live namespace never contains the candidate, so no concurrent reader can
@@ -849,7 +867,7 @@ BEGIN {
     # erasure lives in records, skipping one can silently un-redact, so the
     # ledger is treated as unreadable rather than smaller — the same rule as
     # an unreadable record file or archived header.
-    err(relpath(sp) ": symlinked record files are not allowed in the ledger (no symlinks); the ledger is unreadable, not empty")
+    ferr(relpath(sp) ": symlinked record files are not allowed in the ledger (no symlinks); the ledger is unreadable, not empty")
     fatalrc = 4
     exit 4
   }
@@ -883,7 +901,7 @@ BEGIN {
 function read_archived_header(path, aid,   line, state, firstline, pos, key, val) {
   if ((getline line < path) < 0) {
     close(path)
-    err(relpath(path) ": cannot read archived record header (permission denied or I/O error); the ledger is unreadable, not empty")
+    ferr(relpath(path) ": cannot read archived record header (permission denied or I/O error); the ledger is unreadable, not empty")
     fatalrc = 4
     exit 4
   }
@@ -976,7 +994,7 @@ function read_record(path, base,   id, line, state, firstline, fmclosed, pos, ke
   # then reopen for the real read.)
   if ((getline line < path) < 0) {
     close(path)
-    err(relpath(path) ": cannot read record file (permission denied or I/O error); the ledger is unreadable, not empty")
+    ferr(relpath(path) ": cannot read record file (permission denied or I/O error); the ledger is unreadable, not empty")
     fatalrc = 4
     exit 4
   }
@@ -1842,7 +1860,32 @@ function validdate(d,   y, mo, dy, dim) {
 # key is usually a typo, but guessing wrong must not cost the whole record
 function warn(msg) { print "zamm-compile: WARNING: " msg | "cat 1>&2"; nwarn++ }
 
-function err(msg) { print "zamm-compile: ERROR: " msg | "cat 1>&2"; nerr++ }
+# Every error below is also RENDERED — on the path that renders. A
+# record-scoped failure becomes a line under ## Degraded, and so do dangling
+# supersedes targets, bad vote references, void coverage claims, duplicate ids
+# and revived archived records. On the digest path the stderr copy was
+# therefore a second, unstructured printing of the same facts — six lines for
+# one malformed file — arriving ahead of a two-line session-start report that
+# exists to be read. There it is counted and rendered, and announced by
+# `zamm-run.sh startup` as a count with a path.
+#
+# Every OTHER mode exits before emit_degraded runs, so stderr is the only
+# channel it has and silence there would make a quarantined record invisible:
+# --check, whose error list is the entire product of the command (a validator
+# that only says "3 problems" is not one), and the read-only seams --list-live,
+# --list-inert, --list-votes, --list-graph, --list-state and --export, which
+# all answer SHORT when a record is quarantined and must say why.
+function err(msg) {
+  if (check == 1 || listlive == 1 || listinert == 1 || listvotes == 1 ||
+      listgraph == 1 || liststate == 1 || export == 1)
+    print "zamm-compile: ERROR: " msg | "cat 1>&2"
+  nerr++
+}
+
+# The exception: an error that ABORTS. Nothing is rendered on the way out (the
+# previous digest is deliberately left in place), so stderr is the only surface
+# a fatal has, whichever path it fired on.
+function ferr(msg) { print "zamm-compile: ERROR: " msg | "cat 1>&2"; nerr++ }
 
 # Record-scoped error: quarantines the record. A record that fails the
 # contract is dropped from liveness, supersession, votes and ranking — but it
@@ -3142,7 +3185,7 @@ END {
   # all while export happily returned the survivors.
   nlivecls = nlive + ((lens == "journal") ? nelev + nwm : 0)
   if (nlivecls == 0 && nquar > 0) {
-    err("0 live records but " nquar " quarantined: refusing to publish (ledger is unreadable, not empty)")
+    ferr("0 live records but " nquar " quarantined: refusing to publish (ledger is unreadable, not empty)")
     close("cat 1>&2")
     exit 3
   }
@@ -3624,11 +3667,18 @@ END {
     # Soft in the GUARDRAIL_MAX sense: warn, never shed. A digest that drops
     # records to hit a number is lying about the ledger; one that overruns and
     # says so is merely large, and the operator can act on it.
+    #
+    # It says so HERE, in the surface being measured, and nowhere else. This
+    # used to also go to stderr, so every caller that left stderr attached —
+    # session start, every record publish — reprinted it. But an overrun is a
+    # standing property of a mature ledger, not an event: once true it is true
+    # on every run until a human retires something, and a warning that fires
+    # on every run is one the reader learns to skip. The readings that remain
+    # are this footer and the Ledger section of `zamm-run.sh status`.
     say("OVER BUDGET by " total - SOFTMAX " chars: every listed entry is already at its")
     say("headline floor, so the compiler has no room left to give back. Nothing is")
     say("truncated — the cost is context: every agent pays this at every session start.")
     say("Retire or supersede what has gone stale, or raise --softmax deliberately.")
-    printf "zamm-compile: WARNING: digest is %d chars (~%dk tokens), over the %d-char soft budget, with every entry already collapsed to its headline. Nothing was dropped; the cost is context spent by every session. Retire stale records or raise --softmax.\n", total, int(total / 4000 + 0.5), SOFTMAX | "cat 1>&2"
   }
 
   # Live but below the Digests+Headlines entry caps: counted, not listed

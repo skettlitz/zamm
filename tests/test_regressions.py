@@ -50,10 +50,11 @@ class TestCompilerIntegrity(ZammTest):
         self.assertIn_("files=40 parsed=40 live=40 quarantined=0", self.header())
         self.assertEqual(len(self.led.entries()), 40)
 
-        # no shared temp file may survive a run; the digest and the state.tsv
-        # sidecar are the two published artifacts, everything else is a stray.
+        # no shared temp file may survive a run; the digest, the state.tsv
+        # sidecar and the defect report are the published artifacts, everything
+        # else is a stray.
         compiled = self.led.root / "zamm-memory/.compiled"
-        published = {"zamm-digest.md", "state.tsv"}
+        published = {"zamm-digest.md", "state.tsv", "zamm-defects.md"}
         strays = [p.name for p in compiled.iterdir() if p.name not in published]
         self.assertEqual(strays, [], "temp files left behind")
 

@@ -8,9 +8,10 @@ changes the ledger.
 `bash <zamm-skill>/scripts/zamm-run.sh startup` recompiles the digest
 and hands back its path. **Reading that file, whole, is the session read.**
 The command's own output is a handoff: two lines — what the project holds and
-where the digest is — plus one `!` block per thing that needs doing this
-session, each naming its own remedy. It is not the digest, and an agent that
-stops there has read nothing. How to read the file is not repeated there; it
+where the digest is — plus two more when something is wrong with the project,
+naming the defect types and the report that explains them
+(`.compiled/zamm-defects.md`). It is not the digest, and an agent that stops
+there has read nothing. How to read the file is not repeated there; it
 is in the router the same agent read from `AGENTS.md` moments earlier.
 
 Open the file with a file-reading tool. Do NOT `cat`, `head` or `tail` it:
@@ -57,10 +58,12 @@ Its anatomy, top to bottom:
   flat, because that is how this layer is used — you scan it for a topic,
   not for the top of a list.
 - `Budget:` — the digest's size against its soft character ceiling, and how
-  many blocks kept their elaboration. `OVER BUDGET` means the surface is
-  large enough that a tool capping command output will silently cut it:
-  read `.compiled/zamm-digest.md` directly, and say so — the ledger needs
-  pruning, and only a human can decide what goes.
+  many blocks kept their elaboration. `OVER BUDGET` means every entry is
+  already collapsed to its headline and the total still exceeds the ceiling.
+  Nothing was dropped and nothing is wrong: it is a reading on a mature
+  ledger, not an error, and not something to raise at session start. Bring it
+  up only when the human is already deciding what to retire, or when you have
+  a concrete candidate to supersede.
 - Trailing counts: live records below the entry caps (unlisted) and dormant
   ones (decayed below the floor). Both stay in the ledger, greppable.
 - `## Plans` — every active plan (status, progress, title) and the recently

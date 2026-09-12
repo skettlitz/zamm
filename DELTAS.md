@@ -1917,3 +1917,96 @@ stuck waiting on a human reported `Plans     none active` — the one state
 that must never look idle. Both surfaces now count it, and `startup` puts it
 on line one, where a blocked plan belongs: it is the first thing to act on or
 route.
+
+Locked 2026-09-12 — the attention budget stops being a session-start
+complaint: `startup` says nothing about it, the compiler no longer warns on
+stderr, and the reading moves to `status`.
+
+**An overrun is state, not an event.** Session start had one exception block
+for an over-budget digest, and the compiler printed the same thing to stderr,
+which every caller that left stderr attached — `startup` itself, every
+`memory create` — reprinted. Both were written as if the condition were news.
+It is not: a digest past its soft ceiling is where a useful ledger ends up,
+only a human can decide what gets retired, and nothing in the project changes
+between runs, so once true it is true on every run forever. That made it the
+one block that always fired, five or six lines on a report whose happy path is
+two — and a reader who learns that the `!` blocks are usually the budget is a
+reader who stops reading the `!` blocks, which is where reconciliation and a
+degraded ledger live. The cost of the notice outgrew the cost it was
+reporting.
+
+**It is still measured, in the two places a measurement belongs.** The digest
+keeps its `Budget:` footer and its `OVER BUDGET` paragraph — that is the
+surface being measured, reporting on itself, to a reader already holding it.
+And `status`, the health overview someone opens on purpose, grows a
+`budget: used/max chars` line in its Ledger section, flagged `OVER` with the
+two ways out (retire stale records, or raise `--softmax`). Printed whether or
+not the ceiling binds, for the same reason the digest footer is: pressure
+should be legible before it becomes an outage, not only after. Nothing
+suppresses anything conditionally and no flag was added to mute a message —
+the message that existed only to be muted is gone.
+
+Locked 2026-09-12 — defects get a file: `startup` announces types and counts in
+two lines and points at `.compiled/zamm-defects.md`, which explains each one.
+The compiler stops printing its error list on the digest path.
+
+**The content was right and the place was wrong.** Each defect printed as a
+block at session start: a headline plus three or four indented lines, remedy
+included. Correct, useful prose — and a project carrying two of them opened the
+session with twenty lines of it, above a report whose entire purpose is to hand
+over one path. Worse, the compiler printed its own per-violation error list to
+stderr on the same run, so one malformed record contributed six more lines
+saying what the digest already said under `## Degraded`. A defect needs room to
+say what it means, what it costs and what resolves it; session start is the one
+surface with no room. So the explanations move to a file where length is free,
+and the announcement keeps only what it takes to decide whether to open it:
+
+    defects: 1 contested group, 2 quarantined records, skill drift
+    details: zamm-memory/.compiled/zamm-defects.md
+
+**It is written on every startup, including the clean ones, and deleted by
+every compile that is not one.** A report that exists only when something is
+broken cannot be read as evidence that nothing is — absence reads as "never
+generated" — and then the silence on a healthy project is not trustworthy
+either. So every startup writes it, and it opens with either `none` or the same
+summary line the announcement carries. But only `startup` CAN write it: skill
+drift and the plan tally are not compiler facts. Every other compile — a record
+write, a plan status change, an archive — therefore obsoletes it, and a stale
+report saying "none" over a ledger that has since gone contested is worse than
+no report at all, because this is the one file whose whole job is to be
+believed. The compiler removes it at the START of any knowledge compile, before
+the fail-closed exits: a run that aborts on an unreadable ledger or refuses to
+publish one with nothing live left never reaches its publish block, and that is
+exactly when a report claiming "none" would be most wrong. That makes the
+staleness unmistakable and leaves the writers to announce their own damage
+(they already do: a `memory create` that leaves a fork open says so on the
+spot). If the file is there, it describes the ledger as it is now. It copies the digest's `##
+Needs reconciliation` and `## Degraded` sections in verbatim: the per-group and
+per-record detail is already rendered there, and a details file that sends the
+reader somewhere else is a third hop, not a detail. A degraded backlog or
+journal gets its own section from the same rule — the sub-passes publish their
+own lens and give the digest one DEGRADED line, and a report that read only the
+knowledge tree said "none" over an exit-2 compile.
+
+**Silence is for the path that renders, and for nothing else.** Every error
+the compiler raises while building the digest ends up under `## Degraded` —
+quarantines, dangling targets, duplicate ids, bad vote references, void
+coverage, revived archived records — so there the stderr copy loses nothing.
+Every other mode exits before that section is rendered: `--check`, whose error
+list is the entire product of the command, and the read-only seams
+(`--list-live` and friends, `--export`) that answer SHORT when a record is
+quarantined and must say why. They all still print. So do fatal errors on any
+path — they abort before anything is rendered, so stderr is the only surface
+they have. The one error with nowhere to go was "other holds N live records
+(max 5)": a property of the whole ledger rather than of a record, so it renders
+nowhere, and it became a defect section of its own with the
+refile-by-supersession recipe.
+
+**Two things left the report for good.** The empty-ledger block is gone — line
+one already says `ledger empty`, and what to do about it (ask before
+initializing, never write placeholder records) is in `SKILL.md` and in the
+rendered router the same agent read minutes earlier; filing a fresh project
+under damage was also simply wrong. And skill drift is now a defect type like
+any other rather than its own trailing paragraph, which is what it always was:
+the rendered protocol no longer matching the installed scripts is a defect in
+the installation.

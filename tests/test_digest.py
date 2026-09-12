@@ -528,10 +528,6 @@ class Rev6WarningSeverity(ZammTest):
         self.assertNotIn_("New errors", p.err)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestDigestIsDeliveredAsAFile(ZammTest):
     """The session read is a FILE read, not command output.
 
@@ -653,40 +649,56 @@ class TestDigestIsDeliveredAsAFile(ZammTest):
         self.assertIn_("read the file", r.err)
 
     def test_a_degraded_ledger_is_visible_without_opening_the_file(self):
-        """Degradation must reach the operator even if the read never happens."""
+        """Degradation must reach the operator even if the read never happens —
+        as a type and a count, with the explanation one file away. The compiler
+        used to also print a line per violation to stderr; six lines about one
+        malformed file, ahead of a two-line report, is how a reader learns to
+        scroll past session start."""
         self.led.add("good", "A fine record.")
         self.led.write("zamm-memory/knowledge/2026/2026-01-05-broken-99999.md", "no frontmatter\n")
 
         r = self.led.compile()
 
-        self.assertIn_("## Degraded", r.out)
-        self.assertIn_("memory check", r.out)
+        self.assertIn_("1 quarantined record", r.out)
+        self.assertIn_("zamm-defects.md", r.out)
+        self.assertNotIn_("missing frontmatter", r.output)
+        defects = self.led.read("zamm-memory/.compiled/zamm-defects.md")
+        self.assertIn_("memory check", defects)
+        self.assertIn_("missing frontmatter", defects)
 
-    def test_an_over_budget_ledger_says_so_in_the_handoff(self):
+    def test_an_over_budget_ledger_stays_out_of_the_handoff(self):
+        """Every exception in the handoff is something to finish this session.
+        The attention budget is not one — it is a property of a ledger that has
+        grown, only a human can decide what goes, and a block that fires every
+        session forever devalues the ones that do not."""
         for i in range(120):
             self.led.add(f"rec-{i}", f"Headline {i}.\n\n" + ("Elaboration. " * 40))
 
         r = self.led.compile("--softmax", "4000")
 
-        self.assertIn_("over its soft budget", r.out)
+        self.assertIn_("OVER BUDGET", self.led.digest())
+        self.assertNotIn_("budget", r.out.lower())
+        self.assertNotIn_("budget", r.err.lower())
 
-    def test_an_exception_block_names_the_command_that_fixes_it(self):
-        """An exception the reader cannot act on is noise. Every block that
-        HAS a mechanical remedy names it; the one that does not (an empty
-        ledger, where the next move is to ask a human) says that instead."""
+    def test_every_defect_section_names_the_command_that_fixes_it(self):
+        """A defect the reader cannot act on is noise. The announcement is two
+        lines, so the remedy lives where the explanation does: every section of
+        the defect report names the one command that addresses it."""
         self.led.add("good", "A fine record.")
         self.led.write("zamm-memory/knowledge/2026/2026-01-05-broken-99999.md", "no frontmatter\n")
 
-        blocks = [b for b in self.led.compile().out.split("\n\n") if b.startswith("!")]
+        self.led.compile()
+        defects = self.led.read("zamm-memory/.compiled/zamm-defects.md")
+        sections = [b for b in defects.split("\n## ")[1:]]
 
-        self.assertTrue(blocks, "the broken record must raise an exception")
-        for block in blocks:
-            self.assertIn_("zamm-run.sh", block,
-                           "an exception must name the command that fixes it")
+        self.assertTrue(sections, "the broken record must raise a defect")
+        for section in sections:
+            self.assertIn_("zamm-run.sh", section,
+                           "a defect must name the command that fixes it")
 
-    def test_the_contested_block_names_the_write_that_resolves_it(self):
-        """Reconciliation is the one exception an agent must finish this
-        session, so the block carries the verb, not just the diagnosis."""
+    def test_the_contested_section_names_the_write_that_resolves_it(self):
+        """Reconciliation is the one defect an agent must finish this session,
+        so its section carries the verb, not just the diagnosis."""
         self.led.add("root", "The original statement.", date="2026-01-02")
         for branch in ("alpha", "beta"):
             self.led.add(branch, f"Branch {branch}.", date="2026-01-06",
@@ -695,7 +707,9 @@ class TestDigestIsDeliveredAsAFile(ZammTest):
         r = self.led.compile()
 
         self.assertIn_("contested", r.out.splitlines()[0])
-        self.assertIn_("memory create --supersedes", r.out)
+        self.assertIn_("1 contested group", r.out)
+        self.assertIn_("memory create --supersedes",
+                       self.led.read("zamm-memory/.compiled/zamm-defects.md"))
 
     def test_the_old_name_still_works_and_says_what_it_is_now(self):
         """Every project scaffolded before the rename has `memory digest`
@@ -723,9 +737,192 @@ class TestDigestIsDeliveredAsAFile(ZammTest):
         self.assertIn_("1 plan", first)
         self.assertIn_("1 blocked", first)
 
-    def test_an_empty_ledger_asks_before_initializing(self):
-        """A fresh project must not be seeded with placeholder records."""
+    def test_an_empty_ledger_says_so_on_line_one_and_stops_there(self):
+        """A fresh project is not a broken one. `ledger empty` on line one is
+        the whole report: what to do about it (ask before initializing, never
+        write placeholder records) is in the rendered protocol the same agent
+        read from AGENTS.md minutes earlier, and repeating it as a defect would
+        file an uninitialized project under damage."""
         r = self.led.compile()
 
         self.assertIn_("ledger empty", r.out.splitlines()[0])
-        self.assertIn_("Ask the human before initializing", r.out)
+        self.assertEqual(2, len(r.out.strip().splitlines()))
+        self.assertIn_("none", self.led.read("zamm-memory/.compiled/zamm-defects.md"))
+
+
+class TestTheDefectReport(ZammTest):
+    """Everything wrong with the project: two lines at session start, and a
+    file that explains.
+
+    The blocks used to print in full — a headline plus three or four indented
+    lines each, remedy included. The content was right and the place was wrong:
+    a project carrying two of them buried the digest path under twenty lines of
+    prose before the agent had done any work. A defect needs room to say what it
+    means and what resolves it, and session start is the one surface with none.
+    """
+
+    DEFECTS = "zamm-memory/.compiled/zamm-defects.md"
+
+    def _broken(self):
+        self.led.write("zamm-memory/knowledge/2026/2026-01-05-broken-99999.md",
+                       "no frontmatter\n")
+
+    def test_a_clean_project_announces_nothing(self):
+        self.led.add("rule", "A statement.")
+
+        r = self.led.compile()
+
+        self.assertEqual(2, len(r.out.strip().splitlines()))
+        self.assertNotIn_("defects:", r.out)
+
+    def test_the_file_says_so_when_there_is_nothing_to_say(self):
+        """A file that exists only when something is broken cannot be read as
+        saying that nothing is: absence reads as "never generated", and then the
+        silence at session start is not trustworthy either."""
+        self.led.add("rule", "A statement.")
+
+        self.led.compile()
+
+        self.assertIn_("none", self.led.read(self.DEFECTS).splitlines()[0])
+
+    def test_the_announcement_is_two_lines_after_a_blank(self):
+        """The shape is the contract: a blank line, the types with their counts,
+        the path. Everything else about them is in the file."""
+        self.led.add("good", "A fine record.")
+        self._broken()
+
+        tail = self.led.compile().out.strip().splitlines()[2:]
+
+        self.assertEqual(3, len(tail))
+        self.assertEqual("", tail[0])
+        self.assertTrue(tail[1].startswith("defects: "), tail[1])
+        self.assertEqual("details: " + self.DEFECTS, tail[2])
+
+    def test_types_are_announced_worst_first_on_one_line(self):
+        """Several defects must not mean several blocks again."""
+        self.led.add("root", "The original statement.", date="2026-01-02")
+        for branch in ("alpha", "beta"):
+            self.led.add(branch, f"Branch {branch}.", date="2026-01-06",
+                         supersedes="2026-01-02-root-22222")
+        self._broken()
+
+        line = [ln for ln in self.led.compile().out.splitlines()
+                if ln.startswith("defects: ")][0]
+
+        self.assertEqual("defects: 1 contested group, 1 quarantined record", line)
+
+    def test_it_is_rewritten_by_every_startup(self):
+        """Derived and disposable, like the digest beside it: a defect report
+        that outlived its defect would be read as a live one."""
+        self.led.add("good", "A fine record.")
+        self._broken()
+        self.led.compile()
+        self.assertIn_("quarantined", self.led.read(self.DEFECTS))
+
+        (self.led.root
+         / "zamm-memory/knowledge/2026/2026-01-05-broken-99999.md").unlink()
+        r = self.led.compile()
+
+        self.assertNotIn_("defects:", r.out)
+        self.assertIn_("none", self.led.read(self.DEFECTS).splitlines()[0])
+
+    def test_the_read_only_seams_still_say_why_they_are_short(self):
+        """The digest path can stay quiet because it RENDERS every error under
+        `## Degraded`. `memory list` and the other seams exit before that runs,
+        so stderr is the only channel they have — silence there turns a
+        quarantined record into a shorter answer with no explanation."""
+        self.led.add("good", "A fine record.")
+        self._broken()
+        quiet = self.led.compile()
+
+        r = self.led.memory_list()
+
+        self.assertNotIn_("missing frontmatter", quiet.output,
+                          "the digest path renders it instead")
+        self.assertIn_("missing frontmatter", r.err)
+
+    def test_a_degraded_optional_tree_is_announced_too(self):
+        """The backlog and journal sub-passes publish their own lens and give
+        the digest one DEGRADED line; the compile exits 2 either way. Reading
+        only the knowledge tree here made the report say "none" over an exit-2
+        compile — not incomplete, wrong."""
+        self.led.add("rule", "A statement.")
+        self.led.add_idea("fine", "An idea.")
+        self.led.write("zamm-memory/backlog/2026/2026-01-05-broke-abcde.md",
+                       "---\ntype: memory\nscope: tooling\ncreated: 2026-01-05\n"
+                       "schema: 9\n---\n\nBroken.\n")
+
+        r = self.led.compile()
+
+        self.assertCode(r, EXIT_DEGRADED)
+        self.assertIn_("backlog degraded", r.out)
+        defects = self.led.read(self.DEFECTS)
+        self.assertNotIn_("none", defects.splitlines()[0])
+        self.assertIn_("backlog check", defects)
+
+    def test_a_write_after_startup_takes_the_report_with_it(self):
+        """Only `startup` can write this file — drift and the plan tally are
+        not compiler facts — but every compile can obsolete it. A stale report
+        saying "none" over a ledger that has since gone contested is worse than
+        no report: it is the one file whose whole job is to be believed."""
+        self.led.add("root", "The original statement.", date="2026-01-02")
+        self.led.compile()
+        self.assertIn_("none", self.led.read(self.DEFECTS).splitlines()[0])
+
+        for branch in ("alpha", "beta"):
+            self.led.add(branch, f"Branch {branch}.", date="2026-01-06",
+                         supersedes="2026-01-02-root-22222")
+        self.led.new_memory("--scope", "internals", "touch", validate=True,
+                            body="A write that recompiles the digest.")
+
+        self.assertIn_("## Needs reconciliation", self.led.digest(),
+                       "the write must have rebuilt the digest")
+        self.assertFalse(self.led.exists(self.DEFECTS),
+                         "a compile outside startup must not leave a stale report")
+        self.assertIn_("1 contested group", self.led.compile().out)
+
+    def test_a_copied_section_stops_at_the_tail_that_follows_it(self):
+        """The digest puts its `Key: <count>` tail lines between sections, so a
+        copy that stopped only at the next `## ` heading pulled the catch-all
+        `Other:` block into `## Degraded`, where it read as degradation and had
+        no section to explain it."""
+        self.led.add("good", "A fine record.")
+        self.led.add("loose", "A statement with no home.", scope="other")
+        self._broken()
+
+        self.led.compile()
+
+        self.assertIn_("Other:", self.led.digest(), "the fixture must emit the tail")
+        self.assertNotIn_("catch-all area", self.led.read(self.DEFECTS))
+
+    def test_a_compile_that_refuses_to_publish_takes_the_report_too(self):
+        """Exit 3 and exit 4 never reach the publish block, and they are exactly
+        when a report claiming "none" would be most wrong — the ledger is
+        unreadable or nothing live survived."""
+        self.led.add("good", "A fine record.")
+        self.led.compile()
+        self.assertIn_("none", self.led.read(self.DEFECTS).splitlines()[0])
+
+        (self.led.root
+         / "zamm-memory/knowledge/2026/2026-01-05-good-22222.md").unlink()
+        self._broken()
+        r = self.led.compile()
+
+        self.assertNotEqual(0, r.code, "0 live with a quarantined record must refuse")
+        self.assertFalse(self.led.exists(self.DEFECTS),
+                         "a refused compile must not leave a report claiming none")
+
+    def test_the_catch_all_area_over_its_cap_is_a_defect(self):
+        """The one validation failure the digest renders no line for — it is a
+        property of the whole ledger, not of a record — so without a section
+        here it reached nobody until someone ran `check`, which it makes fail."""
+        for i in range(6):
+            self.led.add(f"loose-{i}", f"A statement with no home {i}.",
+                         scope="other")
+
+        r = self.led.compile()
+
+        self.assertIn_("6 live records in other", r.out)
+        defects = self.led.read(self.DEFECTS)
+        self.assertIn_("catch-all", defects)
+        self.assertIn_("memory create --scope <area> --supersedes", defects)

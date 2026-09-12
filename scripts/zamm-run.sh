@@ -458,11 +458,22 @@ installed_stamp() {
 #      session spends output re-teaching a reader who already knows.
 #
 #      Happy path is exactly two lines: what the project holds, and where the
-#      digest is. Anything that needs doing expands below them, worst first,
-#      each carrying its own remedy. Nothing that the file itself carries is
+#      digest is. Anything that needs doing adds two more — the defect types
+#      with their counts, and the path of the file that explains them (see
+#      defects_report). Nothing that the file itself carries is
 #      quoted here — not the size (the read is not optional, so a price only
 #      invites haggling), not the entry counts, not the reconciliation
 #      groups. The agent is about to read all of it.
+#
+#      The attention budget is deliberately NOT counted as a defect. A defect
+#      is something to fix; a digest over its soft ceiling is a standing
+#      property of a mature ledger, and only a human can decide what gets
+#      retired. Counted here it would be the line that appears every session
+#      forever — which teaches the reader to skip a line that sometimes says
+#      the ledger is broken, and that costs more than the pressure it was
+#      reporting. It stays legible where it reads as a measurement rather than
+#      an order: the digest's own `Budget:` footer, and the Ledger section of
+#      `zamm-run.sh status`.
 startup_report() {
   _sr_rel="zamm-memory/.compiled/zamm-digest.md"
   _sr_d="$ROOT/$_sr_rel"
@@ -519,74 +530,272 @@ startup_report() {
   #      keeps a home directory out of every transcript.
   printf 'digest updated: %s\n' "$_sr_rel"
 
-  # ---- exceptions, worst first. Each says what is wrong and what fixes it.
-  if [ "$_sr_c" -gt 0 ]; then
-    startup_note "$(plural "$_sr_c" "contested group needs" "contested groups need") reconciliation — resolve this session." \
-      '  The digest opens with "## Needs reconciliation" and lists each group.' \
-      '  Read the competing records, then write ONE new record naming them all:' \
-      '  zamm-run.sh memory create --supersedes <id>,<id> ...' \
-      '  Never edit or delete the competing files.'
-  fi
-  if grep -q '^## Degraded' "$_sr_d"; then
-    _sr_q=$(num "$(tsv_field "$_sr_st" quarantined)")
-    startup_note "the ledger has integrity problems; the digest opens with \"## Degraded\"." \
-      "  $(plural "$_sr_q" "record is" "records are") quarantined — invisible to the digest until fixed." \
-      '  zamm-run.sh memory check     names each file and its violation'
-  fi
-  if grep -q '^OVER BUDGET' "$_sr_d"; then
-    startup_note 'the digest is over its soft budget with every entry already collapsed' \
-      '  to its headline. Nothing was dropped — the cost is context, paid by every' \
-      '  agent at every session start. Retire or supersede what has gone stale,' \
-      '  or raise the ceiling deliberately (--softmax).' \
-      '  zamm-run.sh memory list     what the digest is currently spending it on'
-  fi
-  if [ "$_sr_live" -eq 0 ]; then
-    startup_note 'no live memory records. Ask the human before initializing, and never' \
-      '  write placeholder records.'
-  fi
-  if [ "$_sr_plans" -eq 0 ]; then
-    startup_note 'the plan tree could not be enumerated (unreadable, not empty).' \
-      '  zamm-run.sh plan check      says which entry refuses to be read'
-  else
-    if [ -n "$PT_MISSING" ]; then
-      startup_note 'a plan root is missing — structural damage, not an empty project:' \
-        "$(printf '%s\n' "$PT_MISSING" | sed 's/^/    /')" \
-        '  zamm-run.sh scaffold        recreates the directory; then investigate'
-    fi
-    [ "$PT_ANOM" -gt 0 ] &&
-      startup_note "$(plural "$PT_ANOM" "invalid plan entry" "invalid plan entries") in the active tree." \
-        '  zamm-run.sh plan check      names each one'
-  fi
-  startup_stale_note
+  # ---- anything wrong with the project: two lines, and a file that explains.
+  defects_report "$_sr_plans"
   return 0
 }
 
-# One exception: a headline (prefixed `! `) plus any number of already-indented
-# continuation lines, separated from what came before by a blank line. The
-# separator belongs to the note, not to the report, so a clean startup really
-# is two lines and not two lines plus padding.
-startup_note() {
-  echo ""
-  printf '! %s\n' "$1"
-  shift
-  for _sn_l in "$@"; do printf '%s\n' "$_sn_l"; done
+# ---------------- the defect report ----------------
+#
+# Everything wrong with the project, written to a file and announced in two
+# lines: the types with their counts, then the path.
+#
+#   defects: 2 contested groups, 1 quarantined record, skill drift
+#   details: zamm-memory/.compiled/zamm-defects.md
+#
+# These used to print in full at session start — a headline plus three or four
+# indented lines each, remedy included. The content was right and the place was
+# wrong: a project carrying two of them buried the one line the report exists
+# for under twenty lines of prose, before the agent had read anything or done
+# any work. A defect needs room to say what it means, why it matters and what
+# resolves it, and session start is the one surface with no room. So the
+# explanations move into the file, where length is free, and session start
+# keeps only what it takes to decide whether to open it.
+#
+# The file is rewritten by EVERY startup, clean ones included, and says so when
+# there is nothing wrong. A file that exists only when something is broken
+# cannot be read as saying that nothing is — absence reads as "never
+# generated" — and the two-line announcement is only safe to omit on a clean
+# project if the file itself is unambiguous about the silence.
+#
+# Reads the plan tally from the PT_* globals, so plan_tally must have run; $1
+# is 1 when it succeeded and 0 when the tree could not be enumerated at all.
+DF_TMP=""
+DF_SUM=""
+df_say() { printf '%s\n' "$*" >> "$DF_TMP" 2>/dev/null || true; }
+# One defect type: its "<count> <noun>" for the announcement line.
+df_type() {
+  if [ -z "$DF_SUM" ]; then DF_SUM="$1"; else DF_SUM="$DF_SUM, $1"; fi
 }
+# One section of the digest, copied in verbatim so the file is self-contained:
+# the digest already renders the per-group and per-record detail, and a details
+# file that tells the reader to go and find it somewhere else is a third hop,
+# not a detail. Interior blank lines are kept, surrounding ones dropped.
+#
+# A section ends at the next `## ` heading OR at the next tail line — one of the
+# digest's `Key: <count>` summaries (`Other:`, `Budget:`, `Backlog:`, `Journal:`),
+# which sit between sections and belong to no heading. Stopping only at headings
+# pulled the catch-all `Other: N record(s)` block into the copy of `## Degraded`,
+# where it read as part of the degradation and had no section to explain it. No
+# body line can be mistaken for one: the listings are `- ` items and the prose
+# carries no `Key: <digit>`.
+df_digest_section() {
+  awk -v h="$1" '
+    index($0, h) == 1 { inside = 1; next }
+    inside && (/^## / || /^[A-Za-z][A-Za-z ]*: [0-9]/) { exit }
+    inside && $0 == "" { if (seen) pend++; next }
+    inside { while (pend > 0) { print ""; pend-- }; seen = 1; print }
+  ' "$2" >> "$DF_TMP" 2>/dev/null || true
+}
+defects_report() {
+  _df_plans=$1
+  _df_rel="zamm-memory/.compiled/zamm-defects.md"
+  _df_out="$ROOT/$_df_rel"
+  _df_d="$ROOT/zamm-memory/.compiled/zamm-digest.md"
+  _df_st="$ROOT/zamm-memory/.compiled/state.tsv"
+  DF_TMP="$_df_out.$$.tmp"
+  DF_SUM=""
+  # An unwritable .compiled/ is already fatal to the compile that ran before
+  # this, so it cannot happen here — but a report that dies writing its own
+  # footnotes would take the digest path down with it, and that is the one
+  # thing session start must deliver.
+  : > "$DF_TMP" 2>/dev/null || return 0
 
-# Stale rendered surfaces, as a startup exception rather than a stderr aside.
-# It used to go to stderr to keep stdout pipeable when stdout WAS the digest;
-# now stdout is a two-line report, and the one warning that says "your
-# instructions are out of date" must not be the one an agent's harness files
-# away separately — or drops.
-startup_stale_note() {
-  _rs=$(rendered_stamp)
-  [ -n "$_rs" ] || return 0
-  _is=$(installed_stamp)
-  [ -n "$_is" ] || return 0
-  [ "$_rs" != "$_is" ] || return 0
-  startup_note 'the ZAMM skill changed since this project was scaffolded, so the' \
-    '  rendered protocol in AGENTS.md may no longer be the one in force.' \
-    "  rendered $_rs, installed $_is" \
-    '  zamm-run.sh scaffold        refresh the surfaces, and tell the human'
+  # ---- worst first, the order they are announced in.
+  _df_c=$(num "$(tsv_field "$_df_st" contested)")
+  if [ "$_df_c" -gt 0 ]; then
+    df_type "$(plural "$_df_c" "contested group" "contested groups")"
+    df_say "## Needs reconciliation — $(plural "$_df_c" group groups)"
+    df_say ""
+    df_say 'The one defect with a deadline: resolve it THIS session. Two or more live'
+    df_say 'records claim the same ground and nothing supersedes them, so no reader'
+    df_say 'can tell which one holds — including the next session, which will'
+    df_say 'rediscover the same split and decide it again, differently.'
+    df_say ""
+    df_say '  zamm-run.sh memory create --supersedes <id>,<id> <slug>'
+    df_say ""
+    df_digest_section '## Needs reconciliation' "$_df_d"
+    df_say ""
+  fi
+
+  if grep -q '^## Degraded' "$_df_d" 2>/dev/null; then
+    _df_q=$(num "$(tsv_field "$_df_st" quarantined)")
+    if [ "$_df_q" -gt 0 ]; then
+      df_type "$(plural "$_df_q" "quarantined record" "quarantined records")"
+    else
+      df_type 'ledger degraded'
+    fi
+    if [ "$_df_q" -gt 0 ]; then
+      df_say "## Degraded ledger — $(plural "$_df_q" "quarantined record" "quarantined records")"
+    else
+      df_say '## Degraded ledger'
+    fi
+    df_say ""
+    df_say 'A record that fails the record contract is excluded from liveness,'
+    df_say 'supersession, votes and ranking: it sits in the tree and reaches no'
+    df_say 'reader, which is worse than absent, because nothing about the project'
+    df_say 'looks wrong. The full violation list, file by file —'
+    df_say ""
+    df_say '  zamm-run.sh memory check'
+    df_say ""
+    df_digest_section '## Degraded' "$_df_d"
+    df_say ""
+  fi
+
+  # The optional trees degrade on their own terms: the sub-pass publishes its
+  # lens, the knowledge digest carries one DEGRADED line in its tail, and the
+  # whole compile exits 2. Before this had a section, the only session-start
+  # signal was the sub-pass printing its error list to stderr — so a defect
+  # report that said "none" over an exit-2 compile was not merely incomplete,
+  # it was wrong.
+  _df_bs="$ROOT/zamm-memory/.compiled/backlog-state.tsv"
+  _df_js="$ROOT/zamm-memory/.compiled/journal-state.tsv"
+  if grep -q '^Backlog: DEGRADED' "$_df_d" 2>/dev/null; then
+    df_type 'backlog degraded'
+    df_say '## Degraded backlog'
+    df_say ""
+    df_say 'The backlog tree has integrity problems of its own, and its lens says so'
+    df_say 'where the digest can only carry the verdict. Quarantined ideas are in the'
+    df_say 'tree and reach no reader; a tree where nothing live survived publishes'
+    df_say 'nothing at all.'
+    _df_bq=$(num "$(tsv_field "$_df_bs" quarantined)")
+    [ "$_df_bq" -gt 0 ] &&
+      df_say "$(printf '\n  %s quarantined' "$(plural "$_df_bq" "idea is" "ideas are")")"
+    df_say ""
+    df_say '  zamm-run.sh backlog check    every file, with its violation in full'
+    df_say ""
+  fi
+  if grep -q '^Journal: DEGRADED' "$_df_d" 2>/dev/null; then
+    df_type 'journal degraded'
+    df_say '## Degraded journal'
+    df_say ""
+    df_say 'The journal tree has integrity problems of its own. A quarantined episode'
+    df_say 'is excluded from the timeline and from coverage, so a review that looks'
+    df_say 'complete has a hole in it exactly where the record should have been.'
+    _df_jq=$(num "$(tsv_field "$_df_js" quarantined)")
+    [ "$_df_jq" -gt 0 ] &&
+      df_say "$(printf '\n  %s quarantined' "$(plural "$_df_jq" "record is" "records are")")"
+    df_say ""
+    df_say '  zamm-run.sh journal check    every file, with its violation in full'
+    df_say ""
+  fi
+
+  # The catch-all area, over its cap. The one validation failure the digest
+  # does NOT render a line for (it is a property of the whole ledger, not of a
+  # record), so silence here would leave it reaching no reader until someone
+  # ran `check` — and it is the failure that makes `check` refuse.
+  _df_o=$(num "$(tsv_field "$_df_st" other)")
+  if [ "$_df_o" -gt 5 ]; then
+    df_type "$_df_o live records in other"
+    df_say "## The catch-all area is over its cap — $_df_o of 5"
+    df_say ""
+    df_say 'Scope `other` is a waiting room, not an area: records land there when'
+    df_say 'nothing else fit, and a reader looking for them by topic never finds them.'
+    df_say 'Five is the cap, and `zamm-run.sh check` refuses past it. Refile each one'
+    df_say 'by superseding it with the same content under a real area —'
+    df_say ""
+    df_say '  zamm-run.sh memory list --scope other'
+    df_say '  zamm-run.sh memory create --scope <area> --supersedes <id> <slug>'
+    df_say ""
+  fi
+
+  if [ "$_df_plans" -eq 0 ]; then
+    df_type 'plan tree unreadable'
+    df_say '## Plan tree unreadable'
+    df_say ""
+    df_say 'The plan tree could not be enumerated. Unreadable is not empty: every'
+    df_say 'plan count in this session is missing, not zero, so do not conclude from'
+    df_say 'a quiet report that there is no work in flight.'
+    df_say ""
+    df_say '  zamm-run.sh plan check      says which entry refuses to be read'
+    df_say ""
+  else
+    if [ -n "$PT_MISSING" ]; then
+      df_type "$(plural "$(printf '%s\n' "$PT_MISSING" | grep -c .)" "missing plan root" "missing plan roots")"
+      df_say '## Missing plan root'
+      df_say ""
+      df_say 'A directory the plan tree is built on does not exist. This is structural'
+      df_say 'damage, not an empty project — something deleted or moved it:'
+      df_say ""
+      printf '%s\n' "$PT_MISSING" | sed 's/^/  /' >> "$DF_TMP" 2>/dev/null || true
+      df_say ""
+      df_say '  zamm-run.sh scaffold        recreates the directory; then investigate'
+      df_say '                              what removed it before writing anything'
+      df_say ""
+    fi
+    if [ "$PT_ANOM" -gt 0 ]; then
+      df_type "$(plural "$PT_ANOM" "invalid plan entry" "invalid plan entries")"
+      df_say "## Invalid plan entries — $PT_ANOM"
+      df_say ""
+      df_say 'Something in the active plan tree is not a plan: a symlink, a file where'
+      df_say 'a directory belongs, a duplicate slug, or debris. Each one is skipped, so'
+      df_say 'the plan it was meant to be is not being tracked by anything.'
+      df_say ""
+      df_say '  zamm-run.sh plan check      names each one'
+      df_say ""
+    fi
+  fi
+
+  # Skill drift is a defect in the INSTALLATION, not in the ledger, and it is
+  # the one the agent cannot discover any other way: the rendered protocol it
+  # read from AGENTS.md minutes ago may not be the protocol these scripts now
+  # implement. A moved stamp is a notice, not a refusal — it hashes every skill
+  # file, so a comment edit moves it, and the protocol version is what governs
+  # whether the ledger still parses.
+  _df_rs=$(rendered_stamp)
+  if [ -n "$_df_rs" ]; then
+    _df_is=$(installed_stamp)
+    if [ -n "$_df_is" ] && [ "$_df_rs" != "$_df_is" ]; then
+      df_type 'skill drift'
+      df_say '## Skill drift'
+      df_say ""
+      df_say 'The ZAMM skill changed since this project was scaffolded, so the rendered'
+      df_say 'protocol in AGENTS.md may no longer be the one in force.'
+      df_say ""
+      df_say "  rendered  $_df_rs"
+      df_say "  installed $_df_is"
+      df_say ""
+      df_say '  zamm-run.sh scaffold        refresh the surfaces, and tell the human'
+      df_say ""
+    fi
+  fi
+
+  # ---- the header goes on last, because it names what was found.
+  _df_hdr="$_df_out.$$.hdr"
+  if [ -z "$DF_SUM" ]; then
+    {
+      printf '# ZAMM defects — none\n\n'
+      printf 'Nothing to act on. No group needs reconciliation, nothing is quarantined\n'
+      printf 'in any tree, the plan tree enumerates cleanly, and the rendered protocol in\n'
+      printf 'AGENTS.md matches the installed skill.\n\n'
+      printf 'Written by `zamm-run.sh startup` and DELETED by any later compile — a\n'
+      printf 'record write, a plan status change, an archive. So this file describes the\n'
+      printf 'ledger as it is now: if it were out of date it would not be here.\n'
+    } > "$_df_hdr" 2>/dev/null || { rm -f "$DF_TMP"; return 0; }
+  else
+    {
+      printf '# ZAMM defects — %s\n\n' "$DF_SUM"
+      printf 'Worst first; each section says what is wrong, what it costs, and the one\n'
+      printf 'command that addresses it. `startup` prints the line above and the path of\n'
+      printf 'this file and nothing else: session start has no room for explanations,\n'
+      printf 'and a defect is not worth reporting without one. Written by `startup` and\n'
+      printf 'deleted by any later compile, so it describes the ledger as it is now.\n\n'
+    } > "$_df_hdr" 2>/dev/null || { rm -f "$DF_TMP"; return 0; }
+  fi
+  cat "$DF_TMP" >> "$_df_hdr" 2>/dev/null || {
+    rm -f "$DF_TMP" "$_df_hdr"
+    return 0
+  }
+  rm -f "$DF_TMP"
+  mv "$_df_hdr" "$_df_out" 2>/dev/null || { rm -f "$_df_hdr"; return 0; }
+
+  # ---- the announcement. Silence on a clean project is the whole point: the
+  #      file says so, and nothing needs to be read to learn it.
+  [ -n "$DF_SUM" ] || return 0
+  echo ""
+  printf 'defects: %s\n' "$DF_SUM"
+  printf 'details: %s\n' "$_df_rel"
+  return 0
 }
 
 # ---------------- built-in read-only views ----------------
@@ -752,6 +961,23 @@ print_status() {
     [ -n "$dormant" ] && printf '          dormant: %s\n' "$dormant"
     unlisted=$(sed -n 's/^Unlisted live (.*): //p' "$DIGEST" | head -1)
     [ -n "$unlisted" ] && printf '          unlisted (below entry caps): %s\n' "$unlisted"
+    # The attention budget as a reading. `startup` deliberately says nothing
+    # about it (see startup_report): an overrun is standing state, not a task,
+    # so it belongs on the health overview someone consults on purpose rather
+    # than in the report every session is handed. Parsed from the digest's own
+    # footer — the compiler is the only thing that knows what it spent.
+    _bu=$(sed -n 's/^Budget: \([0-9][0-9]*\)\/\([0-9][0-9]*\) chars.*/\1 \2/p' "$DIGEST" | head -1)
+    if [ -n "$_bu" ]; then
+      _bu_used=${_bu%% *}; _bu_max=${_bu##* }
+      if [ "$_bu_used" -gt "$_bu_max" ]; then
+        printf '          budget: %s/%s chars -- OVER, every entry collapsed to its headline\n' \
+          "$_bu_used" "$_bu_max"
+        printf '          nothing is dropped; to spend less, retire stale records (memory list)\n'
+        printf '          or raise the ceiling: zamm-run.sh startup --softmax N\n'
+      else
+        printf '          budget: %s/%s chars\n' "$_bu_used" "$_bu_max"
+      fi
+    fi
     # guardrail/contested/other counts are graph facts the compiler records in
     # the sidecar. There is deliberately NO Markdown fallback: reverse-parsing
     # the digest double-counted contested guardrails and reconciliation groups
@@ -3766,9 +3992,15 @@ the project holds, and the path of the digest to read. READ THAT FILE, whole,
 with a file tool - this output is not the digest, and `cat` would be cut
 silently by the harness output cap.
 
-Anything needing action expands below those two lines, worst first, each with
-its remedy: reconciliation, ledger degradation, an over-budget digest, plan
-tree damage, rendered surfaces that no longer match the installed skill.
+Anything wrong with the project adds two lines, never more: the defect types
+with their counts, and the path of zamm-memory/.compiled/zamm-defects.md, which
+carries a section per defect - what it means, what it costs, the one command
+that fixes it. That file is rewritten by every run and says so when there is
+nothing wrong. Covered: reconciliation, ledger degradation, the catch-all area
+over its cap, plan tree damage, rendered surfaces that no longer match the
+installed skill. NOT covered: the attention budget - an overrun is standing
+state, not a task for this session, and it reads on `zamm-run.sh status` and in
+the digest's own `Budget:` footer.
 
   --inline     print the digest itself instead of its path, for a reader with
                no file tool. Command output is capped; a real ledger gets cut.
@@ -3841,13 +4073,13 @@ run_startup() {
         echo "zamm: WARNING: --inline printed $sz chars; output past ~30000 is cut" >&2
         echo "      by the tool, not by ZAMM. Drop --inline and read the file." >&2
       }
-      # --inline owns stdout, so the stale-surfaces notice cannot join the
-      # report there without landing inside piped digest content: stderr.
-      _rs=$(rendered_stamp); _is=$(installed_stamp)
-      if [ -n "$_rs" ] && [ -n "$_is" ] && [ "$_rs" != "$_is" ]; then
-        echo "zamm: the ZAMM skill changed since this project was scaffolded" >&2
-        echo "      rendered $_rs, installed $_is -- run: zamm-run.sh scaffold" >&2
-      fi
+      # --inline owns stdout, so the defect announcement cannot join the digest
+      # there without landing inside piped content: stderr. The FILE is written
+      # either way — every startup refreshes it, and a reader with no file tool
+      # is exactly the reader who should not have to ask twice.
+      _il_plans=1
+      plan_tally || _il_plans=0
+      defects_report "$_il_plans" >&2
     else
       startup_report
     fi

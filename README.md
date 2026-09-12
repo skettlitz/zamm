@@ -46,10 +46,20 @@ ZAMM v3 · 34 live · 3 guardrails · 2 plans (1 blocked) · 11 ideas (2 hot) ·
 digest updated: zamm-memory/.compiled/zamm-digest.md
 ```
 
-Below them, one `!` block per thing needing action this session, each naming the command
-that fixes it; a healthy project prints nothing there. How to read the digest is not
-repeated — the rendered router in `AGENTS.md` carries it, and the same agent read that
-minutes earlier.
+Below them, two more lines when something is wrong with the project — never more than two:
+
+```
+defects: 1 contested group, 2 quarantined records, skill drift
+details: zamm-memory/.compiled/zamm-defects.md
+```
+
+That file carries a section per defect — what it means, what it costs, the one command that
+addresses it — and is rewritten by every run, so it also says when there is nothing wrong. A
+healthy project prints neither line. The explanations used to print in full at session
+start, four lines each; the content was right and the place was wrong, because a defect
+needs room to explain itself and session start is the one surface with none. How to read the
+digest is not repeated either — the rendered router in `AGENTS.md` carries it, and the same
+agent read that minutes earlier.
 
 Reading that file, whole, is the whole read. Top to bottom: a `Needs reconciliation` index when a merge
 left two heads; marked backlog ideas; up to a few dozen full entries balanced across
@@ -127,8 +137,8 @@ votes join the bracket as they accumulate):
 An idea and an episode are the same file shape with a different root: `backlog add` and
 `journal add` write them from one sentence, and any depth rides below the headline.
 
-The digest is delivered as a **file the agent reads**, not as command output. `memory
-digest` recompiles and hands back a path; reading that file once, whole, is the session
+The digest is delivered as a **file the agent reads**, not as command output. `startup`
+recompiles and hands back a path; reading that file once, whole, is the session
 read. This is not a detail of plumbing. Command output is capped — Claude Code cuts a Bash
 result at 30000 characters and replaces the remainder with a short preview — so a digest
 printed to stdout is truncated silently, and a session that gets a header and one entry
@@ -142,7 +152,10 @@ that soft character ceiling, which decides how much each listed record gets to s
 the ceiling binds, Digest blocks give up their elaboration and render as their headline
 alone, marked `+el` so a reader knows there is more in the file. No record is ever dropped
 to hit the number: a digest that sheds entries to look small is lying about the ledger, so
-an oversized one goes over its budget and says so instead.
+an oversized one goes over its budget and says so instead — in its own `Budget:` footer and
+on `status`, not at session start. An overrun is a standing property of a ledger that has
+grown, and only a human can decide what gets retired; a notice that fires every session
+forever would just teach the reader to skip the notices that need acting on.
 
 Digest budgets and scoring constants are deliberately not documented here: they are tuning
 knobs, and their single authoritative home is the commented header of

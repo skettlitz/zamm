@@ -300,15 +300,43 @@ class TestSpaceBudget(ZammTest):
         self.assertGreater(len(digest), 4000)
         self.assertIn_("OVER BUDGET by ", digest)
 
-    def test_the_burst_is_reported_on_stderr_too(self):
-        """The digest itself is the thing being truncated, so the warning
-        cannot only live inside it."""
+    def test_the_burst_never_reaches_session_start(self):
+        """An overrun is standing state on a mature ledger, not a task: once
+        true it is true on every run until a human retires something. Raised at
+        session start it would be the one notice that fires forever, which
+        teaches the reader to skip the notices that do need acting on."""
         for i in range(60):
             self.led.add(f"fat-{i}", _fat(i))
 
         r = self.led.compile("--softmax", "4000")
 
-        self.assertIn_("over the 4000-char soft budget", r.err)
+        self.assertNotIn_("budget", r.out.lower())
+        self.assertNotIn_("softmax", r.out.lower())
+        self.assertNotIn_("budget", r.err.lower())
+
+    def test_the_burst_reads_on_status(self):
+        """Silence at session start is not silence everywhere: the health
+        overview is consulted on purpose, so the pressure is legible there."""
+        for i in range(60):
+            self.led.add(f"fat-{i}", _fat(i))
+        self.led.compile("--softmax", "4000")
+
+        out = self.led.status().out
+
+        self.assertIn_("budget:", out)
+        self.assertIn_("OVER", out)
+        self.assertIn_("--softmax", out)
+
+    def test_status_reports_the_budget_when_it_is_not_bound(self):
+        """A reading, not an alarm: a project under its ceiling still gets to
+        see what memory costs before it becomes a problem."""
+        self.led.add_many(3)
+        self.led.compile()
+
+        out = self.led.status().out
+
+        self.assertIn_("budget:", out)
+        self.assertNotIn_("OVER", out)
 
     def test_the_budget_line_reports_what_it_spent(self):
         """Pressure has to be legible before it becomes an outage."""

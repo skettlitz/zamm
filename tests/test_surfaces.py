@@ -483,9 +483,10 @@ class TestDigestReportsSkillDrift(ZammTest):
                          "no nagging when nothing drifted")
 
     def test_startup_reports_drift_without_failing(self):
-        """On stdout, with the other exceptions: a warning that says "your
-        instructions are out of date" must not be the one an agent's harness
-        files away on a separate stream — or drops."""
+        """On stdout, as a defect type: a warning that says "your instructions
+        are out of date" must not be the one an agent's harness files away on a
+        separate stream — or drops. The stamps and the remedy are in the defect
+        report, which is where every defect explains itself."""
         self.led.add("rule", "A statement.")
         self.led.scaffold()
         self._make_stale()
@@ -493,8 +494,11 @@ class TestDigestReportsSkillDrift(ZammTest):
         r = self.led.compile()
 
         self.assertCode(r, EXIT_OK, "drift is a notice, never a refusal")
-        self.assertIn_("skill changed", r.out)
-        self.assertIn_("scaffold", r.out)
+        self.assertIn_("skill drift", r.out)
+        self.assertIn_("zamm-defects.md", r.out)
+        defects = self.led.read("zamm-memory/.compiled/zamm-defects.md")
+        self.assertIn_("skill changed", defects)
+        self.assertIn_("scaffold", defects)
 
     def test_the_notice_never_contaminates_the_digest(self):
         """The report is not the digest; the file is what the agent reads at
@@ -511,13 +515,17 @@ class TestDigestReportsSkillDrift(ZammTest):
             "the notice must not enter the digest file")
 
     def test_inline_keeps_the_notice_off_piped_digest_content(self):
-        """--inline hands stdout to the digest itself, so the notice goes to
-        stderr there rather than landing inside piped content."""
+        """--inline hands stdout to the digest itself, so the announcement goes
+        to stderr there rather than landing inside piped content. The file is
+        written either way: a reader with no file tool is exactly the reader who
+        should not have to ask twice."""
         self.led.add("rule", "A statement.")
         self.led.scaffold()
         self._make_stale()
 
         r = self.led.compile("--inline")
 
-        self.assertNotIn("skill changed", r.out)
-        self.assertIn_("skill changed", r.err)
+        self.assertNotIn("skill drift", r.out)
+        self.assertIn_("skill drift", r.err)
+        self.assertIn_("skill changed",
+                       self.led.read("zamm-memory/.compiled/zamm-defects.md"))
