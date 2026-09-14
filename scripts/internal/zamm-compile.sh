@@ -345,7 +345,7 @@ fi
 # set +e first: a failing rm (an unwritable directory, say) must never abort
 # the trap before the lock is released — a leaked lock stalls every later
 # compile and publish for a 60s timeout apiece.
-trap 'set +e; rm -f "$TMP_FILE" "$PLANS_TMP" "$PLANS_TAIL" "$EXTRA_TAIL" "$MF_FILES" "$MF_LINKS" "$MF_ARCH" "$MANIFEST" "$STATE_TMP" "$TMP_FILE.pmf"; [ -n "$OVERLAY_DIR" ] && rm -rf "$OVERLAY_DIR"; :' EXIT HUP INT TERM
+trap 'set +e; rm -f "$TMP_FILE" "$TMP_FILE.awk" "$PLANS_TMP" "$PLANS_TAIL" "$EXTRA_TAIL" "$MF_FILES" "$MF_LINKS" "$MF_ARCH" "$MANIFEST" "$STATE_TMP" "$TMP_FILE.pmf"; [ -n "$OVERLAY_DIR" ] && rm -rf "$OVERLAY_DIR"; :' EXIT HUP INT TERM
 
 # No lock. The digest is derived, gitignored and regenerable, so it is never
 # protected — only recomputed (references/invariants.md, G2). Each compile
@@ -777,9 +777,15 @@ if [ "$TREE" = "knowledge" ] && [ "$CHECK" -eq 0 ] && [ "$LIST_INERT" -eq 0 ] &&
   TAILBYTES=$(( $(wc -c < "$PLANS_TAIL") + $(wc -c < "$EXTRA_TAIL") ))
 fi
 
-set +e
-awk \
-  -v today="$TODAY" -v check="$CHECK" -v listinert="$LIST_INERT" -v listlive="$LIST_LIVE" -v listvotes="$LIST_VOTES" -v listgraph="$LIST_GRAPH" -v liststate="$LIST_STATE" -v candidate="$cid" -v export="$EXPORT" -v root="$PROJECT_ROOT/" -v statefile="$STATE_TMP" -v lens="$TREE" -v softmax="$SOFTMAX" -v tailbytes="$TAILBYTES" '
+# The program goes to awk as a FILE, never as an argument. It is ~140 KB of
+# text, and Linux caps a single argv element at 128 KiB (MAX_ARG_STRLEN, 32
+# pages) where macOS caps only the total. Passed inline it execs fine on
+# every Mac and fails on every Linux box with "Argument list too long", exit
+# 126, previous digest untouched — which is what turned CI red the day the
+# program crossed the line and stayed invisible to every local run since.
+# A quoted heredoc: no expansion, no escapes, byte-for-byte what is written.
+AWK_PROG="$TMP_FILE.awk"
+cat > "$AWK_PROG" <<'ZAMM_AWK_PROGRAM'
 BEGIN {
   DIGEST_MAX = 75       # full digest blocks (actionable: headline + elaboration)
   HEADLINE_MAX = 150    # headline-only reminders (topic exists; open if relevant)
@@ -3720,7 +3726,11 @@ END {
   # one by the code alone, without parsing the Markdown.
   exit (degraded() ? 2 : 0)
 }
-' "$MANIFEST" > "$TMP_FILE"
+ZAMM_AWK_PROGRAM
+set +e
+awk \
+  -v today="$TODAY" -v check="$CHECK" -v listinert="$LIST_INERT" -v listlive="$LIST_LIVE" -v listvotes="$LIST_VOTES" -v listgraph="$LIST_GRAPH" -v liststate="$LIST_STATE" -v candidate="$cid" -v export="$EXPORT" -v root="$PROJECT_ROOT/" -v statefile="$STATE_TMP" -v lens="$TREE" -v softmax="$SOFTMAX" -v tailbytes="$TAILBYTES" \
+  -f "$AWK_PROG" "$MANIFEST" > "$TMP_FILE"
 rc=$?
 set -e
 

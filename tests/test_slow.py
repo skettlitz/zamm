@@ -74,38 +74,45 @@ class TestPerformance(ZammTest):
 class TestSourceHygiene(unittest.TestCase):
     """Static checks that need no fixture."""
 
-    def test_no_apostrophe_inside_the_awk_program(self):
-        """zamm-compile.sh embeds its awk program in a single-quoted shell
-        string, so ONE apostrophe — even in a comment — terminates the string
-        and the shell tries to execute awk source. This happened on
-        2026-07-20; see 2026-07-20-awk-block-apostrophe-hazard-dzpda.
-        """
+    # Linux caps ONE argv element at 128 KiB (MAX_ARG_STRLEN = 32 pages);
+    # macOS caps only the total. A program passed inline to awk crosses it
+    # silently on every Mac and fails on every Linux box with "Argument list
+    # too long", exit 126 — which is what CI reported from 5760b9b onward, when
+    # the compiler's awk reached 136 KB, while every local run stayed green.
+    MAX_ARG_STRLEN = 131072
+
+    def test_no_shell_argument_can_exceed_the_linux_limit(self):
+        """Every single-quoted string in every script stays well under what
+        Linux will pass as one argument. Single-quoted strings have no escapes,
+        so a naive scan between quotes is exact."""
+        for path in sorted((SKILL_DIR / "scripts").rglob("*.sh")):
+            with self.subTest(script=path.name):
+                text = path.read_text()
+                longest, i = 0, 0
+                while True:
+                    a = text.find("'", i)
+                    if a < 0:
+                        break
+                    b = text.find("'", a + 1)
+                    if b < 0:
+                        break
+                    longest, i = max(longest, b - a - 1), b + 1
+                self.assertLess(
+                    longest, self.MAX_ARG_STRLEN // 2,
+                    f"{path.name}: a {longest}-byte quoted string is headed for "
+                    f"MAX_ARG_STRLEN; hand it to the program as a file instead",
+                )
+
+    def test_the_compiler_hands_awk_its_program_as_a_file(self):
+        """The one program large enough to matter goes through -f from a
+        quoted heredoc, never inline. The heredoc also retires the apostrophe
+        hazard the old single-quoted form had (2026-07-20)."""
         text = (SKILL_DIR / "scripts" / "internal" / "zamm-compile.sh").read_text()
-        lines = text.splitlines()
 
-        starts = [i for i, ln in enumerate(lines) if ln.rstrip().endswith("awk \\")]
-        self.assertTrue(starts, "could not locate the awk invocation")
-        # the program opens on the first line after the invocation that ends
-        # in a quote, and closes on the first line that starts with one
-        begin = next(
-            i for i in range(starts[0], len(lines)) if lines[i].rstrip().endswith("'")
-        )
-        end = next(
-            (i for i in range(begin + 1, len(lines)) if lines[i].startswith("'")), None
-        )
-        self.assertIsNotNone(end, "could not locate the end of the awk program")
-
-        offenders = [
-            (i + 1, lines[i])
-            for i in range(begin + 1, end)
-            if "'" in lines[i]
-        ]
-        self.assertEqual(
-            offenders,
-            [],
-            "apostrophe inside the awk block would break the script:\n"
-            + "\n".join(f"  line {n}: {t}" for n, t in offenders),
-        )
+        self.assertIn("<<'ZAMM_AWK_PROGRAM'", text)
+        self.assertIn('-f "$AWK_PROG" "$MANIFEST"', text)
+        self.assertIn('"$TMP_FILE.awk"', text.split("trap 'set +e")[1].split("\n")[0],
+                      "the program file must be in the cleanup trap")
 
     def test_scripts_are_executable_by_their_declared_interpreter(self):
         """Every script must parse under the shell its shebang names."""

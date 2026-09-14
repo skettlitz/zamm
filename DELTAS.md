@@ -2010,3 +2010,31 @@ under damage was also simply wrong. And skill drift is now a defect type like
 any other rather than its own trailing paragraph, which is what it always was:
 the rendered protocol no longer matching the installed scripts is a defect in
 the installation.
+
+Locked 2026-09-13 — the compiler hands awk its program as a file. CI had been
+red on Linux since 2026-09-10 and green on every Mac, including every local
+run that tried to reproduce it.
+
+**The program was the argument.** The compiler's awk is one single-quoted
+string on the command line — 136,321 bytes at the `Blocked` commit, 141,555 in
+this tree. Linux limits a SINGLE argv element to 128 KiB (`MAX_ARG_STRLEN`, 32
+pages); macOS limits only the total (`ARG_MAX`, 1 MiB). So `execve` succeeds on
+every Mac and fails on every Linux box with E2BIG, which the shell reports as
+"Argument list too long" and exit 126, and the compiler then does the right
+thing for the wrong reason: previous digest untouched, every suite that
+compiles fails at its first compile. The `Blocked` commit was simply the one
+that crossed the line. Three days of hunting Ubuntu differences — mawk, gawk,
+dash, a case-sensitive volume — found nothing, because none of them were the
+difference; the kernel was. A backlog note from the failing run had the
+symptom exactly and guessed the ledger paths were on argv; they never were
+(they go through the manifest file), it was the program text itself.
+
+**`-f`, from a quoted heredoc.** The program is written to `$TMP_FILE.awk`
+with `<<'ZAMM_AWK_PROGRAM'` — no expansion, no escapes, byte-for-byte — and
+awk reads it with `-f`. The `-v` flags and the manifest argument are unchanged.
+The longest quoted string left in any script is 3,856 bytes. This also retires
+the apostrophe hazard the old form had (an apostrophe in an awk comment ended
+the shell string; 2026-07-20): a quoted heredoc has no such character. The
+hygiene test that guarded against apostrophes now guards the actual
+constraint — no single-quoted string in any script may reach half of
+`MAX_ARG_STRLEN` — and checks that the compiler feeds its program through `-f`.
