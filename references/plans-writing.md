@@ -97,11 +97,12 @@ unknowns, missing access, risky surfaces, coordination) and
 `ant|gecko|raccoon|capybara|badger|octopus|manatee|shark|godzilla|kraken`;
 `kraken` is the off-scale wicked marker — scope a bounded probe with
 closeable Done-when items, never "solve it"; cues in
-`references/complexity-animals.md`). A `kraken` forecast also needs
-`Frame-approved-by:` and `Frame-approved-at:` before `Implementing`: the
+`references/complexity-animals.md`). A `kraken` forecast should also carry
+`Frame-approved-by:` and `Frame-approved-at:` before `Implementing` — the
 human's yes to the `problem:` line, which is the working frame, with the
-rejected frames on `alternatives:` and the rest in `<plan-dir>/frame.md`
-(`complexity-animals.md`, "The gate"). These fields describe the WORK, never
+rejected frames on `alternatives:` and the rest in `<plan-dir>/frame.md`;
+`plan check` warns without them (`complexity-animals.md`, "The frame").
+These fields describe the WORK, never
 a person: plan files are committed and team-visible, so personal and
 health-adjacent detail stays out.
 

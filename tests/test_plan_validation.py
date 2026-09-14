@@ -709,10 +709,12 @@ class TestWhySection(ZammTest):
 
 
 class TestKrakenFrameGate(ZammTest):
-    """A kraken plan leaves Draft only through its frame gate: the human's yes
-    to the `problem:` line, recorded as `Frame-approved-by:` / `-at:`. Other
-    animals owe nothing, and a kraken still in Draft owes nothing — Draft is
-    where the framing happens."""
+    """A kraken plan past Draft without its frame — the human's yes to the
+    `problem:` line, recorded as `Frame-approved-by:` / `-at:` — gets a
+    WARNING, never a refusal (human decision 2026-09-14: advisory, like the
+    rest of memory). A malformed date in a field that is present is still a
+    contract error. Other animals owe nothing, and a kraken still in Draft
+    owes nothing — Draft is where the framing happens."""
 
     def _kraken(self, slug, status, frame_by=None, frame_at=None, tail=()):
         head = [f"# {slug}", "", f"Status: {status}",
@@ -731,26 +733,31 @@ class TestKrakenFrameGate(ZammTest):
             "\n".join(head) + "\n",
         )
 
-    def test_kraken_implementing_without_frame_is_rejected(self):
+    def test_kraken_implementing_without_frame_is_warned_not_refused(self):
         self._kraken("2026-01-05-k1", "Implementing")
         r = self.led.plan_check()
-        self.assertCode(r, EXIT_CONTRACT)
+        self.assertCode(r, EXIT_OK)
+        self.assertIn_("WARNING", r.err)
         self.assertIn_("approved frame", r.err)
 
-    def test_kraken_with_only_one_field_is_rejected(self):
+    def test_kraken_with_only_one_field_is_warned(self):
         self._kraken("2026-01-05-k2", "Implementing", frame_by="SKe")
         r = self.led.plan_check()
-        self.assertCode(r, EXIT_CONTRACT)
+        self.assertCode(r, EXIT_OK)
         self.assertIn_("approved frame", r.err)
 
     def test_kraken_in_draft_owes_nothing(self):
         self._kraken("2026-01-05-k3", "Draft")
-        self.assertCode(self.led.plan_check(), EXIT_OK)
+        r = self.led.plan_check()
+        self.assertCode(r, EXIT_OK)
+        self.assertNotIn("approved frame", r.err)
 
-    def test_kraken_with_approved_frame_passes(self):
+    def test_kraken_with_approved_frame_is_silent(self):
         self._kraken("2026-01-05-k4", "Implementing",
                      frame_by="SKe", frame_at="2026-01-05")
-        self.assertCode(self.led.plan_check(), EXIT_OK)
+        r = self.led.plan_check()
+        self.assertCode(r, EXIT_OK)
+        self.assertNotIn("approved frame", r.err)
 
     def test_frame_approved_at_must_be_a_real_date(self):
         self._kraken("2026-01-05-k5", "Implementing",
@@ -763,9 +770,10 @@ class TestKrakenFrameGate(ZammTest):
         self.led.add_plan("2026-01-05-gecko", status="Implementing")
         self.assertCode(self.led.plan_check(), EXIT_OK)
 
-    def test_abandoned_kraken_that_did_work_needs_the_frame(self):
+    def test_abandoned_kraken_that_did_work_is_warned_too(self):
         """Execution-context-before is filled, so the work-happened heuristic
-        says the plan left Draft — and a kraken leaves Draft only framed."""
+        says the plan left Draft — the frame suggestion applies there as well,
+        as a warning."""
         retro = ["## Learnings", "", "- It moved again.", "",
                  "## Loose ends", "", "- Abandoned: the frame kept moving.", "",
                  "Execution-friction-after: none",
@@ -773,11 +781,13 @@ class TestKrakenFrameGate(ZammTest):
                  "Complexity-delta: as-expected"]
         self._kraken("2026-01-05-k6", "Abandoned", tail=retro)
         r = self.led.plan_check()
-        self.assertCode(r, EXIT_CONTRACT)
+        self.assertCode(r, EXIT_OK)
         self.assertIn_("approved frame", r.err)
         self._kraken("2026-01-05-k6", "Abandoned",
                      frame_by="SKe", frame_at="2026-01-05", tail=retro)
-        self.assertCode(self.led.plan_check(), EXIT_OK)
+        r = self.led.plan_check()
+        self.assertCode(r, EXIT_OK)
+        self.assertNotIn("approved frame", r.err)
 
     def test_digest_shows_frame_state_on_kraken_lines(self):
         self.led.add_memory(

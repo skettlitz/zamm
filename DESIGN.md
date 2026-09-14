@@ -141,19 +141,19 @@ The `problem:` line is written so that Done-when can say it no longer happens.
 **A vanished problem or a failed assumption is grounds to stop.** Abandoning
 on that basis is the plan working as designed, and is written as such.
 
-**A kraken plan has a frame gate.** The scale says a kraken is never scoped as
-"solve it"; a kraken that leaves Draft without a chosen frame is exactly that
-plan. So past Draft it must carry the human's yes to its `problem:` line —
-`Frame-approved-by:` and `Frame-approved-at:` — and `plan check` refuses it
-otherwise: the one place a "no production work before an approved frame" rule
-can be mechanical without a hook, because the checker already runs and its
-defects print at every startup. The Plans tail shows the state (`frame
-pending` / `frame approved <date>`) so an open gate is re-read every session.
-Every other animal is untouched; a kraken in Draft owes nothing. The method
-behind the gate is a policy skill (`zamm-wicked`), not ZAMM — judgement call,
-2026-09-14, on the same reasoning that kept reflection out of the journal
-tree. *Cost:* two header lines on the rare kraken plan, and one more thing the
-checker knows about plans.
+**A kraken plan is warned, not stopped, when it leaves Draft unframed.** The
+scale says a kraken is never scoped as "solve it"; the frame the human said
+yes to — `Frame-approved-by:` / `Frame-approved-at:`, the yes to the
+`problem:` line — is what makes it something else. `plan check` warns when a
+kraken is past Draft without them and the Plans tail shows `frame pending`,
+so the missing frame is re-read every session; nothing refuses, because memory
+is advisory and a plan that must proceed unframed says why on its `enough:`
+line instead of fighting a lock. Judgement call, the human's, 2026-09-14 — an
+earlier draft the same day made it a refusal. The method behind the frame
+(triage, assumptions, spikes, probes, argument map, stop) is a policy skill,
+`zamm-wicked`, suggested for a kraken and usable at any animal: wickedness is a
+property of the problem, not of the size. *Cost:* two header lines on the rare
+kraken plan, and one warning the checker knows about.
 
 ---
 

@@ -106,19 +106,22 @@ require_retrospective() {
   esac
 }
 
-# The kraken frame gate. The scale says a kraken plan is never scoped as
-# "solve it"; a kraken that leaves Draft without a chosen frame is exactly that
-# plan. So past Draft it must carry the human's yes to its `problem:` line:
-# `Frame-approved-by:` (who) and `Frame-approved-at:` (a real date). Every other
-# animal is untouched, and a kraken still in Draft owes nothing -- Draft is
-# where the framing happens.
+# The kraken frame -- a strong suggestion, never a refusal. The scale says a
+# kraken plan is never scoped as "solve it"; the frame the human said yes to
+# (`Frame-approved-by:`, `Frame-approved-at:` -- the yes to the `problem:`
+# line) is what makes it something else. A kraken past Draft without them gets
+# a WARNING, so the missing frame is said at every check and never blocks: a
+# plan that must proceed unframed writes why on its `enough:` line instead of
+# fighting a lock. A malformed date in a field that IS present is a contract
+# error like any other date field. Other animals are untouched, and a kraken
+# still in Draft owes nothing -- Draft is where the framing happens.
 require_frame_gate() {
   _pf="$1"; _rel="$2"; _st="$3"
   [ "$(field "$_pf" "Complexity-forecast")" = "kraken" ] || return 0
   _fb=$(field "$_pf" "Frame-approved-by")
   _fa=$(field "$_pf" "Frame-approved-at")
   if [ -z "$_fb" ] || [ -z "$_fa" ]; then
-    err "$_rel: forecast kraken and status $_st, but no approved frame (Frame-approved-by:/Frame-approved-at: empty) -- a kraken never leaves Draft unframed: get the human's yes to the problem: line and record it, or stay Draft"
+    warn "$_rel: forecast kraken and status $_st without an approved frame (Frame-approved-by:/Frame-approved-at: empty) -- strongly suggested before work: the human's yes to the problem: line, recorded; a kraken scoped as 'solve it' cannot close. Proceeding anyway? say why on the plan's enough: line"
   elif ! valid_date "$_fa"; then
     err "$_rel: Frame-approved-at is not a real YYYY-MM-DD date: $_fa"
   fi
@@ -568,8 +571,8 @@ EOF
         if [ -n "$cf" ] && ! in_set "$cf" "$COMPLEXITY_ANIMALS"; then
           err "$rel: Complexity-forecast \"$cf\" is not on the animal scale ($COMPLEXITY_ANIMALS)"
         fi
-        # work happened, so the plan left Draft -- and a kraken leaves Draft
-        # only through its frame gate
+        # work happened, so the plan left Draft -- the frame suggestion
+        # applies to a kraken here too (a warning, like everywhere)
         require_frame_gate "$pf" "$rel" "$status"
         require_retrospective "$pf" "$rel" "$status"
       fi

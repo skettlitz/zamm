@@ -2431,3 +2431,11 @@ ZAMM on the same reasoning that kept reflection out of the journal tree.
 Docs: `complexity-animals.md` ("The gate"), `plans-writing.md`,
 `plans-maintenance.md`, one SKILL.md dispatch row, DESIGN.md. Tests: `TestKrakenFrameGate` in
 `test_plan_validation.py`.
+
+**Loosened the same day (human decision 2026-09-14): a warning, not a
+refusal.** The gate above became `warn`; exit stays 0; a malformed date in a
+field that is present stays a contract error. Memory is advisory, and a lock
+on the one status transition an agent makes alone invites fighting the lock
+instead of writing the reason. The docs now say "should", name `zamm-wicked`
+as a suggestion rather than a requirement, and say that the method applies at
+any animal — kraken is where it is needed most, not where it is allowed.
