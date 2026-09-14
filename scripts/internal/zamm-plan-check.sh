@@ -106,6 +106,24 @@ require_retrospective() {
   esac
 }
 
+# The kraken frame gate. The scale says a kraken plan is never scoped as
+# "solve it"; a kraken that leaves Draft without a chosen frame is exactly that
+# plan. So past Draft it must carry the human's yes to its `problem:` line:
+# `Frame-approved-by:` (who) and `Frame-approved-at:` (a real date). Every other
+# animal is untouched, and a kraken still in Draft owes nothing -- Draft is
+# where the framing happens.
+require_frame_gate() {
+  _pf="$1"; _rel="$2"; _st="$3"
+  [ "$(field "$_pf" "Complexity-forecast")" = "kraken" ] || return 0
+  _fb=$(field "$_pf" "Frame-approved-by")
+  _fa=$(field "$_pf" "Frame-approved-at")
+  if [ -z "$_fb" ] || [ -z "$_fa" ]; then
+    err "$_rel: forecast kraken and status $_st, but no approved frame (Frame-approved-by:/Frame-approved-at: empty) -- a kraken never leaves Draft unframed: get the human's yes to the problem: line and record it, or stay Draft"
+  elif ! valid_date "$_fa"; then
+    err "$_rel: Frame-approved-at is not a real YYYY-MM-DD date: $_fa"
+  fi
+}
+
 # Real Gregorian date, not just the digit shape (2026-99-99 and 2026-02-30 are
 # rejected, leap years respected) — the same rule the compiler applies to
 # record filenames. `10#` is not POSIX, so leading zeros are stripped by hand
@@ -503,6 +521,7 @@ EOF
       if [ -n "$cf" ] && ! in_set "$cf" "$COMPLEXITY_ANIMALS"; then
         err "$rel: Complexity-forecast \"$cf\" is not on the animal scale ($COMPLEXITY_ANIMALS)"
       fi
+      require_frame_gate "$pf" "$rel" "$status"
       ;;
   esac
   case "$status" in
@@ -549,6 +568,9 @@ EOF
         if [ -n "$cf" ] && ! in_set "$cf" "$COMPLEXITY_ANIMALS"; then
           err "$rel: Complexity-forecast \"$cf\" is not on the animal scale ($COMPLEXITY_ANIMALS)"
         fi
+        # work happened, so the plan left Draft -- and a kraken leaves Draft
+        # only through its frame gate
+        require_frame_gate "$pf" "$rel" "$status"
         require_retrospective "$pf" "$rel" "$status"
       fi
       ;;

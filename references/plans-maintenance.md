@@ -15,7 +15,9 @@ Allowed transitions: `Draft -> Implementing | Abandoned`;
 ## Requirements per transition
 
 - `Draft -> Implementing`: Scope and Done-when filled;
-  `Execution-context-before` and `Complexity-forecast` filled.
+  `Execution-context-before` and `Complexity-forecast` filled. A `kraken`
+  forecast also needs `Frame-approved-by` and `Frame-approved-at` — the
+  human's yes to the `problem:` line; the checker refuses otherwise.
 - `Draft -> Abandoned`: rationale under `## Loose ends`. A never-started
   draft needs nothing more; the checker asks for the full retrospective only
   once work happened (an `Execution-context-before` was filled, or a

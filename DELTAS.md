@@ -2406,3 +2406,28 @@ names for 25 fewer. Nothing outside the vendored skill refers to the old
 section names. `status` will say `guardrails: 16/15 -- OVER`, `11 plans are
 Implementing`, `4 archive-ready`, and `check` passes.
 
+
+Locked 2026-09-14 — the kraken frame gate.
+
+**A kraken plan cannot leave Draft unframed.** `kraken` had been a marker with
+a paragraph since v3: never scope it as "solve it", probe one tentacle, distill
+the new shape. Nothing checked any of it, and the plans that needed it most sat
+in Draft with statements that moved on every approach. The gate is the one rule
+the wicked-problems literature does not let scale down — no production
+commitment before the decision-maker has approved a written frame — expressed
+where ZAMM already has a mechanical check: `plan check` now refuses a
+`Complexity-forecast: kraken` plan on any status past Draft whose
+`Frame-approved-by:` or `Frame-approved-at:` is empty (and an Abandoned kraken
+that did work, by the work-happened heuristic), and rejects a fake date. The
+compiler shows the state on the Plans tail line — `[kraken, frame pending]` or
+`[kraken, frame approved YYYY-MM-DD]` — so the open gate is re-read at every
+session start, which is what an agent-side stance needs instead of a hook. The
+`problem:` line of `## Why` is the working frame and `alternatives:` the
+rejected frames; perspectives, an assumptions register and a probe portfolio go
+in a `<plan-dir>/frame.md` sidecar. Other animals are untouched, a kraken in
+Draft owes nothing, and the method itself — triage, frame, assumptions, spike,
+probes, argument map, stop — is a policy skill (`zamm-wicked`), kept out of
+ZAMM on the same reasoning that kept reflection out of the journal tree.
+Docs: `complexity-animals.md` ("The gate"), `plans-writing.md`,
+`plans-maintenance.md`, one SKILL.md dispatch row, DESIGN.md. Tests: `TestKrakenFrameGate` in
+`test_plan_validation.py`.

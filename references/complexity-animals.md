@@ -40,3 +40,13 @@ mitigation with explicit exit criteria. `Done-when` items must describe the prob
 the mitigation shipped, not the disappearance of the problem. After each engagement, distill
 the updated shape-perception into the ledger so the next attempt starts from the newest map
 instead of rediscovering the beast.
+
+The gate: a kraken plan leaves Draft only after the human has said yes to the sentence on its
+`## Why` `problem:` line — the working frame — recorded in the header as `Frame-approved-by:`
+(who) and `Frame-approved-at:` (a real date). `plan check` refuses a kraken past Draft without
+them, and the digest Plans tail shows `[kraken, frame pending]` until they exist. `alternatives:`
+holds the rejected frames; the perspectives, the assumptions register and the probe portfolio
+live in a `<plan-dir>/frame.md` sidecar. A kraken still in Draft owes nothing — Draft is where
+the framing happens — and every other animal is untouched. The method behind the gate (triage,
+frame, assumptions, spikes, probes, argument map, stop) is a policy skill, `zamm-wicked`; without
+it, this paragraph is the whole guidance.

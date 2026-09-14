@@ -706,3 +706,90 @@ class TestWhySection(ZammTest):
 
         self.assertCode(self.led.plan_check(), EXIT_OK)
 
+
+
+class TestKrakenFrameGate(ZammTest):
+    """A kraken plan leaves Draft only through its frame gate: the human's yes
+    to the `problem:` line, recorded as `Frame-approved-by:` / `-at:`. Other
+    animals owe nothing, and a kraken still in Draft owes nothing — Draft is
+    where the framing happens."""
+
+    def _kraken(self, slug, status, frame_by=None, frame_at=None, tail=()):
+        head = [f"# {slug}", "", f"Status: {status}",
+                "Execution-context-before: outcome unclear, causality unclear",
+                "Complexity-forecast: kraken"]
+        if frame_by is not None:
+            head.append(f"Frame-approved-by: {frame_by}")
+        if frame_at is not None:
+            head.append(f"Frame-approved-at: {frame_at}")
+        head += ["Last updated: 2026-01-05", "",
+                 "Scope:", "* In: one bounded probe.", "* Out: solving it.", "",
+                 "## Done-when", "", "- [ ] probe outcome recorded", ""]
+        head += list(tail)
+        self.led.write(
+            f"zamm-memory/active/plans/{slug}/{slug}.plan.md",
+            "\n".join(head) + "\n",
+        )
+
+    def test_kraken_implementing_without_frame_is_rejected(self):
+        self._kraken("2026-01-05-k1", "Implementing")
+        r = self.led.plan_check()
+        self.assertCode(r, EXIT_CONTRACT)
+        self.assertIn_("approved frame", r.err)
+
+    def test_kraken_with_only_one_field_is_rejected(self):
+        self._kraken("2026-01-05-k2", "Implementing", frame_by="SKe")
+        r = self.led.plan_check()
+        self.assertCode(r, EXIT_CONTRACT)
+        self.assertIn_("approved frame", r.err)
+
+    def test_kraken_in_draft_owes_nothing(self):
+        self._kraken("2026-01-05-k3", "Draft")
+        self.assertCode(self.led.plan_check(), EXIT_OK)
+
+    def test_kraken_with_approved_frame_passes(self):
+        self._kraken("2026-01-05-k4", "Implementing",
+                     frame_by="SKe", frame_at="2026-01-05")
+        self.assertCode(self.led.plan_check(), EXIT_OK)
+
+    def test_frame_approved_at_must_be_a_real_date(self):
+        self._kraken("2026-01-05-k5", "Implementing",
+                     frame_by="SKe", frame_at="2026-02-30")
+        r = self.led.plan_check()
+        self.assertCode(r, EXIT_CONTRACT)
+        self.assertIn_("Frame-approved-at", r.err)
+
+    def test_other_animals_are_untouched(self):
+        self.led.add_plan("2026-01-05-gecko", status="Implementing")
+        self.assertCode(self.led.plan_check(), EXIT_OK)
+
+    def test_abandoned_kraken_that_did_work_needs_the_frame(self):
+        """Execution-context-before is filled, so the work-happened heuristic
+        says the plan left Draft — and a kraken leaves Draft only framed."""
+        retro = ["## Learnings", "", "- It moved again.", "",
+                 "## Loose ends", "", "- Abandoned: the frame kept moving.", "",
+                 "Execution-friction-after: none",
+                 "Complexity-felt: kraken",
+                 "Complexity-delta: as-expected"]
+        self._kraken("2026-01-05-k6", "Abandoned", tail=retro)
+        r = self.led.plan_check()
+        self.assertCode(r, EXIT_CONTRACT)
+        self.assertIn_("approved frame", r.err)
+        self._kraken("2026-01-05-k6", "Abandoned",
+                     frame_by="SKe", frame_at="2026-01-05", tail=retro)
+        self.assertCode(self.led.plan_check(), EXIT_OK)
+
+    def test_digest_shows_frame_state_on_kraken_lines(self):
+        self.led.add_memory(
+            "2026-01-01-anchor-" + "22222",
+            "Anchor record so the ledger is not empty.", scope="domain",
+        ) if hasattr(self.led, "add_memory") else None
+        self._kraken("2026-01-05-k7", "Draft")
+        self._kraken("2026-01-05-k8", "Implementing",
+                     frame_by="SKe", frame_at="2026-01-05")
+        self.led.add_plan("2026-01-05-gecko2", status="Implementing")
+        self.led.compile()
+        d = self.led.digest()
+        self.assertIn_("2026-01-05-k7 [kraken, frame pending]", d)
+        self.assertIn_("2026-01-05-k8 [kraken, frame approved 2026-01-05]", d)
+        self.assertIn_("2026-01-05-gecko2 [gecko]", d)

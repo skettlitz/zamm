@@ -141,6 +141,20 @@ The `problem:` line is written so that Done-when can say it no longer happens.
 **A vanished problem or a failed assumption is grounds to stop.** Abandoning
 on that basis is the plan working as designed, and is written as such.
 
+**A kraken plan has a frame gate.** The scale says a kraken is never scoped as
+"solve it"; a kraken that leaves Draft without a chosen frame is exactly that
+plan. So past Draft it must carry the human's yes to its `problem:` line —
+`Frame-approved-by:` and `Frame-approved-at:` — and `plan check` refuses it
+otherwise: the one place a "no production work before an approved frame" rule
+can be mechanical without a hook, because the checker already runs and its
+defects print at every startup. The Plans tail shows the state (`frame
+pending` / `frame approved <date>`) so an open gate is re-read every session.
+Every other animal is untouched; a kraken in Draft owes nothing. The method
+behind the gate is a policy skill (`zamm-wicked`), not ZAMM — judgement call,
+2026-09-14, on the same reasoning that kept reflection out of the journal
+tree. *Cost:* two header lines on the rare kraken plan, and one more thing the
+checker knows about plans.
+
 ---
 
 ## Ranking and the digest

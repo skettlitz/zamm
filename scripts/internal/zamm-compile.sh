@@ -818,6 +818,8 @@ render_plans_section() {
       { sub(/\r$/, "") }
       st == "" && /^Status:/              { st = $0; sub(/^Status:/, "", st); st = trimv(st) }
       cf == "" && /^Complexity-forecast:/ { cf = $0; sub(/^Complexity-forecast:/, "", cf); cf = trimv(cf) }
+      fb == "" && /^Frame-approved-by:/   { fb = $0; sub(/^Frame-approved-by:/, "", fb); fb = trimv(fb) }
+      fa == "" && /^Frame-approved-at:/   { fa = $0; sub(/^Frame-approved-at:/, "", fa); fa = trimv(fa) }
       lu == "" && /^Last updated:/        { lu = $0; sub(/^Last updated:/, "", lu); lu = trimv(lu) }
       ti == "" && /^# /                   { ti = $0; sub(/^# /, "", ti); ti = trimv(ti) }
       si == "" && /^\* In:/               { si = $0; sub(/^\* In:/, "", si); si = trimv(si) }
@@ -866,6 +868,18 @@ render_plans_section() {
         line = "- " label ": " slug
         if (cf != "" && cf !~ /^</) {
           if (length(cf) > 32) cf = substr(cf, 1, 29) "..."
+          # A kraken plan carries the one gate the scale imposes -- the frame
+          # the human said yes to -- and its state rides on the line every
+          # session reads, so a kraken that left Draft unframed cannot hide
+          # behind its status. Other animals show the animal alone.
+          if (cf == "kraken") {
+            if (fb != "" && fb !~ /^</ && fa != "" && fa !~ /^</) {
+              split(fa, faw, /[ \t]/)
+              cf = cf ", frame approved " faw[1]
+            } else {
+              cf = cf ", frame pending"
+            }
+          }
           line = line " [" cf "]"
         }
         tot = nopen + ndone + 0
