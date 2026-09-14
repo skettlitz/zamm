@@ -15,8 +15,9 @@ Not you, and not now. Write for these readers, most frequent first:
   SITUATION — the file, the command, the phase, the tool — so the match
   happens before the sentence ends; then the instruction; then the why in
   one clause. Condition first: "When touching X, do Y because Z."
-- The same agent reading ~150 `## Headlines`: the headline alone, and a
-  decision whether to open the record. A headline that says "see below" or
+- The same agent reading a collapsed entry (one the space budget could not
+  expand, marked `+el`): the headline alone, and a decision whether to open
+  the record. A headline that says "see below" or
   "important caveat about tests" makes that decision impossible; one that
   carries the rule makes opening unnecessary.
 - An agent about to do something high-impact, which opened the record
@@ -48,8 +49,8 @@ instruction, not detail.
   guardrail statement, standalone-readable. One short sentence is the norm;
   ~300 characters is a ceiling, not a target. The digest joins the
   paragraph's lines into one line, so wrap freely in the file — it is still
-  one statement. It is the entry's first line in the digest and its only
-  line under Headlines.
+  one statement. It is the entry's first line in the digest, and everything a
+  reader gets when the budget cannot afford the rest.
 - Optional elaboration paragraphs follow: a digest-worthy caveat, a key
   parameter, the load-bearing why. Everything above the first heading is
   the DIGEST BLOCK; hard limits are 12 lines and 1200 characters (the writer

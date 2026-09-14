@@ -1,16 +1,19 @@
 # ZAMM Memory Digest (2026-07-19: files=22 parsed=22 live=17 quarantined=0 archive-ready=4; generated file - do not edit)
 
-Entry format: - subpath: headline [record-id votes +bg +el]; indented lines =
-elaboration. Both record sections group under ### area headings; the subpath on
+Entry format: - subpath: headline [record-id votes +bg +el]; indented
+lines = elaboration. Records group under ### area headings; the subpath on
 each line names the topic of that one record inside its area.
-Digest section: up to 75 actionable full blocks (! = guardrail, do not violate;
-~ = contested head, also listed under Needs reconciliation). +el = the block
-has elaboration the space budget could not render; open the record.
-Headlines section: up to 150 one-line reminders that knowledge exists;
-open the record (+bg) when the topic matches. Id doubles as creation date.
+Records section: up to 200 live records, ranked (! = guardrail, do not
+violate; ~ = contested head, also listed under Needs reconciliation). Every
+listed record shows its headline; elaboration is expanded in rank order while
+the space budget lasts, and +el marks a record whose elaboration did not fit —
+open it. +bg means the file also holds a ## Background section. Id doubles as
+creation date.
 Session read: `zamm-run.sh startup` recompiles this file and hands back its path.
 Reading this file once, whole, IS the session read - there is nothing else
 to run and no second surface to consult.
+Searching for something half-remembered, or reading as a human? The same
+ledger with nothing left out is beside this file, as zamm-digest-full.md.
 
 ## Needs reconciliation (resolve this session)
 
@@ -22,7 +25,7 @@ This is an index — each head keeps its full block below, marked ~.
 - tooling/build: Branch beta of the contested statement. [2026-07-16-contested-beta-2222n]
 - tooling/build: Branch alpha of the contested statement. [2026-07-16-contested-alpha-2222m]
 
-## Digest (actionable; full blocks)
+## Records (ranked; every listed record shows its headline)
 
 ### ops
 - ! migrations: Never run a migration against production without a snapshot first. [2026-07-10-guard-snapshot-22222]
@@ -58,7 +61,7 @@ This is an index — each head keeps its full block below, marked ~.
 ### domain
 - audience: Domain rule in an otherwise empty area; it should enter early on diversity. [2026-07-12-sparse-domain-2222a]
 
-Budget: 3922/80000 chars, ~1k tokens (soft). 16 of 16 digest entries expanded;
+Budget: 4108/80000 chars, ~1k tokens (soft). 16 of 16 listed records expanded;
 0 collapsed to their headline (+el) to fit. Raise with --softmax, or supersede
 what has gone stale — this is context every agent pays for at every session start.
 
@@ -68,4 +71,4 @@ Dormant (decayed below digest floor; ledger stays greppable): 1 meta
 
 (no active plans)
 
-<!-- zamm-generation: 1344333901-3858 -->
+<!-- zamm-generation: 3316047876-4044 -->

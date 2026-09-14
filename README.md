@@ -43,7 +43,7 @@ It prints two lines — what the project holds, and the path of the digest:
 
 ```
 ZAMM v3 · 34 live · 3 guardrails · 2 plans (1 blocked) · 11 ideas (2 hot) · 47 episodes
-digest updated: zamm-memory/.compiled/zamm-digest.md
+digest ready: zamm-memory/.compiled/zamm-digest.md
 ```
 
 Below them, two more lines when something is wrong with the project — never more than two:
@@ -54,7 +54,8 @@ details: zamm-memory/.compiled/zamm-defects.md
 ```
 
 That file carries a section per defect — what it means, what it costs, the one command that
-addresses it — and is rewritten by every run, so it also says when there is nothing wrong. A
+addresses it. Every startup writes it, so it also says when there is nothing wrong, and any
+other compile deletes it, so if it is there it is current. A
 healthy project prints neither line. The explanations used to print in full at session
 start, four lines each; the content was right and the place was wrong, because a defect
 needs room to explain itself and session start is the one surface with none. How to read the
@@ -62,11 +63,12 @@ digest is not repeated either — the rendered router in `AGENTS.md` carries it,
 agent read that minutes earlier.
 
 Reading that file, whole, is the whole read. Top to bottom: a `Needs reconciliation` index when a merge
-left two heads; marked backlog ideas; up to a few dozen full entries balanced across
-knowledge areas so one hot topic cannot drown the rest (a leading `!` is a guardrail, `+bg`
-means a Background section exists); a longer list of one-line reminders; counts for the
-unlisted and the dormant; the active plans with status and progress; the recently archived
-plan ids; one backlog line; and, only when journal digestion is due, one `Journal:` line.
+left two heads; marked backlog ideas; up to 200 records balanced across knowledge areas so
+one hot topic cannot drown the rest, each with its elaboration where the budget could afford
+it (a leading `!` is a guardrail, `+bg` means a Background section exists, `+el` means the
+elaboration did not fit); counts for the unlisted and the dormant; the active plans with
+status and progress; the recently archived plan ids; one backlog line; and, only when
+journal digestion is due, one `Journal:` line.
 Nothing else has to be discovered. The agent reruns it only after records were written or
 merged.
 
@@ -147,15 +149,39 @@ digest for a reader with no file tool, and warns when the output will not surviv
 
 That makes the surface's ceiling an attention budget rather than a plumbing one: what it
 bounds is how much context memory takes from every session before any work starts. The
-surface is bounded twice — by entry counts, which decide WHICH records are listed, and by
-that soft character ceiling, which decides how much each listed record gets to say. When
-the ceiling binds, Digest blocks give up their elaboration and render as their headline
-alone, marked `+el` so a reader knows there is more in the file. No record is ever dropped
+surface is bounded twice — by one entry count, which decides WHICH records are listed (200),
+and by a soft character ceiling, which decides how much each listed record gets to say. When
+the ceiling binds, entries give up their elaboration in reverse rank order and render as
+their headline alone, marked `+el` so a reader knows there is more in the file. There used
+to be two layers here, 75 full blocks and 150 headline-only reminders, and the split
+predated the budget: with both in place a record could be demoted twice for one reason, and
+the boundary between "actionable" and "a reminder that this exists" was a judgement about
+content that the ranking never knew. Membership is one cap now, and detail is one budget. No record is ever dropped
 to hit the number: a digest that sheds entries to look small is lying about the ledger, so
 an oversized one goes over its budget and says so instead — in its own `Budget:` footer and
 on `status`, not at session start. An overrun is a standing property of a ledger that has
 grown, and only a human can decide what gets retired; a notice that fires every session
 forever would just teach the reader to skip the notices that need acting on.
+
+The same ledger is rendered a second time, as `.compiled/zamm-digest-full.md`: every record
+that is still standing, dormant ones included, each with its full elaboration, no cap and no
+budget. That one is for a person searching for something half-remembered — `+el` is exactly
+the wrong answer to "where did I write that down" — and it says so at the top, because an
+agent reading it at session start would pay for everything the ranking decided not to push.
+
+Neither file is rebuilt when nothing has moved. The compiler fingerprints its inputs and a
+startup whose fingerprint matches the one stored beside the digest exits without compiling:
+about 110ms against 550ms on a 400-record project. Under git it asks git — the object ids of
+the committed ledger, plus the content of anything `status` calls dirty, untracked or
+ignored — because a repository already has an authority on what changed, and one that scales:
+at 4000 records that answer costs 20ms where reading the ledger costs 140ms. Without git it
+reads the ledger and hashes it, which at a few hundred records is the same speed. Content
+either way, never mtime: two edits inside one filesystem tick, a restored backup or a
+`git checkout` that rewrites a file to the same size all leave a digest describing a ledger
+that no longer exists, and memory that is confidently stale is worse than memory that is
+slow. Writes recompile as they land, so the work happens where it belongs — at the end of a
+session that wrote something, not at the start of every session that did not.
+`startup --force` rebuilds regardless.
 
 Digest budgets and scoring constants are deliberately not documented here: they are tuning
 knobs, and their single authoritative home is the commented header of
@@ -165,7 +191,9 @@ every compile.
 ## Finding things
 
 The digest is the read, not a search. When it is silent and the agent needs what was
-written down, the ledger is plain files: `grep -r <term> zamm-memory/` finds dormant and
+written down, there is the full rendering beside it (`.compiled/zamm-digest-full.md`, the
+same ledger with nothing left out) — and under that, plain files: `grep -r <term>
+zamm-memory/` finds dormant and
 unlisted records too, and any markdown search the project happens to have works as well
 (QMD is one example; none is required, and none ever writes a record).
 
@@ -287,7 +315,7 @@ Everything runs through one entrypoint, which finds the project root itself
 (nearest ancestor holding `zamm-memory/`, else the git top level):
 
 ```
-startup              session start: rebuild every tree, name the digest to read
+startup              session start: recompile, then READ the digest it names
 scaffold             install ZAMM here, or refresh the rendered surfaces
 status               health overview: ledger, backlog, journal, plans, drift
 check                validate everything (memory + backlog + journal + plans)
@@ -398,6 +426,7 @@ In **development and testing**; the structure is still evolving and tested on in
 - Memory record template: `<zamm-skill>/references/templates/memory-record.template.md`
 - Existing project initialization: `<zamm-skill>/references/initialization/existing-project.md`
 - Major-version migrations: `<zamm-skill>/references/migrations/`
+- Design decisions in force, and what each one costs: `DESIGN.md`
 - Changelog and change map vs. v2: `DELTAS.md` (decisions as they were taken — some were later reversed; it is history, not current behaviour)
 
 (`<zamm-skill>` means your installed skill directory, for example `~/.agents/skills/zamm`.)

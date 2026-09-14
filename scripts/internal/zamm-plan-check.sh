@@ -151,12 +151,14 @@ section_body() {
   ' "$1"
 }
 
-# `Scope:` heads a block (`* In:` / `* Out:` and bullets), so its value is not
-# on the Scope: line itself. Non-empty means there is real text under it beyond
-# the bare `* In:` / `* Out:` scaffolding, up to the next `## ` heading.
+# Scope heads a block (`* In:` / `* Out:` and bullets), so its value is not on
+# the heading line itself. Non-empty means there is real text under it beyond
+# the bare `* In:` / `* Out:` scaffolding, up to the next `## ` heading. Both
+# spellings are accepted for good: `## Scope` (the template since 2026-09-13,
+# a heading like every other section) and `Scope:` (every plan before it).
 scope_has_content() {
   awk '
-    /^Scope:/ { inb = 1; next }
+    /^Scope:/ || /^## Scope[[:space:]]*$/ { inb = 1; next }
     inb && /^## / { inb = 0 }
     inb { print }
   ' "$1" |

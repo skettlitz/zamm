@@ -23,7 +23,7 @@ class TestRouting(ZammTest):
     def test_each_subcommand_reaches_its_script(self):
         self.led.add("a-rule", "A statement.")
         for args, expect in [
-            (["startup"], "digest updated:"),  # startup reports, not just builds
+            (["startup"], "digest ready:"),  # startup reports, not just builds
             (["memory", "check"], "check passed"),
             (["plan", "list"], "plan status snapshot"),
             (["plan", "archive"], "plan archive helper"),

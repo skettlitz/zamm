@@ -5,6 +5,10 @@ consecutive review rounds hardened the write path against an adversary nobody
 had ever specified, and the cost — roughly a fifth of the shell, concentrated
 in the most defect-dense fifth — bought nothing a real user could observe.
 
+It covers what counts as a defect. Why the system is shaped the way it is — the
+design choices these guarantees constrain — is in `DESIGN.md` at the repository
+root.
+
 A finding that does not violate one of the three guarantees below is **not a
 defect**. Close it as out of scope and cite this file. That rule is the point
 of the document; without a stopping condition, "could a hypothetical process
@@ -103,6 +107,42 @@ resolves on the next run.
 **Untrusted repository *content* is in scope.** A symlink or a hostile path
 committed by someone else is static and cheap to refuse; G5 refuses it as a
 side effect of requiring a self-contained ledger.
+
+**The input fingerprint is not a validator.** A compile is skipped when the
+fingerprint of its inputs matches the one stored beside the digest. Under git
+that is the object ids of the committed ledger (`.compiled/` excluded) plus the
+content of everything `status` reports as not committed-and-clean; without git
+it is every path under `zamm-memory/` outside `.compiled/` and the content of
+every `.md` among them. Both then add the skill scripts, the budget and today.
+It answers one question: could the output have changed? It is not a second
+gate, and it is allowed to be coarser than the gates. One known case: the
+content pass reads through symlinks, so replacing a record with a symlink to a
+byte-identical copy can read as no change, and that run skips rather than
+refusing under G5. Under git this only applies to a record git does not track
+(a tracked one becomes a typechange, which `status` reports); without git it
+applies to any record. Adding or deleting a symlink changes the path list and
+is caught in both tiers. The delay is bounded and the guarantee is not
+weakened: `check` never skips,
+`--force` never skips, every compile that does run still refuses, and content
+reached through a symlink cannot enter a digest that was never produced. The
+alternative — walking the tree three times to record each path as file,
+directory or link — was a permanent cost on every session start for a
+substitution nobody performs by accident.
+
+**Derived answers are reused under the same rule.** When the fingerprint says
+nothing moved, every answer the last compile derived is still the answer, so
+session start reuses two of them instead of recomputing: the plan manifest
+(`.compiled/plan-manifest.tsv`, written by the compile that enumerated the
+tree) and the installed skill stamp (`.compiled/skill-stamp.tsv`, keyed to the
+install that computed it, so two harnesses with separate skill copies on one
+project never serve each other's stamp). The stamp cache carries its own
+compromise: its freshness probe is mtime-based where the stamp is
+content-based, so a skill file restored with its old timestamp — or renamed
+with `mv`, which keeps it — can delay a drift notice until the next ordinary
+edit. Both caches are opt-in per
+caller. `status` takes neither — it is the surface whose job is to notice
+staleness, and it is read-only over the project, so it enumerates and hashes
+for itself every time.
 
 ### The one carve-out
 

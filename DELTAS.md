@@ -1,7 +1,8 @@
 # v3 — change map vs. v2
 
 **This is a changelog, not a description of the system.** For how ZAMM behaves
-today, read `README.md`, `SKILL.md` and `references/invariants.md`; entries
+today, read `README.md`, `SKILL.md` and `references/invariants.md`; for the
+decisions currently in force and why, `DESIGN.md`. Entries
 here describe decisions at the moment they were taken, and some of them have
 since been reversed (see the 2026-08-08 sections).
 
@@ -2011,6 +2012,267 @@ any other rather than its own trailing paragraph, which is what it always was:
 the rendered protocol no longer matching the installed scripts is a defect in
 the installation.
 
+Locked 2026-09-12 — the same rule, applied to warnings: `warn()` prints only
+where nothing renders, the guardrail cap becomes a reading on `status`, and a
+record that is live and archived at once becomes a defect.
+
+**The first run of the reworked startup in a real project still opened with
+four sentences about guardrail inflation.** `16 live guardrails (soft max 15).
+Guardrails bypass the digest budget and never decay…` — above the report,
+before the count line that already said `16 guardrails`, and true on every run
+until a human reclassifies something. It is the attention budget again in
+different clothes: standing state, only a human can resolve it, and a notice
+that always fires is one a reader learns to scroll past. So `warn()` now
+follows the channel rule `err()` got: it prints on `--check` and the read-only
+seams, which render nothing and would otherwise answer short with no
+explanation, and stays quiet on the path that renders. `status` grows the
+missing half — `guardrails: 16/15 -- OVER, and guardrails never decay`, with
+the reclassify remedy — so the pressure reads where someone asked for it. The
+marked lane already said so in its own lens, and the per-record warnings (an
+unknown key, a body opening with a key-looking line) still reach their author
+at the moment it is news, because a validating write runs `--check`.
+
+**One warning was load-bearing, and it moved rather than went quiet.** A
+record that exists live AND archived renders nowhere — the ledger parses, so
+there is no `## Degraded` line, and no count `status` prints moves — which
+means its stderr line was the only thing standing between a half-finished
+archive and silence. It is now counted in the state sidecar (`livearchived`)
+and announced as a defect type with `memory archive` as its remedy. The test
+that pinned the warning to `check` stderr now also pins the defect to session
+start: this is the one case where "say it where it renders" required giving it
+somewhere to render.
+
+Locked 2026-09-12 — one ranked section of 200 instead of two layers, a second
+rendering with nothing left out, and a compiler that does not compile when
+nothing moved.
+
+**Two layers were one mechanism too many.** The digest listed 75 "actionable"
+full blocks and then 150 headline-only "reminders". That split predates the
+space budget, which already decides per record how much it can afford to say.
+With both in place a record could be demoted twice for the same reason — once
+by missing the Digest cap, once by the budget — and the boundary carried no
+meaning a reader could act on: "actionable" versus "a reminder that this
+exists" is a judgement about CONTENT, and the ranking never knew it. Now
+membership is one cap (200 records, `## Records`) and detail is one budget:
+every listed record shows its headline, elaboration is bought in rank order
+until the money runs out, and `+el` marks what could not be. The section that
+used to be Headlines is now simply the tail of the same list, and a ledger
+under the ceiling reads identically to before.
+
+**The same ledger, rendered twice, because the two readers have opposite
+budgets.** `.compiled/zamm-digest-full.md` is every record still standing —
+dormant ones included — each with its full elaboration, no cap, no budget, no
+floor. `+el` is exactly the wrong answer to "where did I write that down", and
+a person searching pays nothing for length. It is a second process, not a
+second pass inside the awk: that renderer is one straight line of emission
+with byte accounting threaded through it, and the honest way to get two budgets
+out of it is to run it twice. Each file says which one it is, because the
+failure to prevent is an agent reading the full rendering at session start and
+paying for everything the ranking decided not to push.
+
+**A compile that changes nothing should not run.** Session start recompiled
+unconditionally, so the common case — open a session, change nothing, read
+memory — paid for the whole ledger to be reranked and rewritten byte for byte.
+The compiler now fingerprints its inputs and exits early when they have not
+moved: ~180ms against ~550ms on a 400-record project. In the fingerprint: every
+path under `zamm-memory/` outside `.compiled/` (a rename, a deletion, debris
+appearing in a plan directory), the CONTENT of every `.md` among them, every
+script in the skill (a changed renderer is a changed digest from the same
+ledger), the effective budget, and today.
+
+**Content, not mtime.** mtime is the cheap answer and it is wrong in the
+expensive direction: two edits inside one filesystem tick, a restored backup, a
+`git checkout` that rewrites a file to the same size each leave a digest
+describing a ledger that no longer exists, and memory that is confidently stale
+is worse than memory that is slow. Reading every record costs ~45ms against the
+~550ms compile it replaces.
+
+**The fingerprint is not a validator, and buying that confusion was
+expensive.** The suite caught what content alone misses: swapping a record for
+a SYMLINK to a byte-identical copy leaves both the path list and the bytes
+unchanged, and a symlinked record is exactly what the ledger refuses (it is a
+record the compiler did not read, and skipping one can silently un-redact an
+erasure). The first fix walked the tree three times, labelling every path as
+file, directory or link, to make that one substitution visible — a permanent
+cost on every session start for something nobody does by accident.
+
+It is a compromise instead, taken deliberately and written down in
+`references/invariants.md`: the fingerprint answers "could the output have
+changed", not "is this ledger legal". It is allowed to be coarser than the
+gates, because it does not stand in for them. A symlink ADDED or DELETED
+changes the path list and is caught; only the swap is invisible, and for it the
+diagnosis is delayed rather than lost — `check` never skips, `--force` never
+skips, every compile that runs still refuses, and no content reached through a
+symlink can enter a digest that was never produced. The next real change
+recompiles and the refusal arrives. Both halves are pinned by tests: the
+fail-closed suite asserts the refusal under `--force`, and `test_recompile`
+asserts the blind spot itself, so the trade stays visible rather than becoming
+folklore.
+
+**Today is in the fingerprint, and that is deliberate.** Scores decay by date,
+so a ledger nobody touched ranks differently tomorrow. Leaving the clock out
+would have bought a few hundred milliseconds a day at the price of a digest
+whose dormancy and ordering silently lag — the same stale-memory failure the
+content hash exists to prevent. One compile per calendar day is the whole cost.
+
+**Nothing is remembered until the inputs have been read twice with the same
+answer.** The fingerprint is taken before the compile and again after it, and
+stored only if they agree: a record written while the compiler was running is
+not described by what it published, and remembering that fingerprint would skip
+the recompile that fixes it. Storing nothing costs one compile; storing a wrong
+one costs a stale digest until someone writes again. The exit code is stored
+with it and replayed on a skip — a degraded ledger must keep reporting 2 on a
+run that re-derived nothing, or the skip would read as a repair. And the
+session-start line says `digest ready:` rather than `digest updated:`: most
+startups now update nothing, and it must not say "unchanged" either, because an
+agent that reads that will decide it already knows what the file says.
+
+Locked 2026-09-12 — the rest of session start: what was left after the compile
+stopped compiling.
+
+**With the compile skipped, the two enumerations session start did for itself
+became the bill.** A warm startup on a 400-record project measured ~190ms:
+72ms to prove the inputs had not moved, 62ms hashing the skill tree for the
+drift notice, 41ms walking the plan tree for one line of counts, ~15ms of
+everything else. The fingerprint is the only one of those that has to happen —
+it is the thing that decides — so the other two were cut. It is now ~100ms.
+
+**`zamm-skill-stamp.sh` spawned a `cat` per file.** Forty-eight files, forty-
+eight processes, to hash 776K. One awk reads them all: same bytes in the same
+order, so the stamp value is identical (verified by running both against one
+tree), 62ms to 39ms, and `scaffold` and `status` get it too.
+
+**`plan_tally` spawned two processes per plan** — an awk to find the plan file
+in the manifest, a sed to read its `Status:`. That is fine for two plans and
+absurd for twenty, and it is the function BOTH startup and status read, so the
+cost was paid twice over on every surface that mentions plans. It is one awk
+pass now: the manifest goes in, the tally comes out, and the counting rules
+stay where they were, in one definition.
+
+**The last two are caches, and they rest on the rule the skip already
+asserts.** If nothing under `zamm-memory/` moved, the plan manifest the last
+compile wrote is still the manifest — so the compiler leaves it in
+`.compiled/plan-manifest.tsv` and session start reads it instead of walking
+the tree again. The skill stamp is cached the same way but keyed on mtimes,
+which is a real compromise and is written down in `references/invariants.md`:
+a skill file restored with its old timestamp can delay a drift notice. Both are
+opt-in per caller, and `status` takes neither — it is the surface whose job is
+to notice staleness, and a test holds it to touching nothing.
+
+**Five bugs this shook out.** The skip exited before the cleanup trap was
+installed, so every skipped compile leaked the temp file it had already
+created — invisible until a directory listing showed twenty of them. The stamp
+cache was written by `installed_stamp` unconditionally, which made `status`
+write to the project it promises only to read; the test that says so caught it
+the first time it ran. The skip checked that the rendered files were present
+but not their SIDECARS, so a deleted `backlog-state.tsv` left session start
+silently dropping the idea counts while `status` said "run startup" — the one
+command that would now skip forever. `_pt_nl=$(printf '\n')` is the empty
+string, because command substitution strips trailing newlines, so two missing
+plan roots ran together into one unreadable path and counted as one. And the
+stamp marker was refreshed BEFORE the stamp was computed, so a computation
+that failed left a fresh marker over a stale value and every later cached call
+would have answered with the stamp from before the skill changed — the marker
+is written to a side path now and only becomes the marker once there is a
+value to mark.
+
+**A comment that was wrong in a way that looked right.** The freshness probe
+runs `find ... -exec printf 'NEWER\n' {} +` and counted on the format being
+reused per argument. POSIX only defines that reuse when the format CONTAINS a
+conversion specification: without one, GNU printf prints once and BSD printf
+errors. The line-count invariant it was documenting held on Linux and nowhere
+else. It is `printf 'NEWER %s\n'` now, which is defined everywhere.
+
+Locked 2026-09-12 — asking git what changed, when there is a git to ask.
+
+**The question is narrower than "did any byte move".** Under the conditions
+this runs in, a ledger changes in exactly two ways: an agent writes a record,
+and that write recompiles as it lands; or someone else's records arrive, which
+means a pull, a merge or a checkout — and every one of those moves a git object
+id. Hand edits outside the tools are the remainder, and git sees those too, as
+a dirty working tree. So the fingerprint asks git first: the object ids of the
+committed ledger (one `ls-tree` line per direct child of `zamm-memory/`), plus
+the content of every path `status` reports as dirty, untracked or ignored, plus
+the skill scripts, the budget and today. No git, or a ledger git has never
+seen, falls back to reading the tree.
+
+**It is not a weaker answer, it is a cheaper one — and only at scale.**
+Measured on the same 400-record ledger, the two tiers cost the same: ~50ms
+each, because reading four hundred small files with a warm page cache is not
+slow. At 4000 records the git answer is 20ms and reading is 140ms, and the gap
+is linear: the tree object does not care how large the ledger is, and `status`
+only hashes what it already knows is in flux. Git is also the more precise
+instrument — it compares content, handles the racy-timestamp case a mtime rule
+gets wrong, and reports a record swapped for a symlink as a typechange, which
+closes the one blind spot the read-the-tree tier documents.
+
+**`ls-tree`, not `rev-parse HEAD:zamm-memory`.** The id of the zamm-memory tree
+is the id of a tree that CONTAINS `.compiled/`. A project that has committed
+its compiled artifacts — no ignore rule, or one someone removed — would then
+change its own input every time it published and never skip again. The same
+trap in the other half: `--ignored` lists `.compiled/` file by file, so the
+digest would be an input to the fingerprint that produces it. Both are excluded
+by path. The test that caught the first one was the one asserting that
+committing unrelated code does not cost a session a full compile.
+
+**Review found three more, all silent.** The status pathspec was prefixed with
+the repo-relative prefix although `git -C <project>` already makes pathspecs
+relative to the project, so for any project below a repository top it named
+`<prefix>/<prefix>/zamm-memory`, matched nothing, and git only warned: the
+fast path was dead there. Worse, `ls-tree` filters its output by the working
+directory unless told `--full-tree`, and where the project's prefix happened to
+name a directory inside the ledger the listing came back non-empty and partial
+— a fingerprint covering some of the tree, accepted as covering all of it. The
+full rendering read the backlog and journal sidecars, which a degraded sub-pass
+still writes, so it printed healthy counts beside a session digest that said
+DEGRADED; the parent now passes its verdict down. And a companion render that
+failed still let the fingerprint be stored, so one transient failure froze the
+full rendering at an old ledger with every later run calling it unchanged; a
+failed companion now stores no fingerprint, and the next run retries. (Exit 2 —
+a degraded ledger, rendered — counts as success there; treating it as failure
+was the bug the suite caught while this fix was going in.)
+
+Locked 2026-09-13 — plans carry their why. New plans only; older plans stay
+valid as they are.
+
+**What and how are the record of doing; why is the record of steering.** A
+plan with Scope, Done-when and Approach and nothing above them is a to-do
+list, and a to-do list fails in two ways that this project demonstrated to
+itself in one session. Forks the plan did not anticipate get decided by
+"easier": when a symlink case turned up in the compile skip, the fix was three
+directory traversals — strictly correct, permanently expensive — because
+nothing written down said the skip existed to make startup cheap under
+expected conditions; the human had to redirect twice. And lists get executed
+past their reason: the assumptions that made git the right change detector
+("agents recompile as they write; everything else arrives by pull") were said
+in conversation before the work began, and a content hash of four hundred
+files was built first anyway.
+
+**The reason is usually recoverable, so derive it and say so.** Sometimes the
+human's reason is not given; more often it is in the discussion, and the
+agent's job at plan creation is to write it down and mark each line `human:`,
+`derived:` or `not revealed`. A wrong derivation then costs one round of plan
+review instead of a day of code review, and `not revealed` on serious work is
+the prompt to ask.
+
+**Six questions, asked; three answered by most plans.** now, problem, serves,
+approach, enough, assumes — each guarding a specific failure (a lost trigger,
+an unverifiable done, a local win against a global rule, a re-litigated
+choice, a compromise turned folklore, a premise that expired). Two more live
+where they already belong: the reason beside each Scope `Out` item, and "why
+it ended this way" under Learnings at close-out. The checker requires none of
+it. What the section changes is behaviour at two moments — before choosing at
+a fork, and at approval, where the question becomes "is the problem gone?".
+
+**Not a taxonomy.** The first draft of this had four levels of why and four
+kinds of basis as fields on every decision. The useful residue is one habit,
+written into `DESIGN.md`: say what kind of answer a decision rests on where it
+matters — a measured number carries its date, a judgement call carries its
+owner — so a preference is not re-argued as a proof. Three entries there were
+rewritten to say so: the 80k ceiling and the symlink compromise are the
+human's calls; today-in-the-fingerprint is the agent's, taken against a stated
+preference, and says why.
+
 Locked 2026-09-13 — the compiler hands awk its program as a file. CI had been
 red on Linux since 2026-09-10 and green on every Mac, including every local
 run that tried to reproduce it.
@@ -2038,3 +2300,68 @@ the shell string; 2026-07-20): a quoted heredoc has no such character. The
 hygiene test that guarded against apostrophes now guards the actual
 constraint — no single-quoted string in any script may reach half of
 `MAX_ARG_STRLEN` — and checks that the compiler feeds its program through `-f`.
+
+Locked 2026-09-13 — review of the compile skip: five things the fingerprint
+could not see, and what a skipped compile owes the surfaces around it.
+
+**Git answers only for a ledger it can see.** The git tier took the answer
+whenever `status` listed anything, even with no committed tree — and a ledger
+that is its own repository, or a submodule, is ONE status line for the
+directory to the outer git, with every edit inside it invisible. The content
+pass then read a directory and printed nothing. It now requires a committed
+tree and falls back to reading the files the moment any status line names a
+directory; the gitignored-ledger case, which was taking the git tier and paying
+for it twice, reads the tree directly like it used to.
+
+**Git tracks no directories.** An empty plan directory renders in the plans
+tail and counts as an anomaly; an interrupted `plan create` leaves a
+`.tmp-plan-*` the manifest reports as debris. Neither moves `git status`. The
+fingerprint lists directories itself now, in both tiers.
+
+**The project path is an input.** `plan-manifest.tsv` holds absolute paths, so
+a git-tracked project moved to a new directory matched its old fingerprint
+(same tree object, same clean status), skipped, and read plan files at the old
+location. The root is in the header line now; a move costs one compile.
+
+**A skip certifies, so it touches.** `status` decides staleness by `find
+-newer` the digest; startup decides by content. A record touched without a
+content change — a branch switch, a sync, an editor saving identical bytes —
+left status saying "run startup" and startup skipping, forever: the
+"status tells you to run the one command that will skip" failure this same
+change had fixed for a missing sidecar, reintroduced through mtime. A skipped
+compile now touches every published file: they are current as of now, and
+every mtime-based reader should see it. Tests that ask "was it rebuilt" read
+the inode, which only a real publish (a rename) changes.
+
+**One rename, whole.** `rc` and `inputs` were appended to the published
+sidecar after its rename — a second writer, and under concurrent compiles one
+process's rows landed in the other's fresh file, where the first `inputs` row a
+reader hit could describe a digest built at a different budget. Every row now
+goes into the temp file before the one rename, the verdict (`degnote`)
+included, so a skipped compile replays the last compile's wording instead of
+guessing "see ## Degraded" for a degraded backlog. The companion pass moved
+ahead of the second fingerprint read for the same reason, and it is handed the
+tails the session pass rendered — plans section, marked lane, backlog and
+journal lines, verdicts included — instead of re-enumerating the plan tree and
+being told the verdict through environment variables; run on its own, `--full`
+renders everything itself and cannot be the cheerful one.
+
+**Smaller, from the same review.** The stamp cache is keyed to the install
+that computed it (two harnesses with separate skill copies on one project
+served each other's stamp) and written through a rename; the stamp script is
+byte-transparent again (`cat`, not an awk getline loop that cuts at NUL and
+appends a newline — a binary under references/ would have stamped differently
+per awk); the awk routes errors and warnings by one `renders` flag computed
+once in shell instead of a seven-flag test spelled three times; the scripts
+are hashed once per process rather than once per fingerprint read; the
+interrupted-read test now interrupts a read (the companion seam writes a record
+between the two fingerprint reads, and nothing may be stored); and a dead
+`ENTRY_MAX` override, three inline sidecar reads and a hand-built newline
+separator are gone.
+
+**Left standing, on purpose.** Three larger proposals from the same review —
+a single-pass full rendering inside the awk, plan counts in the sidecar
+replacing the manifest cache, and folding the skill stamp into the fingerprint
+— each remove a mechanism this session added and would each be a day. The
+deploy is the priority; they are written down here so they are not lost.
+

@@ -44,16 +44,30 @@ fi
 # and hashing those made the stamp differ between the author's tree and a clean
 # clone of the SAME commit, so every fresh clone reported STALE surfaces and no
 # re-scaffold could ever fix it. Anything normative lives in a non-dot path.
-digest=$({
+# Paths first, then the bytes of every file in the same order. `cat` is
+# byte-transparent where an awk getline loop is not: awk cuts a line at NUL
+# and appends a newline to a final line that has none, so a binary or an
+# unterminated file under references/ would have stamped differently per awk.
+# Word-splitting on newline alone (no globbing) is how POSIX sh hands a list
+# to one `cat` without xargs; the skill tree carries no newline in a path.
+files=$({
   { [ -f "$SKILL_DIR/SKILL.md" ] && printf '%s\n' "$SKILL_DIR/SKILL.md"; }
   find "$SKILL_DIR/references" "$SKILL_DIR/scripts" \
     -name '.*' -prune -o -type f -print 2>/dev/null
-} | LC_ALL=C sort | {
-  while IFS= read -r f; do
-    printf '%s\n' "${f#"$SKILL_DIR"}"
-    cat "$f" 2>/dev/null
-  done
-} | $hasher | tr -d ' -' | cut -c1-12)
+} | LC_ALL=C sort)
+digest=$(
+  {
+    # The IFS change is confined to this segment of the pipeline: each
+    # segment is its own subshell, so $hasher below still splits on spaces.
+    IFS='
+'
+    set -f
+    # shellcheck disable=SC2086 -- deliberate: one path per line, no globbing
+    printf '%s\n' $files | awk -v pre="$SKILL_DIR" '{ print substr($0, length(pre) + 1) }'
+    # shellcheck disable=SC2086
+    cat $files 2>/dev/null
+  } | $hasher | tr -d ' -' | cut -c1-12
+)
 
 [ -n "$digest" ] || { echo "local"; exit 0; }
 printf 'sha:%s\n' "$digest"

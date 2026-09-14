@@ -187,7 +187,7 @@ class TestGoldenDigest(ZammTest):
         build(self.led)
         self.led.compile(today=PINNED_TODAY)
         digest = self.led.digest()
-        digest_section = self.led.digest_section("Digest")
+        digest_section = self.led.digest_section("Records")
 
         # guardrails are always in the actionable layer
         self.assertIn_("Never run a migration against production", digest_section)

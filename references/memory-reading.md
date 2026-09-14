@@ -5,8 +5,11 @@ changes the ledger.
 
 ## The digest
 
-`bash <zamm-skill>/scripts/zamm-run.sh startup` recompiles the digest
-and hands back its path. **Reading that file, whole, is the session read.**
+`bash <zamm-skill>/scripts/zamm-run.sh startup` recompiles the digest when
+anything has moved since the last compile, and hands back its path. (Most
+startups rebuild nothing: the compiler fingerprints the ledger, the plans and
+its own scripts, and skips the work when the answer cannot have changed. Your
+own writes recompile as they land.) **Reading that file, whole, is the session read.**
 The command's own output is a handoff: two lines — what the project holds and
 where the digest is — plus two more when something is wrong with the project,
 naming the defect types and the report that explains them
@@ -44,19 +47,17 @@ Its anatomy, top to bottom:
   `memory-maintenance.md` says how.
 - `## Marked backlog` — only when ideas are marked: the ideas someone
   selected for implementation, one headline each. Implement or unmark.
-- `## Digest (actionable; full blocks)` — up to ~75 records grouped under
-  `### area` headings (the fixed eight), balanced across areas so one hot
-  topic cannot drown the rest. Each is `- subpath: headline [record-id votes
-  +bg]` with its elaboration indented under it; the subpath names the one
-  record inside its area, and is absent when the record has none. A leading `!` is a GUARDRAIL: violating it
-  breaks the project or wastes hours — do not. A leading `~` is a contested
-  head, also listed under Needs reconciliation. An entry ending `+el` had
-  elaboration the space budget could not afford — open the record.
-- `## Headlines (reminders)` — up to ~150 more records, headline only, under
-  the same `### area` headings. Not enough to act on alone: when the topic
-  matches what you are doing, open the record. Grouped rather than ranked
-  flat, because that is how this layer is used — you scan it for a topic,
-  not for the top of a list.
+- `## Records (ranked)` — up to 200 live records grouped under `### area`
+  headings (the fixed eight), balanced across areas so one hot topic cannot
+  drown the rest. Each is `- subpath: headline [record-id votes +bg]`; the
+  subpath names the one record inside its area, and is absent when the record
+  has none. A leading `!` is a GUARDRAIL: violating it breaks the project or
+  wastes hours — do not. A leading `~` is a contested head, also listed under
+  Needs reconciliation. Elaboration is indented under the headline where the
+  space budget could afford it, in rank order; an entry ending `+el` has
+  elaboration that did not fit — open the record when the topic matters. One
+  section, not two: every listed record shows its headline, and the budget
+  alone decides how much more each one says.
 - `Budget:` — the digest's size against its soft character ceiling, and how
   many blocks kept their elaboration. `OVER BUDGET` means every entry is
   already collapsed to its headline and the total still exceeds the ceiling.
@@ -64,8 +65,12 @@ Its anatomy, top to bottom:
   ledger, not an error, and not something to raise at session start. Bring it
   up only when the human is already deciding what to retire, or when you have
   a concrete candidate to supersede.
-- Trailing counts: live records below the entry caps (unlisted) and dormant
-  ones (decayed below the floor). Both stay in the ledger, greppable.
+- Trailing counts: live records below the entry cap (unlisted) and dormant
+  ones (decayed below the floor). Both stay in the ledger, greppable — and
+  both are listed in full in `.compiled/zamm-digest-full.md`, the companion
+  rendering with no cap, no budget and no decay floor. That file is for a
+  person searching, not for a session: reading it at session start spends
+  context on everything the ranking already decided not to push.
 - `## Plans` — every active plan (status, progress, title) and the recently
   archived ones; `plans-reading.md`.
 - `Backlog:` — one line of counts. `Journal:` — one line, only when
@@ -90,8 +95,8 @@ there is more to read.
 - `memory show <slug|id>` — one record in full.
 - `memory list [--all] [--scope <area>]` — scope, slug, and the first ~70
   characters of the headline. By default ONLY the records the digest
-  selected (the ~75 blocks and ~150 headlines); `--all` lists every live
-  record, including the unlisted and the dormant. Before adding knowledge
+  selected (the 200 listed records); `--all` lists every live record,
+  including the unlisted and the dormant. Before adding knowledge
   that might overlap, it is `--all` you want.
 - `grep -r <term> zamm-memory/knowledge/` — the ledger is plain files;
   dormant and unlisted records are found this way.

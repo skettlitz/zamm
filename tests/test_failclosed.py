@@ -197,17 +197,41 @@ class Rev6ErasureFailClosed(ZammTest):
                          "previous digest must survive an unreadable erasure record")
 
     def test_symlinked_erasure_record_is_refused(self):
+        """The compile refuses, and the previous digest survives.
+
+        DOCUMENTED COMPROMISE (DELTAS, "the fingerprint is not a validator"):
+        swapping a record for a symlink to a byte-identical copy is the one
+        change the input fingerprint cannot see, so a bare `startup` may skip
+        the compile that would refuse. `--force` and `check` never skip, and no
+        symlinked content can enter a digest that was not produced. The next
+        real change recompiles and refuses. This test therefore compiles with
+        --force; test_recompile pins the skip that makes it necessary.
+        """
         before, _secret, eid = self._erased_fixture()
         rec = self.led.root / f"zamm-memory/knowledge/2026/{eid}.md"
         real = self.led.root / "real-erasure.md"
         rec.rename(real)
         os.symlink(real, rec)
-        r = self.led.compile()
+        r = self.led.compile("--force")
         self.assertCode(r, EXIT_UNREADABLE)
         self.assertIn_("symlink", r.err)
         self.assertCode(self.led.check(), EXIT_UNREADABLE)
         self.assertEqual(before, self.led.digest(),
                          "previous digest must survive a symlinked record")
+
+    def test_a_symlink_that_appears_beside_the_records_is_still_caught(self):
+        """The compromise is narrow on purpose: a NEW path changes the
+        fingerprint, so the only blind spot is a swap that keeps both the path
+        and the bytes."""
+        self.led.add("rule", "A statement.")
+        self.led.compile()
+
+        os.symlink(self.led.root / "outside.md",
+                   self.led.root / "zamm-memory/knowledge/2026/2026-01-06-sneaky-33333.md")
+        r = self.led.compile()
+
+        self.assertCode(r, EXIT_UNREADABLE)
+        self.assertIn_("symlink", r.err)
 
     def test_a_stray_copy_of_an_erased_record_stays_out(self):
         """The job a one-time delete cannot do: git makes a deleted file

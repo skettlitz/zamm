@@ -432,9 +432,83 @@ rendered_stamp() {
   sed -n 's/.*SKILL-BLOCK:zamm:BEGIN version=\([^ ]*\).*/\1/p' \
     "$ROOT/AGENTS.md" 2>/dev/null | head -1
 }
+# The installed skill's content stamp. `installed_stamp cached` may answer from
+# .compiled/skill-stamp.tsv when no skill file is newer than the marker written
+# beside it and the file count still matches; anything else recomputes.
+#
+# DOCUMENTED COMPROMISE (references/invariants.md): the probe is mtime-based
+# where the stamp itself is content-based, so a skill file restored with its
+# old timestamp (cp -p, rsync --times, a tar that preserves mtimes) can leave a
+# drift notice unsaid until the next ordinary edit. An edit, a checkout, a
+# skill upgrade and a fresh clone all move mtimes, so the case is narrow — and
+# `status`, the surface whose job is to notice drift, never passes `cached`.
+# What this buys is session start: hashing 48 skill files was 39ms of a 125ms
+# startup that had already decided it had nothing to do.
 installed_stamp() {
   [ -f "$INTERNAL/zamm-skill-stamp.sh" ] || return 0
-  sh "$INTERNAL/zamm-skill-stamp.sh" 2>/dev/null || true
+  _is_sk=$(cd "$SCRIPT_DIR/.." && pwd)
+  _is_dir="$ROOT/zamm-memory/.compiled"
+  _is_c="$_is_dir/skill-stamp.tsv"
+  _is_m="$_is_dir/skill-stamp.mark"
+  _is_tab=$(printf '\t')
+  _is_write=0
+  if [ "${1:-}" = "cached" ] && [ -d "$_is_dir" ]; then _is_write=1; fi
+  _is_n=""
+  if [ "$_is_write" -eq 1 ] && [ -f "$_is_c" ] && [ -f "$_is_m" ]; then
+    # One traversal answers both questions: every file prints exactly one line
+    # — its path, or NEWER when it is newer than the marker — so the line count
+    # is the file count (a deletion or an addition moves it) and a NEWER line
+    # is an edit. `printf 'NEWER %s\n' a b c` prints one line per argument:
+    # the format is reused because it CONTAINS a conversion specification;
+    # without one the reuse is unspecified (GNU prints once, BSD errors).
+    if _is_probe=$(find "$_is_sk/SKILL.md" "$_is_sk/references" "$_is_sk/scripts" \
+         -name '.*' -prune -o -type f \
+         \( -newer "$_is_m" -exec printf 'NEWER %s\n' {} + -o -print \) 2>/dev/null); then
+      _is_n=$(printf '%s\n' "$_is_probe" | grep -c . || true)
+      # Three fields: file count, stamp, and WHICH install computed it. Two
+      # harnesses with separate skill copies can share one project; a cache
+      # keyed on the project alone handed one install the other one's stamp.
+      _is_cn=$(awk -F"$_is_tab" '{ print $1; exit }' "$_is_c" 2>/dev/null)
+      _is_ck=$(awk -F"$_is_tab" '{ print $3; exit }' "$_is_c" 2>/dev/null)
+      if [ "$_is_n" = "$_is_cn" ] && [ "$_is_ck" = "$_is_sk" ] &&
+         ! printf '%s\n' "$_is_probe" | grep -q '^NEWER '; then
+        awk -F"$_is_tab" '{ print $2; exit }' "$_is_c" 2>/dev/null
+        return 0
+      fi
+    fi
+  fi
+  # The marker is stamped BEFORE the files are read, so a skill file edited
+  # while the hash runs is newer than the marker and invalidates the cache on
+  # the next run rather than hiding behind it.
+  #
+  # Only the caller that asked for the cache writes it. `status` is read-only
+  # over the project — it says so and a test holds it to that — so it computes
+  # the stamp and leaves no trace; session start, which asked, refreshes it.
+  # It goes to a SIDE path first and only becomes the marker once there is a
+  # value to mark. A marker refreshed ahead of a stamp that then failed to
+  # compute would sit fresh over the old cached value, and every later `cached`
+  # call would answer with the stamp from before the skill changed — the one
+  # failure this whole mechanism exists to avoid.
+  if [ "$_is_write" -eq 1 ]; then : > "$_is_m.new" 2>/dev/null; fi
+  _is_v=$(sh "$INTERNAL/zamm-skill-stamp.sh" 2>/dev/null) || _is_v=""
+  if [ -z "$_is_v" ]; then
+    rm -f "$_is_m.new" 2>/dev/null
+    return 0
+  fi
+  if [ "$_is_write" -eq 1 ] && [ -f "$_is_m.new" ]; then
+    # The probe already counted the files when it ran; a first run has no
+    # marker to probe against and counts here.
+    [ -n "$_is_n" ] ||
+      _is_n=$(find "$_is_sk/SKILL.md" "$_is_sk/references" "$_is_sk/scripts" \
+                -name '.*' -prune -o -type f -print 2>/dev/null | grep -c . || true)
+    if printf '%s%s%s%s%s\n' "$_is_n" "$_is_tab" "$_is_v" "$_is_tab" "$_is_sk" > "$_is_c.new" 2>/dev/null &&
+       mv "$_is_c.new" "$_is_c" 2>/dev/null; then
+      mv "$_is_m.new" "$_is_m" 2>/dev/null || rm -f "$_is_m.new" 2>/dev/null
+    else
+      rm -f "$_is_c.new" "$_is_m.new" 2>/dev/null
+    fi
+  fi
+  printf '%s\n' "$_is_v"
 }
 
 # Session start runs `startup` and nothing else, so this is the only place a
@@ -497,7 +571,7 @@ startup_report() {
   # Plans come from the checked manifest, never a glob: a startup line that
   # reported "no active plan" over an unreadable tree would hide the failure.
   _sr_plans=1
-  plan_tally || _sr_plans=0
+  plan_tally cached || _sr_plans=0
   if [ "$_sr_plans" -eq 0 ]; then
     _sr_l="$_sr_l · plans unreadable"
   elif [ "$PT_TOTAL" -eq 0 ]; then
@@ -528,7 +602,12 @@ startup_report() {
   # ---- line 2: the only thing the agent has to act on. Relative to the
   #      project root, which is where it is already standing: shorter, and it
   #      keeps a home directory out of every transcript.
-  printf 'digest updated: %s\n' "$_sr_rel"
+  # "ready", not "updated": most startups now rebuild nothing (the compiler
+  # skips a compile whose inputs have not moved), and a line that claims an
+  # update on every run is false half the time. It must also not say
+  # "unchanged" — an agent that reads that will decide it already knows what
+  # the file says, and the session read is not optional.
+  printf 'digest ready: %s\n' "$_sr_rel"
 
   # ---- anything wrong with the project: two lines, and a file that explains.
   defects_report "$_sr_plans"
@@ -680,18 +759,41 @@ defects_report() {
     df_say ""
   fi
 
+  # A record that is live AND archived. It renders nowhere — the ledger parses,
+  # so there is no ## Degraded line, and no count status prints moves — and the
+  # live copy silently wins, which is the state nobody goes looking for.
+  _df_la=$(num "$(tsv_field "$_df_st" livearchived)")
+  if [ "$_df_la" -gt 0 ]; then
+    df_type "$(plural "$_df_la" "record live and archived" "records live and archived")"
+    df_say "## Live and archived at once — $_df_la"
+    df_say ""
+    df_say 'An archive move was interrupted: the record exists in both trees. The live'
+    df_say 'copy is the one used, so nothing is lost and nothing reads wrong today —'
+    df_say 'but the next reader to open the archived copy is reading a record that has'
+    df_say 'been superseded somewhere else, and a later archive run has two candidates'
+    df_say 'for the same id.'
+    df_say ""
+    df_say '  zamm-run.sh memory archive     finishes the move it started'
+    df_say ""
+  fi
+
   # The catch-all area, over its cap. The one validation failure the digest
   # does NOT render a line for (it is a property of the whole ledger, not of a
   # record), so silence here would leave it reaching no reader until someone
   # ran `check` — and it is the failure that makes `check` refuse.
   _df_o=$(num "$(tsv_field "$_df_st" other)")
-  if [ "$_df_o" -gt 5 ]; then
+  # The cap comes from the compiler that enforces it. A sidecar too old to carry
+  # it skips the check rather than guessing a number: it cannot survive long,
+  # because a changed skill changes the fingerprint and the next compile writes
+  # the row.
+  _df_om=$(tsv_field "$_df_st" other_max)
+  if [ -n "$_df_om" ] && [ "$_df_o" -gt "$(num "$_df_om")" ]; then
     df_type "$_df_o live records in other"
-    df_say "## The catch-all area is over its cap — $_df_o of 5"
+    df_say "## The catch-all area is over its cap — $_df_o of $_df_om"
     df_say ""
     df_say 'Scope `other` is a waiting room, not an area: records land there when'
     df_say 'nothing else fit, and a reader looking for them by topic never finds them.'
-    df_say 'Five is the cap, and `zamm-run.sh check` refuses past it. Refile each one'
+    df_say "$_df_om is the cap, and \`zamm-run.sh check\` refuses past it. Refile each one"
     df_say 'by superseding it with the same content under a real area —'
     df_say ""
     df_say '  zamm-run.sh memory list --scope other'
@@ -744,7 +846,7 @@ defects_report() {
   # whether the ledger still parses.
   _df_rs=$(rendered_stamp)
   if [ -n "$_df_rs" ]; then
-    _df_is=$(installed_stamp)
+    _df_is=$(installed_stamp cached)
     if [ -n "$_df_is" ] && [ "$_df_rs" != "$_df_is" ]; then
       df_type 'skill drift'
       df_say '## Skill drift'
@@ -849,38 +951,82 @@ num() { case "${1-}" in '' | *[!0-9]*) echo 0 ;; *) echo "$1" ;; esac; }
 plan_tally() {
   PT_TOTAL=0; PT_BLOCKED=0; PT_TERMINAL=0; PT_ARCH=0; PT_ANOM=0
   PT_SUMMARY=""; PT_MISSING=""
-  _pt_f=$(mktemp "${TMPDIR:-/tmp}/zamm-plan-tally.XXXXXX")
-  if ! sh "$INTERNAL/zamm-plan-manifest.sh" --project-root "$ROOT" > "$_pt_f"; then
-    rm -f "$_pt_f"
-    return 1
+  # `plan_tally cached` may read the manifest the last compile left behind
+  # instead of enumerating the tree again. Safe under exactly the rule the
+  # compile skip already asserts: if nothing under zamm-memory/ moved, every
+  # derived answer from that compile is still the answer, and if something DID
+  # move the compile ran and rewrote this file with it. `status` deliberately
+  # does not pass it — it is the surface whose job is to notice staleness, so
+  # it enumerates for itself.
+  _pt_cached=${1:-}
+  _pt_tmp=""
+  _pt_f="$ROOT/zamm-memory/.compiled/plan-manifest.tsv"
+  if [ "$_pt_cached" != "cached" ] || [ ! -f "$_pt_f" ]; then
+    _pt_f=$(mktemp "${TMPDIR:-/tmp}/zamm-plan-tally.XXXXXX")
+    _pt_tmp="$_pt_f"
+    if ! sh "$INTERNAL/zamm-plan-manifest.sh" --project-root "$ROOT" > "$_pt_f"; then
+      rm -f "$_pt_tmp"
+      return 1
+    fi
   fi
-  _pt_tab=$(printf '\t')
-  PT_MISSING=$(awk -F"$_pt_tab" -v r="$ROOT/" '$1 == "MISSING" { p = $2; sub(r, "", p); print p }' "$_pt_f")
-  _pt_st=""
-  while IFS= read -r _pt_d; do
-    [ -n "$_pt_d" ] || continue
-    _pt_pf=$(awk -F"$_pt_tab" -v d="$_pt_d/" '$1 == "PLANFILE" && index($2, d) == 1 { print $2; exit }' "$_pt_f")
-    [ -n "$_pt_pf" ] || continue
-    _pt_s=$(sed -n 's/^Status:[[:space:]]*//p' "$_pt_pf" | head -1 | awk '{print $1}')
-    _pt_st="$_pt_st$_pt_s
-"
-  done <<EOF
-$(awk -F"$_pt_tab" '$1 == "PLANDIR" { print $2 }' "$_pt_f")
+  # ONE awk pass over the manifest, reading each plan file itself. It used to
+  # be two processes per plan — an awk to find the plan file, a sed to read its
+  # Status — which on a project with eighteen plans cost more than every other
+  # part of session start put together. The counting rules are unchanged and
+  # still live here, in the one definition both startup and status read.
+  _pt_rc=0
+  _pt_out=$(awk -F"$(printf '\t')" -v root="$ROOT/" '
+    $1 == "MISSING"  { p = $2; sub(root, "", p); miss[++nmiss] = p; next }
+    $1 == "PLANDIR"  { dirs[++nd] = $2; next }
+    $1 == "PLANFILE" { pf[++npf] = $2; next }
+    $1 == "ARCHDIR"  { narch++; next }
+    $1 ~ /^(SYMLINK|NOTDIR|UNREADABLE|DUP|DEBRIS)$/ { nanom++; next }
+    END {
+      for (i = 1; i <= nd; i++) {
+        d = dirs[i]
+        slug = d; sub(/.*\//, "", slug)
+        want = d "/" slug ".plan.md"
+        file = ""
+        # prefer <slug>.plan.md, else the first candidate the manifest lists —
+        # manifest order, never hash order, so two runs agree
+        for (j = 1; j <= npf; j++) {
+          if (pf[j] == want) { file = want; break }
+          if (file == "" && index(pf[j], d "/") == 1) file = pf[j]
+        }
+        if (file == "") continue
+        st = ""
+        while ((getline line < file) > 0) {
+          sub(/\r$/, "", line)
+          if (line ~ /^Status:/) {
+            st = line
+            sub(/^Status:[ \t]*/, "", st)
+            sub(/[ \t].*$/, "", st)
+            break
+          }
+        }
+        close(file)
+        if (st != "") count[st]++
+      }
+      n = split("Draft Implementing Blocked Review Done Abandoned", order, " ")
+      for (i = 1; i <= n; i++) {
+        k = order[i]
+        c = (k in count) ? count[k] : 0
+        total += c
+        if (c > 0) summary = summary ((summary == "") ? "" : ", ") c " " tolower(k)
+        if (k == "Blocked") blocked = c
+        if (k == "Done" || k == "Abandoned") terminal += c
+      }
+      printf "%d\t%d\t%d\t%d\t%d\t%s\n", total, blocked + 0, terminal + 0, narch + 0, nanom + 0, summary
+      for (i = 1; i <= nmiss; i++) printf "%s\n", miss[i]
+    }
+  ' "$_pt_f") || _pt_rc=$?
+  [ -z "$_pt_tmp" ] || rm -f "$_pt_tmp"
+  [ "${_pt_rc:-0}" -eq 0 ] || return 1
+  # Line one is the six scalars; every line after it is a missing plan root.
+  IFS="$(printf '\t')" read -r PT_TOTAL PT_BLOCKED PT_TERMINAL PT_ARCH PT_ANOM PT_SUMMARY <<EOF
+$(printf '%s\n' "$_pt_out" | sed 1q)
 EOF
-  for _pt_k in Draft Implementing Blocked Review Done Abandoned; do
-    _pt_n=$(printf '%s' "$_pt_st" | grep -c "^$_pt_k\$" || true)
-    PT_TOTAL=$((PT_TOTAL + _pt_n))
-    [ "$_pt_n" -gt 0 ] &&
-      PT_SUMMARY="$PT_SUMMARY$_pt_n $(echo "$_pt_k" | tr 'A-Z' 'a-z'), "
-    case "$_pt_k" in
-      Blocked) PT_BLOCKED=$_pt_n ;;
-      Done|Abandoned) PT_TERMINAL=$((PT_TERMINAL + _pt_n)) ;;
-    esac
-  done
-  PT_SUMMARY=$(printf '%s' "$PT_SUMMARY" | sed 's/, $//')
-  PT_ANOM=$(awk -F"$_pt_tab" '$1 ~ /^(SYMLINK|NOTDIR|UNREADABLE|DUP|DEBRIS)$/ { n++ } END { print n + 0 }' "$_pt_f")
-  PT_ARCH=$(awk -F"$_pt_tab" '$1 == "ARCHDIR" { n++ } END { print n + 0 }' "$_pt_f")
-  rm -f "$_pt_f"
+  PT_MISSING=$(printf '%s\n' "$_pt_out" | sed 1d)
   return 0
 }
 
@@ -984,9 +1130,31 @@ print_status() {
     # (the bug the sidecar exists to fix), so a stale/absent sidecar reports
     # "recompile" rather than a plausible-but-wrong number.
     if state_coherent; then
-      printf '          guardrails: %s/15\n' "$(state_field guardrails)"
+      # Against its cap, and flagged when over. Guardrails bypass the digest
+      # budget and never decay, so inflation grows quietly; the compiler used
+      # to say so on stderr at every session start, which is where a standing
+      # property becomes noise. Here it is a reading someone asked for.
+      # Both caps are read from the sidecar, never hardcoded: the compiler owns
+      # the policy. A sidecar that predates the rows prints the count alone.
+      _gr=$(state_field guardrails)
+      _grm=$(state_field guardrail_max)
+      if [ -z "$_grm" ]; then
+        printf '          guardrails: %s\n' "${_gr:-?}"
+      elif [ "$(num "$_gr")" -gt "$(num "$_grm")" ]; then
+        printf '          guardrails: %s/%s -- OVER, and guardrails never decay\n' "$_gr" "$_grm"
+        printf '          reclassify the weakest to useful, or supersede what no longer applies\n'
+      else
+        printf '          guardrails: %s/%s\n' "${_gr:-?}" "$_grm"
+      fi
       other=$(state_field other)
-      { [ -n "$other" ] && [ "$other" != "0" ]; } && printf '          other backlog: %s/5\n' "$other"
+      _om=$(state_field other_max)
+      if [ -n "$other" ] && [ "$other" != "0" ]; then
+        if [ -n "$_om" ]; then
+          printf '          other backlog: %s/%s\n' "$other" "$_om"
+        else
+          printf '          other backlog: %s\n' "$other"
+        fi
+      fi
       contested=$(state_field contested)
       { [ -n "$contested" ] && [ "$contested" -gt 0 ]; } &&
         printf '          RECONCILIATION PENDING: %s group(s)\n' "$contested"
@@ -3985,12 +4153,20 @@ do_help() {
   case "${1:-}" in
     "") usage 0 ;;
     startup) cat <<'EOF'
-Usage: zamm-run.sh startup [--softmax N] [--inline]
+Usage: zamm-run.sh startup [--softmax N] [--inline] [--force]
 
-Session start, run once. Recompiles every tree, then prints two lines: what
-the project holds, and the path of the digest to read. READ THAT FILE, whole,
-with a file tool - this output is not the digest, and `cat` would be cut
-silently by the harness output cap.
+Session start, run once. Prints two lines: what the project holds, and the
+path of the digest to read. READ THAT FILE, whole, with a file tool - this
+output is not the digest, and `cat` would be cut silently by the harness
+output cap.
+
+It recompiles only when something moved. Under git that question is answered
+by git: the object ids of the committed ledger, plus the content of anything
+`status` reports as dirty, untracked or ignored, plus the skill scripts, the
+budget and today. Without git it reads the ledger and hashes it. Either way the
+compile is skipped when the fingerprint matches the one stored beside the
+digest. Writes recompile as they land, so a session that wrote records leaves
+the digest current behind it.
 
 Anything wrong with the project adds two lines, never more: the defect types
 with their counts, and the path of zamm-memory/.compiled/zamm-defects.md, which
@@ -4004,12 +4180,19 @@ the digest's own `Budget:` footer.
 
   --inline     print the digest itself instead of its path, for a reader with
                no file tool. Command output is capped; a real ledger gets cut.
+  --force      recompile even when nothing moved. For a corrupted or
+               hand-edited compiled file - the ledger itself never needs it.
   --softmax N  the soft character ceiling (default 80000, or
-               $ZAMM_DIGEST_SOFTMAX) - an attention budget. Past it, Digest
-               blocks collapse to their headline (+el); no record is ever
-               dropped. It STICKS: the value is remembered beside the digest,
+               $ZAMM_DIGEST_SOFTMAX) - an attention budget. Past it, entries
+               collapse to their headline (+el) in reverse rank order; no
+               record is ever dropped. It STICKS: the value is remembered beside the digest,
                so later writes rebuild at it; --softmax 80000 restores the
                default.
+
+Beside the digest, every compile also writes zamm-digest-full.md: the same
+ledger with no entry cap, no space budget and no decay floor. It is for a
+person searching, not for a session - an agent that reads it at session start
+pays for everything the ranking decided not to push.
 
 `memory digest` is the old name for this command and still works.
 EOF
@@ -4078,7 +4261,7 @@ run_startup() {
       # either way — every startup refreshes it, and a reader with no file tool
       # is exactly the reader who should not have to ask twice.
       _il_plans=1
-      plan_tally || _il_plans=0
+      plan_tally cached || _il_plans=0
       defects_report "$_il_plans" >&2
     else
       startup_report

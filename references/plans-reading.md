@@ -11,7 +11,9 @@
   blessing while Blocked is work that has stopped. A
   "Recently archived" list follows: check it before treating a referenced
   plan directory as missing after a pull.
-- `plan show <slug>` — one plan with its progress line. `plan list` — every
+- `plan show <slug>` — one plan with its progress line. Its `## Why` (plans
+  created after 2026-09-13 carry one) is what to read before choosing at a
+  fork the plan did not anticipate. `plan list` — every
   active plan grouped by status (`Draft`, `Implementing`, `Blocked`, `Review`,
   `Done`, `Abandoned`, `Unknown`). `plan check` — required fields for the
   declared status, unchecked Done-when items, and the block log: an unknown

@@ -43,7 +43,7 @@ class TestMemoryList(ZammTest):
         default = self.led.memory_list()
         everything = self.led.memory_list("--all")
 
-        self.assertEqual(len(default.out.strip().splitlines()), 225)
+        self.assertEqual(len(default.out.strip().splitlines()), 200)
         self.assertEqual(len(everything.out.strip().splitlines()), 240)
 
     def test_superseded_records_are_not_listed(self):

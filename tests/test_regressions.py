@@ -45,16 +45,18 @@ class TestCompilerIntegrity(ZammTest):
         self.assertEqual(failures, [], f"{len(failures)}/12 compiles failed")
 
         digest = self.led.digest()
-        self.assertIn_("## Digest", digest)
+        self.assertIn_("## Records", digest)
         self.assertIn_("## Plans", digest)
         self.assertIn_("files=40 parsed=40 live=40 quarantined=0", self.header())
         self.assertEqual(len(self.led.entries()), 40)
 
-        # no shared temp file may survive a run; the digest, the state.tsv
-        # sidecar and the defect report are the published artifacts, everything
-        # else is a stray.
+        # no shared temp file may survive a run; the digest, its full
+        # companion, the state.tsv sidecar and the defect report are the
+        # published artifacts, everything else is a stray.
         compiled = self.led.root / "zamm-memory/.compiled"
-        published = {"zamm-digest.md", "state.tsv", "zamm-defects.md"}
+        published = {"zamm-digest.md", "zamm-digest-full.md", "state.tsv",
+                     "zamm-defects.md", "plan-manifest.tsv",
+                     "skill-stamp.tsv", "skill-stamp.mark"}
         strays = [p.name for p in compiled.iterdir() if p.name not in published]
         self.assertEqual(strays, [], "temp files left behind")
 
@@ -86,7 +88,7 @@ class TestCompilerIntegrity(ZammTest):
             digest,
             "the guardrail must survive its invalid successor",
         )
-        self.assertNotIn_("Half-written successor.", self.led.digest_section("Digest"))
+        self.assertNotIn_("Half-written successor.", self.led.digest_section("Records"))
         self.assertIn_("2026-01-06-broken-33333.md", self.led.digest_section("Degraded"))
         self.assertIn_("quarantined=1", self.header())
         self.assertCode(self.led.check(), EXIT_CONTRACT)
@@ -217,7 +219,7 @@ class TestDigestRendering(ZammTest):
         """PRE-FIX: the reconciliation index emitted heads through the same
         'printed' set the digest used, consuming their eligibility. Two
         competing guardrails rendered as one-line headlines and the whole
-        '## Digest' section came out empty — losing the elaboration exactly
+        '## Records' section (then '## Digest') came out empty — losing the elaboration exactly
         when the knowledge was in conflict.
         """
         root = self.led.add(
@@ -235,7 +237,7 @@ class TestDigestRendering(ZammTest):
 
         self.led.compile()
 
-        digest_section = self.led.digest_section("Digest")
+        digest_section = self.led.digest_section("Records")
         self.assertIn_("Elaboration for branch a explaining what breaks.", digest_section)
         self.assertIn_("Elaboration for branch b explaining what breaks.", digest_section)
         self.assertIn_("!~", digest_section, "contested heads must be marked")

@@ -167,9 +167,9 @@ archive tree) as a migration source.
 7. Run `bash <zamm-skill>/scripts/zamm-run.sh startup` and verify:
    - the digest's live-record count equals the total live card count from
      step 2,
-   - former Boulder/Bedrock cards appear as `!` guardrails in ## Digest,
-   - ## Digest and ## Headlines together cover the migrated live set (or
-     note unlisted-live if over the 75+150 budget),
+   - former Boulder/Bedrock cards appear as `!` guardrails in ## Records,
+   - ## Records covers the migrated live set (or note unlisted-live if the
+     set is larger than the 200-record cap),
    - no `Needs reconciliation` section exists,
    - live `other` count is ≤ 5 (ideally 0).
 8. Commit everything as one migration commit; only then let other

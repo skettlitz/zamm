@@ -44,7 +44,8 @@ directly and exists for the few cases that need it.
 | `test_contract.py` | record-contract validation, one case per family |
 | `test_semantics.py` | exit codes, warnings, clock determinism |
 | `test_golden.py` | whole-digest byte comparison over an authored ledger |
-| `test_budgets.py` | digest/headline caps, guardrail admission, dormant vs unlisted |
+| `test_budgets.py` | the 200-record cap, the space budget, guardrail admission, dormant vs unlisted |
+| `test_recompile.py` | the input fingerprint: what counts as a change, and what a skipped compile must still report |
 | `test_surfaces.py` | `zamm-status.sh`, scaffold re-render, `--help`, help-vs-dispatcher parity |
 | `test_settings.py` | chain-depth cap, `other` area + OTHER_MAX, generator flags, ledger edge paths |
 | `test_dispatcher.py` | `zamm-run.sh` routing, root resolution, `status` view |

@@ -21,12 +21,16 @@ Allowed transitions: `Draft -> Implementing | Abandoned`;
   once work happened (an `Execution-context-before` was filled, or a
   Done-when item checked).
 - `Implementing -> Review`:
-  1. Every Done-when item checked; remove items that became obsolete.
+  1. Every Done-when item checked; remove items that became obsolete. Where
+     the plan has a `## Why`, its `problem:` line is the item that matters:
+     say under Done-when that it no longer happens, and how that was seen.
   2. Reconcile stale or conflicting live records touched by this work —
      supersede them (`memory-maintenance.md`) — before adding new
      learnings.
   3. Fill `## Learnings` (required; if nothing durable emerged, say so with
-     a reason).
+     a reason). Include why it ended this way: what moved in the `## Why`
+     during the work — a trigger that turned out to be a symptom, an
+     assumption that failed, an approach rejected mid-flight and why.
   4. Distill durable learnings into knowledge records
      (`memory-writing.md`), superseding stale ones.
   5. Fill `Memory-upvotes` / `Memory-downvotes` with the record ids that
@@ -37,7 +41,9 @@ Allowed transitions: `Draft -> Implementing | Abandoned`;
      failures, flaky steps, missing docs, rework, waiting on answers),
      `Complexity-felt` (same animal scale) and `Complexity-delta`
      (`lighter|as-expected|heavier`).
-  7. Ask the human for approval before `Done`.
+  7. Ask the human for approval before `Done`. The question to put is
+     whether the problem in `## Why` is gone, with the evidence — not
+     whether the list is ticked.
 - `Implementing -> Blocked`: `plan block --kind <class> <slug> '<sentence>'`,
   detail paragraph on stdin. One dated entry lands in `## Blocked-on` and the
   status flips. That is the whole ceremony, on purpose — see "Blocked" below.
@@ -52,7 +58,12 @@ Allowed transitions: `Draft -> Implementing | Abandoned`;
   it — the block is the reason the plan died.
 - `Implementing -> Abandoned`: check off what was completed; record the
   rationale and cleanup notes; then the same distillation, learnings, votes
-  and telemetry as for Review.
+  and telemetry as for Review. A `## Why` whose problem has gone by other
+  means, or whose `assumes:` line has failed, is a legitimate rationale —
+  write it as such rather than executing the plan to completion.
+- A fork the plan did not anticipate, in any status: re-read `## Why` before
+  choosing, and append the choice and its reason to the section (`alternatives:`,
+  `enough:` or `assumes:`) so the next session inherits it.
 - `Review -> Implementing`: capture the requested changes and re-open the
   relevant Done-when items.
 - `Review -> Done`: only after explicit human approval while in Review. Fill

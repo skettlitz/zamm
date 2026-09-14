@@ -11,8 +11,8 @@ schema: 3
 <Headline — first paragraph: ONE imperative, actionable or guardrail
 statement an agent mid-task can recognize as its situation and act on
 alone. One short sentence is the norm; ~300 chars is a ceiling, not a
-target. Leads a ## Digest entry (with elaboration) and
-is the only line under ## Headlines.>
+target. Leads the entry under ## Records, and is all of
+it when the space budget cannot afford the elaboration.>
 
 <Optional elaboration: a digest-worthy caveat, a key parameter, the
 load-bearing why. Headline + elaboration form the digest block — hard limits

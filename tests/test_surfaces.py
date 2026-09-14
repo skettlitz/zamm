@@ -529,3 +529,34 @@ class TestDigestReportsSkillDrift(ZammTest):
         self.assertIn_("skill drift", r.err)
         self.assertIn_("skill changed",
                        self.led.read("zamm-memory/.compiled/zamm-defects.md"))
+
+
+class TestCapsComeFromTheCompiler(ZammTest):
+    """`status` and the defect report used to hardcode the guardrail cap (15)
+    and the `other` cap (5). Tuning either in the compiler would have left
+    both surfaces judging against the old number, quietly. The compiler now
+    publishes the caps beside the counts, and nothing else owns a copy."""
+
+    def test_the_sidecar_carries_the_caps_it_enforces(self):
+        self.led.add("rule", "A statement.")
+        self.led.compile()
+
+        state = self.led.read("zamm-memory/.compiled/state.tsv")
+
+        self.assertIn_("guardrail_max\t", state)
+        self.assertIn_("other_max\t", state)
+
+    def test_status_judges_against_the_published_cap(self):
+        """Rewrite the published cap and status must follow it: proof it reads
+        the number rather than knowing it."""
+        for i in range(3):
+            self.led.add(f"guard-{i}", f"A rule that must hold {i}.",
+                         importance="guardrail", durability="permanent")
+        self.led.compile()
+        state = self.led.root / "zamm-memory/.compiled/state.tsv"
+        state.write_text(state.read_text().replace("guardrail_max\t15", "guardrail_max\t2"))
+
+        out = self.led.status().out
+
+        self.assertIn_("guardrails: 3/2 -- OVER", out)
+

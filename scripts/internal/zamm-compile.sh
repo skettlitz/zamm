@@ -78,6 +78,10 @@ TREE="knowledge"
 # skip the checks the flag applies, so ZAMM_DIGEST_SOFTMAX=abc reached awk as 0
 # and collapsed every entry to its headline while exiting 0 — a corrupt digest
 # reporting success.
+# One key from a TSV sidecar, or nothing. The same read as zamm-run.sh's
+# tsv_field; it was spelled inline three times in this file.
+state_row() { awk -F"$(printf '\t')" -v k="$1" '$1 == k { print $2; exit }' "$2" 2>/dev/null; }
+
 validate_softmax() {
   case "$2" in
     "" | *[!0-9]*)
@@ -90,6 +94,9 @@ validate_softmax() {
     exit 1
   fi
 }
+FULL=0
+FULL_OK=1
+FORCE=0
 SOFTMAX=80000
 SOFTMAX_SET=0
 if [ -n "${ZAMM_DIGEST_SOFTMAX:-}" ]; then
@@ -119,6 +126,14 @@ while [ $# -gt 0 ]; do
       ;;
     --check)
       CHECK=1
+      shift
+      ;;
+    --full)
+      FULL=1
+      shift
+      ;;
+    --force)
+      FORCE=1
       shift
       ;;
     --softmax)
@@ -160,9 +175,12 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     -h|--help)
-      echo "Usage: zamm-compile.sh [--project-root <path>] [--tree knowledge|backlog|journal] [--check [--with-candidate <draft>]] [--list-live] [--list-inert] [--list-votes] [--list-graph] [--list-state] [--export]"
+      echo "Usage: zamm-compile.sh [--project-root <path>] [--tree knowledge|backlog|journal] [--check [--with-candidate <draft>]] [--full] [--force] [--list-live] [--list-inert] [--list-votes] [--list-graph] [--list-state] [--export]"
       echo "  --with-candidate validates the ledger AS IF the named .md.draft were"
       echo "  published, without renaming anything into the live namespace."
+      echo "  --full renders the companion zamm-digest-full.md instead: the same"
+      echo "  ledger with no entry cap, no space budget and no decay floor."
+      echo "  --force recompiles even when the input fingerprint says nothing moved."
       exit 0
       ;;
     *)
@@ -190,6 +208,14 @@ else
   # index and the skill's own references/memory.md. A path it cannot confuse
   # with either is worth more than a name that matches the tree it grew from.
   OUT_FILE="$OUT_DIR/zamm-digest.md"
+  # The companion file: the same ledger with nothing collapsed, no entry cap
+  # and no dormancy floor. The session digest is written for an agent paying
+  # context for every line; this one is written for a person searching, who
+  # pays nothing for length and is badly served by `+el`. It is a SECOND
+  # rendering rather than a mode of the first because the two have opposite
+  # budgets, and the surface an agent reads must never depend on which one a
+  # human asked for last.
+  if [ "$FULL" -eq 1 ]; then OUT_FILE="$OUT_DIR/zamm-digest-full.md"; fi
 fi
 OUT_BASE=$(basename "$OUT_FILE")
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
@@ -226,6 +252,10 @@ if [ "$EXPORT" -eq 1 ] && [ "$TREE" != "journal" ]; then
   echo "ERROR: --export is a journal surface (pass --tree journal)" >&2
   exit 1
 fi
+if [ "$FULL" -eq 1 ] && { [ "$TREE" != "knowledge" ] || [ "$CHECK" -eq 1 ]; }; then
+  echo "ERROR: --full renders the knowledge digest and validates nothing" >&2
+  exit 1
+fi
 
 # The list modes read the ledger and publish nothing, so they must not need a
 # writable .compiled/ either: a sandboxed agent that may read the tree but
@@ -236,25 +266,16 @@ READ_ONLY=0
 if [ "$LIST_INERT" -eq 1 ] || [ "$LIST_LIVE" -eq 1 ] || [ "$LIST_VOTES" -eq 1 ] || [ "$LIST_GRAPH" -eq 1 ] || [ "$LIST_STATE" -eq 1 ]; then
   READ_ONLY=1
 fi
+# Whether this run RENDERS a digest or lens. The awk routes its errors and
+# warnings by this one fact: a rendering run puts them in the file it renders
+# (## Degraded), everything else — check, the read-only seams, export — has
+# stderr as its only channel. It was spelled as a seven-flag test in two awk
+# functions and as READ_ONLY/CHECK/EXPORT here, three copies that had already
+# drifted (READ_ONLY did not know about --export).
+RENDERS=1
+if [ "$READ_ONLY" -eq 1 ] || [ "$CHECK" -eq 1 ] || [ "$EXPORT" -eq 1 ]; then RENDERS=0; fi
 [ "$READ_ONLY" -eq 1 ] || mkdir -p "$OUT_DIR"
 
-# The defect report describes the ledger as of the compile that wrote it, and
-# `zamm-run.sh startup` is the only thing that can write it (skill drift and
-# the plan tally are not compiler facts). Every other compile — a record write,
-# a plan status change, an archive — therefore obsoletes it, and a stale report
-# saying "none" over a ledger that has since gone contested is worse than no
-# report at all: it is the one file whose whole job is to be believed. Removing
-# it makes the staleness unmistakable, and the next startup writes it back;
-# writers announce their own damage as they go.
-#
-# BEFORE the compile, not after it, and before any fail-closed exit: a run that
-# aborts on an unreadable ledger (4) or refuses to publish a ledger with nothing
-# live left (3) is exactly when a report claiming "none" would be most wrong,
-# and it never reaches the publish block. --check and the read-only seams change
-# nothing and invalidate nothing.
-if [ "$READ_ONLY" -eq 0 ] && [ "$CHECK" -eq 0 ] && [ "$TREE" = "knowledge" ]; then
-  rm -f "$OUT_DIR/zamm-defects.md"
-fi
 
 # Candidate overlay: the draft is validated under its FINAL id by staging a
 # private copy named <id>.md and enumerating that copy with the manifest. The
@@ -321,6 +342,11 @@ else
   STATE_FILE="$OUT_DIR/state.tsv"
 fi
 STATE_TMP="$TMP_FILE.state"
+# The full rendering publishes no sidecar: counts, select rows and the
+# remembered budget describe the digest a session is handed, and a second
+# rendering with different caps would overwrite them with answers about a file
+# nothing reads at session start.
+if [ "$FULL" -eq 1 ]; then STATE_TMP=""; fi
 # The budget is a SETTING, not a per-invocation opinion, so it is remembered in
 # the sidecar beside the digest it produced and re-adopted by every run that
 # does not name one. Without this, `--softmax` held only until the next ledger
@@ -333,19 +359,269 @@ STATE_TMP="$TMP_FILE.state"
 # reapplied here and a value that fails them leaves the default standing,
 # because a corrupt sidecar must never be able to brick the digest.
 if [ "$SOFTMAX_SET" -eq 0 ] && [ -f "$STATE_FILE" ]; then
-  _sm_saved=$(awk -F'\t' '$1 == "softmax" { print $2; exit }' "$STATE_FILE")
+  _sm_saved=$(state_row softmax "$STATE_FILE")
   case "$_sm_saved" in
     "" | *[!0-9]*) ;;
     *) [ "$_sm_saved" -ge 4000 ] && SOFTMAX="$_sm_saved" ;;
   esac
 fi
+
 # Cleanup releases the lock ONLY while its pid file still names this process:
 # should the lock ever be lost to another owner, exiting must not destroy the
 # new owner's mutual exclusion.
 # set +e first: a failing rm (an unwritable directory, say) must never abort
 # the trap before the lock is released — a leaked lock stalls every later
 # compile and publish for a 60s timeout apiece.
-trap 'set +e; rm -f "$TMP_FILE" "$TMP_FILE.awk" "$PLANS_TMP" "$PLANS_TAIL" "$EXTRA_TAIL" "$MF_FILES" "$MF_LINKS" "$MF_ARCH" "$MANIFEST" "$STATE_TMP" "$TMP_FILE.pmf"; [ -n "$OVERLAY_DIR" ] && rm -rf "$OVERLAY_DIR"; :' EXIT HUP INT TERM
+trap 'set +e; rm -f "$TMP_FILE" "$TMP_FILE.awk" "$TMP_FILE.fpall" "$TMP_FILE.fpall.raw" "$PLANS_TMP" "$PLANS_TAIL" "$EXTRA_TAIL" "$MF_FILES" "$MF_LINKS" "$MF_ARCH" "$MANIFEST" "$STATE_TMP" "$TMP_FILE.pmf"; [ -n "$OVERLAY_DIR" ] && rm -rf "$OVERLAY_DIR"; :' EXIT HUP INT TERM
+
+# ---------------- do not compile what has not changed ----------------
+#
+# A compile reads every record, every plan and both optional trees, ranks them
+# and renders two files. Session start ran it unconditionally, so the common
+# case — open a session, change nothing, read memory — paid the full price to
+# rewrite the same bytes. The work is not wasted because it is slow; it is
+# wasted because it is a no-op, and an agent that pays half a second before it
+# can read anything learns to skip the step.
+#
+# So the inputs are fingerprinted and the fingerprint is stored beside the
+# digest. What goes in: every path under zamm-memory/ outside .compiled (so a
+# rename, a deletion, or debris appearing in a plan directory all count), the
+# CONTENT of every .md among them, every script in this skill (the renderer is
+# an input: a changed compiler produces a changed digest from the same ledger),
+# the effective budget, and today.
+#
+# Content, not mtime+size. mtime is the cheap answer and it is wrong in the
+# expensive direction: two edits inside one filesystem timestamp tick, a
+# restored backup, a `git checkout` that rewrites a file to the same size —
+# each leaves a digest that describes a ledger that no longer exists, and
+# memory that is confidently stale is worse than memory that is slow. Reading
+# every record costs ~45ms against ~550ms for the compile it replaces.
+#
+# Today is in the fingerprint because scores decay by date: a ledger nobody
+# touched still ranks differently tomorrow. That buys one compile per calendar
+# day, and the alternative — a digest whose dormancy and ordering silently
+# lag — is the same stale-memory failure by another route.
+zamm_hash() {
+  if command -v shasum >/dev/null 2>&1; then shasum -a 256
+  elif command -v sha256sum >/dev/null 2>&1; then sha256sum
+  else cksum
+  fi | tr -d ' -' | cut -c1-32
+}
+
+# Prints the fingerprint, or nothing (and returns 1) when the tree could not be
+# enumerated. Silence is the safe answer: no fingerprint means no skip, and the
+# compile that follows fails closed on the same unreadable tree (G3).
+# Asks git first. A ledger under version control already has an authority on
+# what changed, computed by something that does this for a living: the tree
+# object of zamm-memory/ names its committed content in one hash, and status
+# names everything not committed-and-clean. Under the conditions this project
+# actually runs in, that is the whole question — an agent that writes a record
+# recompiles as it writes, and everything else arrives through a pull, which
+# moves the tree object. Six milliseconds for the subtree SHA, thirteen for the
+# dirty set, against forty-five to read four hundred records.
+#
+# It is not a weaker answer, only a cheaper one: git compares CONTENT for every
+# path it lists, including the racy-timestamp case a mtime rule gets wrong, and
+# the content of everything it lists as dirty, untracked or ignored is hashed
+# here on top. The tree object covers the rest.
+#
+# The subtree, not HEAD: committing unrelated code must not invalidate a digest
+# the ledger did not change. And paths are resolved against the repository
+# root, since that is what porcelain output is relative to.
+git_fingerprint_inputs() {
+  command -v git >/dev/null 2>&1 || return 1
+  _fp_top=$(git -C "$PROJECT_ROOT" rev-parse --show-toplevel 2>/dev/null) || return 1
+  [ -n "$_fp_top" ] || return 1
+  _fp_pre=$(git -C "$PROJECT_ROOT" rev-parse --show-prefix 2>/dev/null) || return 1
+  # The committed identity of the ledger: one object id per direct child of
+  # zamm-memory/, .compiled excluded. Not `rev-parse HEAD:zamm-memory`, which
+  # is the id of a tree that CONTAINS .compiled — a project that has committed
+  # its compiled artifacts (no .gitignore rule, or one that was removed) would
+  # then change its own input every time it published, and never skip again.
+  # --full-tree, because `ls-tree` run from a subdirectory silently filters its
+  # output by that subdirectory: in a project root below the repository top the
+  # listing came back filtered by an unrelated prefix, and where that prefix
+  # happened to name a directory inside the ledger it came back NON-EMPTY and
+  # wrong — a fingerprint covering part of the tree, accepted as if it covered
+  # all of it.
+  _fp_tree=$(git -C "$PROJECT_ROOT" ls-tree --full-tree "HEAD:${_fp_pre}zamm-memory" \
+               2>/dev/null | grep -v '	\.compiled$') || _fp_tree=""
+  # --ignored as well: a ledger someone has gitignored is invisible to plain
+  # status, and answering "nothing changed" about a tree we cannot see is the
+  # one thing this must never do. .compiled is ours and is excluded by path.
+  # The pathspec is relative to the working directory git was pointed at, which
+  # IS the project root — prefixing it with the repo-relative prefix named
+  # <prefix>/<prefix>/zamm-memory, matched nothing, and git only warns. The
+  # fast path was dead for every project below a repository top, silently, in
+  # the direction that looks like it works.
+  git -C "$PROJECT_ROOT" status --porcelain --untracked-files=all --ignored \
+      -- zamm-memory > "$_fp_all.raw" 2>/dev/null || return 1
+  # .compiled is OUR output, and --ignored lists it file by file: leaving it in
+  # would put the digest inside the fingerprint of the inputs that produce it,
+  # so every run would see a changed input and nothing would ever be stored.
+  grep -v '/\.compiled/' "$_fp_all.raw" > "$_fp_all" 2>/dev/null || : > "$_fp_all"
+  # No committed ledger means git adds nothing: every path would be listed and
+  # read anyway, at the price of four more processes.
+  [ -n "$_fp_tree" ] || return 1
+  # A repository nested inside the ledger, or a submodule, is ONE status line
+  # for the directory — `?? dir/` or ` M dir` — and every edit inside it is
+  # invisible to this git; the content pass would then read a directory and
+  # hash nothing. Any listed path that is a directory means the answer is not
+  # here: read the tree instead. (Ignored directories are not this case:
+  # --untracked-files=all lists their files one by one.)
+  while IFS= read -r _fp_p; do
+    if [ -d "$_fp_top/$_fp_p" ]; then return 1; fi
+  done <<EOF
+$(sed 's/^...//; s/.* -> //' "$_fp_all")
+EOF
+  {
+    # The project path is an input: plan-manifest.tsv holds absolute paths, and
+    # a project moved under git has the same tree object at a new location.
+    printf 'zamm-inputs-git-v1\troot=%s\tsoftmax=%s\ttoday=%s\n' \
+      "$PROJECT_ROOT" "$SOFTMAX" "$TODAY"
+    printf '%s\n' "$_fp_tree"
+    # the status text itself: which paths are dirty, untracked or ignored, and
+    # in what way. A path that changes state changes this even if some later
+    # step cannot read it.
+    cat "$_fp_all"
+    # every directory, because git tracks none: an empty plan directory renders
+    # as "Unknown: <slug> (no .plan.md file)" and counts as a plan anomaly, and
+    # an interrupted `plan create` leaves an empty .tmp-plan-* the manifest
+    # reports as debris — both invisible to status, both inputs.
+    find "$_fp_mem" -name '.compiled' -prune -o -type d -print 2>/dev/null | LC_ALL=C sort
+    # then the content of exactly those paths — the ones the tree object does
+    # not already account for. "XY path" or "XY orig -> path"; record and plan
+    # filenames carry no spaces or quotes by contract, so plain cutting is
+    # enough, and a path that cannot be read contributes nothing, which is
+    # itself a change from when it could.
+    sed 's/^...//; s/.* -> //' "$_fp_all" |
+      LC_ALL=C sort |
+      awk -v top="$_fp_top/" '{
+        p = top $0
+        print "\f" p
+        while ((getline line < p) > 0) print line
+        close(p)
+      }'
+    printf 'scripts=%s\n' "$FP_SCRIPTS"
+  } | zamm_hash
+}
+
+inputs_fingerprint() {
+  _fp_mem="$PROJECT_ROOT/zamm-memory"
+  # Both work files are in the exit trap; nothing here removes them by hand.
+  _fp_all="$TMP_FILE.fpall"
+  # The renderer is an input, hashed once per process: the fingerprint is taken
+  # twice per real compile (before, and after to catch a write that landed
+  # mid-compile), and the scripts are not part of that race.
+  [ -n "${FP_SCRIPTS:-}" ] || FP_SCRIPTS=$(cat "$SCRIPT_DIR"/*.sh | zamm_hash)
+  if _fp_out=$(git_fingerprint_inputs) && [ -n "$_fp_out" ]; then
+    printf '%s\n' "$_fp_out"
+    return 0
+  fi
+  # No git, or a ledger it has never seen: read the tree. One traversal of
+  # every path outside .compiled, so a rename, a deletion or debris appearing
+  # in a plan directory all count, and then the content of every markdown file
+  # among them.
+  #
+  # KNOWN COMPROMISE (see DELTAS, "the fingerprint is not a validator"): find
+  # does not follow symlinks but awk below does, so replacing a record with a
+  # symlink to a byte-identical copy leaves this fingerprint unchanged, and
+  # that run skips instead of refusing. The ledger still refuses the symlink at
+  # every compile it actually runs, and `check` never skips — so the diagnosis
+  # is delayed, never lost, and no content from a symlink can reach a digest
+  # this run does not produce. ADDING a symlink is caught (a new path), and so
+  # is deleting one. (The git answer above has the same shape: a symlink is a
+  # path git knows about, so swapping one in is a status change.)
+  find "$_fp_mem" -name '.compiled' -prune -o -print > "$_fp_all" 2>/dev/null || return 1
+  {
+    printf 'zamm-inputs-v1\troot=%s\tsoftmax=%s\ttoday=%s\n' "$PROJECT_ROOT" "$SOFTMAX" "$TODAY"
+    LC_ALL=C sort "$_fp_all"
+    # awk reads the files itself: one process for 400 records instead of 400.
+    # The \f prefix keeps a path from being confused with a line of content.
+    grep '\.md$' "$_fp_all" | LC_ALL=C sort |
+      awk '{ print "\f" $0; while ((getline line < $0) > 0) print line; close($0) }'
+    printf 'scripts=%s\n' "$FP_SCRIPTS"
+  } | zamm_hash
+}
+
+FP=""
+if [ "$READ_ONLY" -eq 0 ] && [ "$CHECK" -eq 0 ] && [ "$FULL" -eq 0 ] &&
+   [ "$TREE" = "knowledge" ] && [ -z "$CANDIDATE" ]; then
+  FP=$(inputs_fingerprint) || FP=""
+  if [ "$FORCE" -eq 0 ] && [ -n "$FP" ] && [ -f "$STATE_FILE" ]; then
+    _fp_prev=$(state_row inputs "$STATE_FILE")
+    _fp_ok=1
+    [ "$_fp_prev" = "$FP" ] || _fp_ok=0
+    # Every artifact the skip is promising is current must actually be there —
+    # the SIDECARS as much as the rendered files. A missing backlog-state.tsv
+    # is not cosmetic: session start reads its counts for line one and `status`
+    # reports the lens/state pair as incoherent and tells you to run startup,
+    # which would then skip forever and never repair it.
+    for _fp_f in "$OUT_FILE" "$OUT_DIR/zamm-digest-full.md"; do
+      [ -f "$_fp_f" ] || _fp_ok=0
+    done
+    if [ -d "$PROJECT_ROOT/zamm-memory/backlog" ]; then
+      [ -f "$OUT_DIR/backlog.md" ] || _fp_ok=0
+      [ -f "$OUT_DIR/backlog-state.tsv" ] || _fp_ok=0
+    fi
+    if [ -d "$PROJECT_ROOT/zamm-memory/journal" ]; then
+      [ -f "$OUT_DIR/journal.md" ] || _fp_ok=0
+      [ -f "$OUT_DIR/journal-state.tsv" ] || _fp_ok=0
+    fi
+    if [ "$_fp_ok" -eq 1 ]; then
+      # The exit code is part of the answer: a degraded ledger must keep
+      # reporting 2 on a run that re-derived nothing, or a skipped compile
+      # would read as a repair.
+      _fp_rc=$(state_row rc "$STATE_FILE")
+      case "$_fp_rc" in "" | *[!0-9]*) _fp_rc=0 ;; esac
+      # A skip certifies the published files as current AS OF NOW, and says so
+      # in the one language every other surface speaks: mtime. `status` decides
+      # staleness by `find -newer` the digest; without this, a record touched
+      # without a content change (a branch switch, a sync, an editor save of
+      # identical bytes) left status saying "run startup" and startup skipping,
+      # forever. Tests that ask "was it rebuilt" read the inode, which only a
+      # real publish (a rename) changes.
+      for _fp_f in "$OUT_FILE" "$OUT_DIR/zamm-digest-full.md" "$STATE_FILE" \
+                   "$OUT_DIR/backlog.md" "$OUT_DIR/backlog-state.tsv" \
+                   "$OUT_DIR/journal.md" "$OUT_DIR/journal-state.tsv"; do
+        [ -f "$_fp_f" ] && touch "$_fp_f" 2>/dev/null
+      done
+      # The verdict as the last real compile worded it, replayed: "see
+      # ## Degraded" was wrong whenever the 2 came from a degraded backlog or
+      # journal, whose section is a line in the tail, not a heading.
+      _fp_note=$(state_row degnote "$STATE_FILE")
+      if [ "$_fp_rc" -eq 2 ]; then
+        echo "ZAMM digest: $OUT_FILE (unchanged; ${_fp_note:-degraded - see ## Degraded})"
+      else
+        echo "ZAMM digest: $OUT_FILE (unchanged)"
+      fi
+      exit "$_fp_rc"
+    fi
+  fi
+fi
+
+
+
+# The defect report describes the ledger as of the compile that wrote it, and
+# `zamm-run.sh startup` is the only thing that can write it (skill drift and
+# the plan tally are not compiler facts). Every other compile that RUNS — a
+# record write, a plan status change, an archive — therefore obsoletes it (a
+# skipped compile changed nothing and leaves it; drift is startup's own check
+# and is outside this fingerprint), and a stale report
+# saying "none" over a ledger that has since gone contested is worse than no
+# report at all: it is the one file whose whole job is to be believed. Removing
+# it makes the staleness unmistakable, and the next startup writes it back;
+# writers announce their own damage as they go.
+#
+# BEFORE the compile, not after it, and before any fail-closed exit: a run that
+# aborts on an unreadable ledger (4) or refuses to publish a ledger with nothing
+# live left (3) is exactly when a report claiming "none" would be most wrong,
+# and it never reaches the publish block. --check and the read-only seams change
+# nothing and invalidate nothing.
+if [ "$READ_ONLY" -eq 0 ] && [ "$CHECK" -eq 0 ] && [ "$FULL" -eq 0 ] &&
+   [ "$TREE" = "knowledge" ]; then
+  rm -f "$OUT_DIR/zamm-defects.md"
+fi
 
 # No lock. The digest is derived, gitignored and regenerable, so it is never
 # protected — only recomputed (references/invariants.md, G2). Each compile
@@ -631,6 +907,16 @@ EOF
   # Recently archived plan IDs: after a pull, a referenced plan directory may
   # have moved to archive on another machine — this list keeps the move
   # visible. Directory mtime sorts fresh arrivals (checkout/closure) first.
+  # The manifest, kept for the surfaces that need the same enumeration right
+  # after this compile. `zamm-run.sh startup` reads it instead of walking the
+  # plan tree a second time; it is valid for exactly as long as the digest
+  # beside it is, because the same fingerprint covers both. Written before the
+  # counts below so a failure here cannot cost the digest.
+  if [ "$FULL" -eq 0 ]; then
+    cp "$pmf" "$OUT_DIR/plan-manifest.tsv.$$" 2>/dev/null &&
+      mv "$OUT_DIR/plan-manifest.tsv.$$" "$OUT_DIR/plan-manifest.tsv" 2>/dev/null ||
+      rm -f "$OUT_DIR/plan-manifest.tsv.$$"
+  fi
   narch=$(awk -F"$tab" '$1 == "ARCHDIR" { n++ } END { print n + 0 }' "$pmf")
   if [ "$narch" -gt 0 ]; then
     {
@@ -766,14 +1052,25 @@ append_journal_line() {
 # they publish their own independent lenses either way, and failing early leaves
 # the previous digest untouched exactly as before.
 TAILBYTES=0
-if [ "$TREE" = "knowledge" ] && [ "$CHECK" -eq 0 ] && [ "$LIST_INERT" -eq 0 ] &&
-   [ "$LIST_LIVE" -eq 0 ] && [ "$LIST_VOTES" -eq 0 ] && [ "$LIST_GRAPH" -eq 0 ] &&
-   [ "$LIST_STATE" -eq 0 ] && [ "$EXPORT" -eq 0 ]; then
+if [ "$TREE" = "knowledge" ] && [ "$RENDERS" -eq 1 ]; then
   : > "$PLANS_TAIL"
   : > "$EXTRA_TAIL"
-  render_plans_section
-  append_backlog_summary
-  append_journal_line
+  # The companion pass is handed the tails the session pass just rendered —
+  # the plans section, the marked lane, the backlog and journal lines, verdicts
+  # included — and copies them instead of enumerating the plan tree again and
+  # re-reading two sidecars for lines that are byte-identical by construction.
+  # Run on its own, `--full` renders everything itself, sub-passes included,
+  # and so cannot print a cheerful line beside a degraded ledger.
+  if [ "$FULL" -eq 1 ] && [ -n "${ZAMM_FULL_PLANS_TAIL:-}" ] && [ -f "$ZAMM_FULL_PLANS_TAIL" ]; then
+    cp "$ZAMM_FULL_PLANS_TAIL" "$PLANS_TAIL"
+    if [ -n "${ZAMM_FULL_EXTRA_TAIL:-}" ] && [ -f "$ZAMM_FULL_EXTRA_TAIL" ]; then
+      cp "$ZAMM_FULL_EXTRA_TAIL" "$EXTRA_TAIL"
+    fi
+  else
+    render_plans_section
+    append_backlog_summary
+    append_journal_line
+  fi
   TAILBYTES=$(( $(wc -c < "$PLANS_TAIL") + $(wc -c < "$EXTRA_TAIL") ))
 fi
 
@@ -787,14 +1084,28 @@ fi
 AWK_PROG="$TMP_FILE.awk"
 cat > "$AWK_PROG" <<'ZAMM_AWK_PROGRAM'
 BEGIN {
-  DIGEST_MAX = 75       # full digest blocks (actionable: headline + elaboration)
-  HEADLINE_MAX = 150    # headline-only reminders (topic exists; open if relevant)
-                        # ~same space as 100 full entries, ~2.25x coverage
+  # Priced by the budget and printed by the renderer, so it is written once:
+  # a heading the budget measured and the renderer then changed is a budget
+  # that is wrong by exactly the difference.
+  RECORDS_HEADING = "## Records (ranked; every listed record shows its headline)"
+  ENTRY_MAX = 200       # records listed in the digest, ranked. ONE layer, not
+                        # two: the old split (75 full blocks + 150 headline
+                        # reminders) predates the space budget, which already
+                        # decides per entry how much it can afford to say. With
+                        # both mechanisms in place a record could be demoted
+                        # twice for the same reason, and the boundary between
+                        # the layers carried no meaning a reader could use —
+                        # "actionable" and "a reminder that this exists" is a
+                        # judgement about the CONTENT, and the ranking never
+                        # knew it. Now membership is one cap and detail is one
+                        # budget: every listed record shows its headline, and
+                        # elaboration is bought in rank order until the money
+                        # runs out (+el marks what could not be).
   SOFTMAX = softmax + 0 # soft ceiling, in characters, on the whole compiled
-                        # digest. It buys EXPANSION, never membership: the two
-                        # count caps above still decide WHICH records are
-                        # listed, and the budget only decides how many of the
-                        # Digest layer can afford their elaboration. A record
+                        # digest. It buys EXPANSION, never membership:
+                        # ENTRY_MAX above still decides WHICH records are
+                        # listed, and the budget only decides how many of them
+                        # can afford their elaboration. A record
                         # that cannot is collapsed to its headline and marked
                         # +el — never dropped, because a reader who is told
                         # less can still open the record, while a reader who
@@ -821,9 +1132,9 @@ BEGIN {
                         # Live guardrails never go dormant: `!` is a safety
                         # contract, retired only by supersession or tombstone
   OTHER_MAX = 5         # --check fails when live other records exceed this
-  GUARDRAIL_MAX = 15    # guardrails enter the Digest layer before DIGEST_MAX
-                        # and never decay, so they are the one unbounded part
-                        # of an otherwise bounded surface: warn, do not fail
+  GUARDRAIL_MAX = 15    # guardrails are seated before ENTRY_MAX and never
+                        # decay, so they are the one unbounded part of an
+                        # otherwise bounded surface: warn, do not fail
   CHAINDEPTH_MAX = 2    # supersede hops that earn durability credit. Ten
                         # rewrites of a churning statement must not outrank
                         # knowledge that was simply right the first time
@@ -838,6 +1149,20 @@ BEGIN {
                         # never decays, so inflation must nag — warn, do not
                         # fail, the guardrail-cap rationale. Deliberately
                         # tighter than GUARDRAIL_MAX.
+  # The full rendering (--full, zamm-digest-full.md) lifts every limit that
+  # exists to protect the attention of a session: it is read by a person
+  # searching, who pays nothing for length. Same ledger, ranking, grouping —
+  # only the three numbers that decide what gets left out are gone, so the two
+  # files can be diffed and the shorter one is always a subset of the longer.
+  # (ENTRY_MAX is not lifted: the full rendering never runs the capped
+  # selector at all — see the selection below.)
+  if (full == 1) {
+    SOFTMAX = 1000000000
+    FLOOR = 0           # dormant records are listed too: a human searching for
+                        # something half-remembered is exactly the reader the
+                        # decay floor is wrong for
+  }
+
   JOURNAL_REVIEW_COUNT = 25   # journal only: triage is due at this many
                               # undigested entries ...
   JOURNAL_REVIEW_AGE = 60     # ... or when the oldest undigested entry is
@@ -860,7 +1185,7 @@ BEGIN {
   JOURNAL_KEYS = " cue salience time agent user reviewed-through pass digest covers covered "
   nelev = 0; nwm = 0; nwmpass = 0; nkinds = 0; nundig = 0; ndue = 0; jnm = 0; jng = 0
   nrec = 0; nerr = 0; nsort = 0; nother = 0
-  nfiles = 0; nbad = 0; ndup = 0; nwarn = 0
+  nfiles = 0; nbad = 0; ndup = 0; nwarn = 0; nlivearch = 0
 }
 
 # ---- input: one record file path per line ----
@@ -1315,8 +1640,8 @@ function first_body_line(id,   m, bl, t, ln) {
 
 # Machine-readable compilation state, written beside the digest. Downstream
 # commands (status, memory list) read THIS instead of grepping the rendered
-# digest. select rows are the record ids the digest actually surfaced (Digest
-# blocks + Headlines), i.e. what memory list should show by default. Guardrail
+# digest. select rows are the record ids the digest actually surfaced (the
+# ## Records section), i.e. what memory list should show by default. Guardrail
 # and contested counts come from the graph, not from counting rendered lines.
 function emit_state(   i, j, id, k, pm, cu, mk, mp, g, gp, n, nm2, fs) {
   if (statefile == "") return
@@ -1329,9 +1654,16 @@ function emit_state(   i, j, id, k, pm, cu, mk, mp, g, gp, n, nm2, fs) {
   printf "badvoterefs\t%d\n", nbadvoteref > statefile
   printf "badcover\t%d\n", nbadcover > statefile
   printf "guardrails\t%d\n", nguard > statefile
+  # The caps themselves, beside the counts measured against them. `status` and
+  # the defect report used to hardcode 15 and 5, so tuning either constant here
+  # would have left those surfaces quietly judging against the old number. The
+  # compiler owns the policy; everything else reads it from here.
+  printf "guardrail_max\t%d\n", GUARDRAIL_MAX > statefile
+  printf "other_max\t%d\n", OTHER_MAX > statefile
   printf "contested\t%d\n", ngroups > statefile
   printf "other\t%d\n", nother > statefile
   printf "dormant\t%d\n", ndorm > statefile
+  printf "livearchived\t%d\n", nlivearch > statefile
   printf "unlisted\t%d\n", nunlist > statefile
   if (lens == "backlog") {
     printf "hot\t%d\n", nhot > statefile
@@ -1863,8 +2195,22 @@ function validdate(d,   y, mo, dy, dim) {
 }
 
 # warnings name a likely mistake without quarantining the record: an unknown
-# key is usually a typo, but guessing wrong must not cost the whole record
-function warn(msg) { print "zamm-compile: WARNING: " msg | "cat 1>&2"; nwarn++ }
+# key is usually a typo, but guessing wrong must not cost the whole record.
+#
+# Same channel rule as err() below, for the same reason. The soft-cap warnings
+# (guardrails, the marked lane) are standing state, not events: once over, they
+# are over on every run until a human reclassifies something, and printed ahead
+# of the session-start report they were four sentences of prose that fire
+# forever — the pattern that teaches a reader to skip what sits above the
+# digest path. They read where a measurement belongs instead: `zamm-run.sh
+# status`, which flags both against their cap, and for the marked lane the lens
+# itself. The per-record ones (an unknown key, a body that opens with a
+# key-looking line) reach their author at the moment that is news, because a
+# validating write runs --check and prints them there.
+function warn(msg) {
+  if (!renders) print "zamm-compile: WARNING: " msg | "cat 1>&2"
+  nwarn++
+}
 
 # Every error below is also RENDERED — on the path that renders. A
 # record-scoped failure becomes a line under ## Degraded, and so do dangling
@@ -1882,9 +2228,7 @@ function warn(msg) { print "zamm-compile: WARNING: " msg | "cat 1>&2"; nwarn++ }
 # --list-inert, --list-votes, --list-graph, --list-state and --export, which
 # all answer SHORT when a record is quarantined and must say why.
 function err(msg) {
-  if (check == 1 || listlive == 1 || listinert == 1 || listvotes == 1 ||
-      listgraph == 1 || liststate == 1 || export == 1)
-    print "zamm-compile: ERROR: " msg | "cat 1>&2"
+  if (!renders) print "zamm-compile: ERROR: " msg | "cat 1>&2"
   nerr++
 }
 
@@ -2409,7 +2753,7 @@ function markpfx(id,   p) {
 # the renderer drifts the moment either side changes, and a budget computed
 # from a drifting cost is worse than no budget at all.
 
-# headline-only entry (Headlines, reconciliation heads); scope = primary tag.
+# headline-only entry (a collapsed record, reconciliation heads); scope = primary tag.
 # nomark: list the record without consuming its digest eligibility — the
 # reconciliation index must not spend the entry it is warning about, or a
 # contested guardrail loses its elaboration exactly when it is most needed.
@@ -2501,8 +2845,14 @@ END {
   # record is exactly the state nobody goes looking for.
   for (i = 1; i <= nrec; i++) {
     id = order[i]
-    if (id in archived)
+    if (id in archived) {
       warn(id " exists both live and archived; the live copy is used. Rerun memory archive to finish the move, or delete one copy.")
+      # Counted, not only warned: this one renders NOWHERE — not under
+      # ## Degraded (the ledger parses fine), not in any count status prints —
+      # so the sidecar is what lets session start report it as a defect
+      # instead of it living or dying on a stderr line nobody reads.
+      nlivearch++
+    }
   }
 
   # ---- erasure set: built BEFORE any graph pass reads it ----
@@ -3177,8 +3527,8 @@ END {
     exit 0
   }
 
-  # 4. digest — Digests (full blocks, DIGEST_MAX) + Headlines (one line,
-  #    HEADLINE_MAX). Background bodies never enter the digest file.
+  # 4. digest — the ranked Records section (ENTRY_MAX entries, expanded while
+  #    the budget lasts). Background bodies never enter the digest file.
   nquar = nbad + ndup
 
   # Zero live records with quarantined files present is indistinguishable
@@ -3411,7 +3761,7 @@ END {
   }
 
   build_archivable()
-  hdrline = sprintf("# ZAMM Memory Digest (%s: files=%d parsed=%d live=%d quarantined=%d archive-ready=%d; generated file - do not edit)", today, nfiles, nrec - nbad, nlive, nquar, narchivable)
+  hdrline = sprintf("# ZAMM Memory Digest%s (%s: files=%d parsed=%d live=%d quarantined=%d archive-ready=%d; generated file - do not edit)", (full == 1) ? " (full)" : "", today, nfiles, nrec - nbad, nlive, nquar, narchivable)
   say(hdrline)
   # Line 1 is the ONE line the archive self-check excludes, because the record
   # counts in it are expected to move when a record is archived. The budget
@@ -3441,17 +3791,39 @@ END {
     exit (degraded() ? 2 : 0)
   }
 
-  say("Entry format: - subpath: headline [record-id votes +bg +el]; indented lines =")
-  say("elaboration. Both record sections group under ### area headings; the subpath on")
+  # +el cannot occur in the full rendering, so it is not explained there: a
+  # legend for a marker the file never uses is one more thing to hold.
+  say("Entry format: - subpath: headline [record-id votes +bg" ((full == 1) ? "" : " +el") "]; indented")
+  say("lines = elaboration. Records group under ### area headings; the subpath on")
   say("each line names the topic of that one record inside its area.")
-  say("Digest section: up to " DIGEST_MAX " actionable full blocks (! = guardrail, do not violate;")
-  say("~ = contested head, also listed under Needs reconciliation). +el = the block")
-  say("has elaboration the space budget could not render; open the record.")
-  say("Headlines section: up to " HEADLINE_MAX " one-line reminders that knowledge exists;")
-  say("open the record (+bg) when the topic matches. Id doubles as creation date.")
-  say("Session read: `zamm-run.sh startup` recompiles this file and hands back its path.")
-  say("Reading this file once, whole, IS the session read - there is nothing else")
-  say("to run and no second surface to consult.")
+  if (full == 1) {
+    say("Records section: every record the ledger holds that is still standing,")
+    say("ranked, each with its elaboration (! = guardrail, do not violate; ~ =")
+    say("contested head, also listed under Needs reconciliation). +bg means the file")
+    say("also holds a ## Background section, which no rendering inlines. Id doubles")
+    say("as creation date.")
+  } else {
+    say("Records section: up to " ENTRY_MAX " live records, ranked (! = guardrail, do not")
+    say("violate; ~ = contested head, also listed under Needs reconciliation). Every")
+    say("listed record shows its headline; elaboration is expanded in rank order while")
+    say("the space budget lasts, and +el marks a record whose elaboration did not fit —")
+    say("open it. +bg means the file also holds a ## Background section. Id doubles as")
+    say("creation date.")
+  }
+  if (full == 1) {
+    say("THIS IS THE FULL RENDERING: every live and dormant record, every")
+    say("elaboration, no entry cap and no space budget. It exists to be searched and")
+    say("read by a person. It is NOT the session read - an agent reads")
+    say("zamm-memory/.compiled/zamm-digest.md, which is this ledger bounded to what")
+    say("a session can afford, and reading this one instead spends context on")
+    say("everything the ranking already decided was not worth pushing.")
+  } else {
+    say("Session read: `zamm-run.sh startup` recompiles this file and hands back its path.")
+    say("Reading this file once, whole, IS the session read - there is nothing else")
+    say("to run and no second surface to consult.")
+    say("Searching for something half-remembered, or reading as a human? The same")
+    say("ledger with nothing left out is beside this file, as zamm-digest-full.md.")
+  }
   say("")
 
   # Degraded: ledger integrity problems surfaced in the digest itself, so a
@@ -3490,16 +3862,14 @@ END {
     }
   }
 
-  # Digest selection (full blocks): guardrails first (never squeezed out of
-  # the actionable layer), then greedy by
+  # Selection: guardrails first (never squeezed out), then greedy by
   # log(score) - GROUP_PENALTY x taken(least-crowded tag area) - TAG_COST x
-  # (tags - 1) up to DIGEST_MAX — weighted ranking vs per-area diversity.
-  # Headlines: next HEADLINE_MAX live records by score as one-line reminders.
-  # Anything beyond Digests+Headlines stays live in the ledger but unlisted.
+  # (tags - 1) up to ENTRY_MAX — weighted ranking vs per-area diversity.
+  # Anything beyond ENTRY_MAX stays live in the ledger but unlisted.
   #
   # Selection decides MEMBERSHIP and runs before anything is emitted, because
   # the space budget below prices the whole surface at once and cannot price a
-  # layer it has not chosen yet.
+  # list it has not chosen yet.
   ncore = 0
   for (i = 1; i <= nsort; i++) {
     id = sorted[i]
@@ -3510,7 +3880,21 @@ END {
       takeseats(id)
     }
   }
-  while (ncore < DIGEST_MAX) {
+  # The full rendering lists every standing record, so there is no membership
+  # to decide and nothing for the selector to balance: rank order, guardrails
+  # already seated first above. Running the greedy loop there was not merely
+  # wasted, it was QUADRATIC — each seat rescans the ranking, and with the cap
+  # lifted to "everything" a 4000-record ledger took 13s for a file nobody
+  # reads at session start, ten times the session digest it rides along with.
+  if (full == 1) {
+    for (i = 1; i <= nsort; i++) {
+      id = sorted[i]
+      if ((id in printed) || (id in coretaken) || (id in dormant)) continue
+      coretaken[id] = 1
+      corelist[++ncore] = id
+    }
+  }
+  while (full != 1 && ncore < ENTRY_MAX) {
     best = ""
     besteff = 0
     for (i = 1; i <= nsort; i++) {
@@ -3530,17 +3914,6 @@ END {
     takeseats(best)
   }
 
-  # Headline membership: the next HEADLINE_MAX ranked live records the Digest
-  # layer did not take. Chosen against coretaken rather than printed because
-  # nothing has been emitted yet.
-  nhlsel = 0
-  for (i = 1; i <= nsort; i++) {
-    id = sorted[i]
-    if ((id in printed) || (id in coretaken) || (id in dormant)) continue
-    if (nhlsel >= HEADLINE_MAX) break
-    hllist[++nhlsel] = id
-  }
-
   # ---- the space budget ----
   # Membership is settled; all that is left to decide is how much of it can
   # afford to be expanded. The floor is every listed entry as a single line —
@@ -3549,29 +3922,19 @@ END {
   # Digest layer rendered in full. Between the two, buy elaboration in rank
   # order until the money runs out.
   floorbytes = 0
-  for (i = 1; i <= ncore; i++)  floorbytes += costline(corelist[i], 2)
-  for (i = 1; i <= nhlsel; i++) floorbytes += costline(hllist[i], 2)
+  for (i = 1; i <= ncore; i++) floorbytes += costline(corelist[i], 2)
 
   # Headings are surface too. Priced at their maximum (heading plus a leading
   # blank): an expanded entry already ends with a blank that suppresses the
   # blank of the next heading, over-counting by at most a byte per scope group.
   # Over-counting spends the budget slightly early, which is the safe
   # direction for a limit whose entire purpose is not to be crossed.
-  chrome = length("## Digest (actionable; full blocks)") + 2
+  chrome = length(RECORDS_HEADING) + 2
   for (i = 1; i <= ncore; i++) {
     scp = area(corelist[i])
     if (("d" SUBSEP scp) in seenscope) continue
     seenscope["d" SUBSEP scp] = 1
     chrome += length("### " ((scp == "") ? "(no scope)" : scp)) + 2
-  }
-  if (nhlsel > 0) {
-    chrome += length("## Headlines (reminders; open the record when the topic matches)") + 2
-    for (i = 1; i <= nhlsel; i++) {
-      scp = area(hllist[i])
-      if (("h" SUBSEP scp) in seenscope) continue
-      seenscope["h" SUBSEP scp] = 1
-      chrome += length("### " ((scp == "") ? "(no scope)" : scp)) + 2
-    }
   }
 
   # bytes = the header, ## Degraded and the reconciliation index, already
@@ -3614,7 +3977,7 @@ END {
   # is also the domain the SELECTOR balances across (GROUP_PENALTY x
   # mintaken), so grouping by it renders the diversity the ranking already
   # bought, instead of hiding it behind a heading per record.
-  say("## Digest (actionable; full blocks)")
+  say(RECORDS_HEADING)
   for (i = 1; i <= ncore; i++) {
     id = corelist[i]
     if (id in printed) continue
@@ -3629,32 +3992,6 @@ END {
     }
   }
 
-  # Headlines: ranked reminders for the next HEADLINE_MAX not already Digested,
-  # grouped by area like the Digest layer. Rank still decides membership and
-  # the order groups appear in; within a group it decides order. Reading order
-  # follows the job of the layer: "open the record when the topic matches" is a
-  # topical lookup, and a flat ranked list is the one shape that does not
-  # support one.
-  nhl = 0; hdr = 0
-  for (i = 1; i <= nhlsel; i++) {
-    id = hllist[i]
-    if (id in printed) continue
-    if (!hdr) {
-      if (!endedblank) say("")
-      say("## Headlines (reminders; open the record when the topic matches)")
-      hdr = 1; endedblank = 0
-    }
-    scp = area(id)
-    if (!endedblank) say("")
-    say("### " ((scp == "") ? "(no scope)" : scp))
-    endedblank = 0
-    for (j = i; j <= nhlsel; j++) {
-      if (area(hllist[j]) != scp || (hllist[j] in printed)) continue
-      emitline(hllist[j], 2)
-      nhl++
-    }
-  }
-
   # ---- budget report ----
   # The number the compiler ACTED on: everything it emitted, plus the tail the
   # shell is about to append, plus the reserve these footer lines are drawn
@@ -3663,7 +4000,13 @@ END {
   # an outage, not only after.
   total = bytes - headerbytes + tailbytes + FOOTER_RESERVE
   if (!endedblank) say("")
-  say(sprintf("Budget: %d/%d chars, ~%dk tokens (soft). %d of %d digest entries expanded;",
+  if (full == 1) {
+    say(sprintf("Full rendering: %d records, %d chars, ~%dk tokens. Nothing collapsed,",
+                ncore, total, int(total / 4000 + 0.5)))
+    say("nothing capped, nothing dropped for decay. The session digest is zamm-digest.md.")
+    endedblank = 0
+  } else {
+  say(sprintf("Budget: %d/%d chars, ~%dk tokens (soft). %d of %d listed records expanded;",
               total, SOFTMAX, int(total / 4000 + 0.5), nexp, ncore))
   say(sprintf("%d collapsed to their headline (+el) to fit. Raise with --softmax, or supersede",
               ncore - nexp))
@@ -3686,8 +4029,9 @@ END {
     say("truncated — the cost is context: every agent pays this at every session start.")
     say("Retire or supersede what has gone stale, or raise --softmax deliberately.")
   }
+  }
 
-  # Live but below the Digests+Headlines entry caps: counted, not listed
+  # Live but below the entry cap: counted, not listed
   nunlist = 0
   for (i = 1; i <= nsort; i++) {
     id = sorted[i]
@@ -3696,7 +4040,7 @@ END {
   }
   if (nunlist > 0) {
     if (!endedblank) say("")
-    say("Unlisted live (below Digests+Headlines entry caps; ledger stays greppable): " nunlist)
+    say("Unlisted live (below the " ENTRY_MAX "-record cap; ledger stays greppable): " nunlist)
     endedblank = 0
   }
 
@@ -3729,7 +4073,7 @@ END {
 ZAMM_AWK_PROGRAM
 set +e
 awk \
-  -v today="$TODAY" -v check="$CHECK" -v listinert="$LIST_INERT" -v listlive="$LIST_LIVE" -v listvotes="$LIST_VOTES" -v listgraph="$LIST_GRAPH" -v liststate="$LIST_STATE" -v candidate="$cid" -v export="$EXPORT" -v root="$PROJECT_ROOT/" -v statefile="$STATE_TMP" -v lens="$TREE" -v softmax="$SOFTMAX" -v tailbytes="$TAILBYTES" \
+  -v today="$TODAY" -v check="$CHECK" -v listinert="$LIST_INERT" -v listlive="$LIST_LIVE" -v listvotes="$LIST_VOTES" -v listgraph="$LIST_GRAPH" -v liststate="$LIST_STATE" -v candidate="$cid" -v export="$EXPORT" -v root="$PROJECT_ROOT/" -v statefile="$STATE_TMP" -v lens="$TREE" -v softmax="$SOFTMAX" -v tailbytes="$TAILBYTES" -v full="$FULL" -v renders="$RENDERS" \
   -f "$AWK_PROG" "$MANIFEST" > "$TMP_FILE"
 rc=$?
 set -e
@@ -3812,11 +4156,79 @@ else
   # replaced when the awk produced one); the next compile re-derives both.
   gen=$(cksum < "$TMP_FILE" | tr -s ' \t' '-')
   printf '<!-- zamm-generation: %s -->\n' "$gen" >> "$TMP_FILE"
+  # A degraded backlog pass degrades the DIGEST run too: exit 2 must always
+  # pair with a visible degradation notice in the published output, and the
+  # published digest carries the "Backlog: DEGRADED" line. Decided HERE, before
+  # anything is renamed into place, because the verdict is a sidecar row.
+  degnote="degraded - see ## Degraded"
+  if [ "$rc" -eq 0 ] && [ "${BACKLOG_DEGRADED:-0}" -eq 1 ]; then
+    rc=2
+    degnote="degraded backlog - see the Backlog line"
+  fi
+  if [ "$rc" -eq 0 ] && [ "${JOURNAL_DEGRADED:-0}" -eq 1 ]; then
+    rc=2
+    degnote="degraded journal - see the Journal line"
+  fi
+  # The companion rendering, from the trees this pass just read and the tails
+  # it just rendered. A second process rather than a second pass inside the
+  # awk: the renderer is one straight line of emission with byte accounting
+  # threaded through it, and the honest way to get two budgets out of it is
+  # to run it twice. It cannot recurse (FULL is already 1 in the child) and it
+  # cannot take the session digest down with it: a companion that fails leaves
+  # the file it wrote last, and the digest is published right after. It runs
+  # BEFORE the second fingerprint read below, so a write that lands while it
+  # runs is caught like any other mid-compile write.
+  if [ "$TREE" = "knowledge" ] && [ "$FULL" -eq 0 ]; then
+    # ZAMM_COMPANION overrides the script used for the companion pass
+    # (test-only DI seam, like ZAMM_PLAN_MANIFEST): a test needs to see what
+    # happens when this fails, and what happens when it writes.
+    _full_rc=0
+    ZAMM_FULL_PLANS_TAIL="$PLANS_TAIL" ZAMM_FULL_EXTRA_TAIL="$EXTRA_TAIL" \
+      sh "${ZAMM_COMPANION:-$0}" --project-root "$PROJECT_ROOT" --full >/dev/null 2>&1 ||
+      _full_rc=$?
+    # 2 is a PUBLISHED rendering of a degraded ledger — the same verdict the
+    # session digest just got — not a failure to render one.
+    if [ "$_full_rc" -ne 0 ] && [ "$_full_rc" -ne 2 ]; then
+      # No fingerprint is stored after this, so the next run compiles again
+      # instead of certifying a companion that never got written.
+      FULL_OK=0
+      echo "zamm-compile: note: zamm-digest-full.md could not be rebuilt; the session digest is current and the next run will retry." >&2
+    fi
+  fi
+  # The digest and the sidecar are two separate renames that cannot be one
+  # atomic step, and rename ORDER alone only chooses which mismatched pairing
+  # survives a crash between them. So the pair carries a shared generation
+  # token (a checksum of the digest content, stamped into both files), and
+  # sidecar CONSUMERS verify it: on a mismatch they refuse with "recompile"
+  # instead of mixing authorities (e.g. memory list serving a selection the
+  # published digest never surfaced). Sidecar absence is tolerated (only
+  # replaced when the awk produced one); the next compile re-derives both.
+  #
+  # EVERY row goes in before the rename, so the sidecar publishes once and
+  # whole. Rows appended to the published path afterwards gave the file two
+  # writers: under concurrent compiles one process's rows landed in the other
+  # process's freshly published file, and the first `inputs` row a reader hit
+  # could describe a digest built at a different budget.
   if [ -f "$STATE_TMP" ]; then
     printf 'generation\t%s\n' "$gen" >> "$STATE_TMP"
     # the budget this digest was actually built at, so the next implicit
     # recompile rebuilds the same digest instead of reverting it
     printf 'softmax\t%s\n' "$SOFTMAX" >> "$STATE_TMP"
+    # the verdict, replayed verbatim by a skipped compile
+    printf 'rc\t%s\n' "$rc" >> "$STATE_TMP"
+    printf 'degnote\t%s\n' "$degnote" >> "$STATE_TMP"
+    # The fingerprint is stored only if re-reading the inputs still answers
+    # what it answered before the compile: a record written while the compiler
+    # was running is not described by what it just published, and storing that
+    # fingerprint would skip the recompile that fixes it. Storing nothing costs
+    # one compile; storing a wrong one costs a stale digest for as long as
+    # nobody writes again.
+    if [ -n "$FP" ] && [ "$TREE" = "knowledge" ]; then
+      _fp_after=$(inputs_fingerprint) || _fp_after=""
+      if [ -n "$_fp_after" ] && [ "$_fp_after" = "$FP" ] && [ "$FULL_OK" -eq 1 ]; then
+        printf 'inputs\t%s\n' "$FP" >> "$STATE_TMP"
+      fi
+    fi
     mv "$STATE_TMP" "$STATE_FILE"
   fi
   mv "$TMP_FILE" "$OUT_FILE"
@@ -3827,18 +4239,6 @@ else
   # that stopped updating. Sweep it on the publish that supersedes it.
   if [ "$TREE" != "backlog" ] && [ "$TREE" != "journal" ]; then
     rm -f "$OUT_DIR/memory.md"
-  fi
-  # A degraded backlog pass degrades the DIGEST run too: exit 2 must always
-  # pair with a visible degradation notice in the published output, and the
-  # published digest carries the "Backlog: DEGRADED" line.
-  degnote="degraded - see ## Degraded"
-  if [ "$rc" -eq 0 ] && [ "${BACKLOG_DEGRADED:-0}" -eq 1 ]; then
-    rc=2
-    degnote="degraded backlog - see the Backlog line"
-  fi
-  if [ "$rc" -eq 0 ] && [ "${JOURNAL_DEGRADED:-0}" -eq 1 ]; then
-    rc=2
-    degnote="degraded journal - see the Journal line"
   fi
   if [ "$TREE" = "backlog" ]; then
     outname="ZAMM backlog lens"

@@ -60,7 +60,7 @@ class TestBacklogLens(ZammTest):
     """The pulled lens: uncapped, hot-to-cold, dormant collapsed."""
 
     def test_lens_is_uncapped(self):
-        """More live ideas than the knowledge HEADLINE_MAX (150) — every one
+        """More live ideas than the knowledge ENTRY_MAX (200) — every one
         is listed. The lens is pulled by someone in triage mode, and a triage
         read wants the whole live list; decay is the only cap."""
         for i in range(160):

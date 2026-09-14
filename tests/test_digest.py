@@ -550,7 +550,7 @@ class TestDigestIsDeliveredAsAFile(ZammTest):
 
         self.assertIn_("zamm-memory/.compiled/zamm-digest.md", r.out)
         self.assertNotIn_("A statement that must not appear on stdout.", r.out)
-        self.assertNotIn_("## Digest (actionable", r.out)
+        self.assertNotIn_("## Records (ranked", r.out)
 
     def test_a_healthy_startup_is_exactly_two_lines(self):
         """The budget for session start is two lines: one saying what the
@@ -563,7 +563,7 @@ class TestDigestIsDeliveredAsAFile(ZammTest):
         lines = [ln for ln in r.out.splitlines() if ln.strip()]
         self.assertEqual(len(lines), 2, r)
         self.assertTrue(lines[0].startswith("ZAMM v"), r)
-        self.assertTrue(lines[1].startswith("digest updated: "), r)
+        self.assertTrue(lines[1].startswith("digest ready: "), r)
 
     def test_line_one_says_what_the_project_holds(self):
         """One segment per tree, so a session can tell a loaded project from
@@ -595,7 +595,7 @@ class TestDigestIsDeliveredAsAFile(ZammTest):
 
         r = self.led.compile()
 
-        self.assertIn_("digest updated: zamm-memory/.compiled/zamm-digest.md", r.out)
+        self.assertIn_("digest ready: zamm-memory/.compiled/zamm-digest.md", r.out)
         self.assertNotIn_(str(self.led.root), r.out)
 
     def test_the_report_does_not_reteach_the_protocol(self):
@@ -635,8 +635,8 @@ class TestDigestIsDeliveredAsAFile(ZammTest):
         r = self.led.compile("--inline")
 
         self.assertIn_("A statement that inline mode must print.", r.out)
-        self.assertIn_("## Digest (actionable", r.out)
-        self.assertNotIn_("digest updated:", r.out)
+        self.assertIn_("## Records (ranked", r.out)
+        self.assertNotIn_("digest ready:", r.out)
 
     def test_inline_warns_when_it_exceeds_what_output_can_carry(self):
         """Printing it is allowed; printing it silently past the cap is not."""
@@ -720,7 +720,7 @@ class TestDigestIsDeliveredAsAFile(ZammTest):
         r = self.led.compile_legacy()
 
         self.assertCode(r, EXIT_OK)
-        self.assertIn_("digest updated:", r.out, "the alias runs the same report")
+        self.assertIn_("digest ready:", r.out, "the alias runs the same report")
         self.assertIn_("startup", r.err, "and names what replaced it")
 
     def test_a_blocked_plan_is_visible_on_line_one(self):
@@ -912,6 +912,42 @@ class TestTheDefectReport(ZammTest):
         self.assertFalse(self.led.exists(self.DEFECTS),
                          "a refused compile must not leave a report claiming none")
 
+    def test_a_soft_cap_never_reaches_session_start(self):
+        """Guardrails bypass the digest budget and never decay, so the compiler
+        warned about inflation past 15 — four sentences of prose, above the
+        report, on every run until a human reclassifies something. Standing
+        state again: it reads on `status`, against its cap, where someone asked
+        for it."""
+        for i in range(16):
+            self.led.add(f"guard-{i}", f"A rule that must not be violated {i}.",
+                         importance="guardrail", durability="permanent")
+
+        r = self.led.compile()
+
+        self.assertIn_("16 guardrails", r.out.splitlines()[0])
+        self.assertNotIn_("soft max", r.output)
+        self.assertNotIn_("defects:", r.out)
+        status = self.led.status().out
+        self.assertIn_("guardrails: 16/15 -- OVER", status)
+        self.assertIn_("reclassify", status)
+
+    def test_a_per_record_warning_still_reaches_its_author(self):
+        """The write is when a typo is news, and a validating write runs
+        --check — which prints every warning. Quiet at session start is not
+        quiet at the moment someone can still fix it in one edit."""
+        self.led.write(
+            "zamm-memory/knowledge/2026/2026-01-05-typo-33333.md",
+            "---\ntype: memory\nscope: internals\nimprtance: useful\n"
+            "importance: useful\ndurability: months\ncreated: 2026-01-05\n"
+            "schema: 3\n---\nA record whose header carries a typo.\n")
+
+        quiet = self.led.compile()
+        loud = self.led.check()
+
+        self.assertNotIn_("unknown frontmatter key", quiet.output)
+        self.assertIn_("unknown frontmatter key", loud.err)
+        self.assertIn_("imprtance", loud.err)
+
     def test_the_catch_all_area_over_its_cap_is_a_defect(self):
         """The one validation failure the digest renders no line for — it is a
         property of the whole ledger, not of a record — so without a section
@@ -926,3 +962,100 @@ class TestTheDefectReport(ZammTest):
         defects = self.led.read(self.DEFECTS)
         self.assertIn_("catch-all", defects)
         self.assertIn_("memory create --scope <area> --supersedes", defects)
+
+
+class TestTheFullRendering(ZammTest):
+    """The companion file: the same ledger with nothing left out.
+
+    The session digest is written for an agent paying context for every line,
+    so it caps membership, collapses what the budget cannot afford, and drops
+    what has decayed. None of that serves a person searching for something
+    half-remembered — `+el` is exactly the wrong answer to "where did I write
+    that down". So the compiler renders the ledger twice, and the two files
+    differ only in the three numbers that decide what gets left out.
+    """
+
+    FULL = "zamm-memory/.compiled/zamm-digest-full.md"
+
+    def _fat(self, n, sentences=8):
+        for i in range(n):
+            self.led.add(
+                f"rec-{i}",
+                f"Headline number {i}.\n\n"
+                + " ".join(f"Elaboration sentence {j} for record {i}."
+                           for j in range(sentences)),
+            )
+
+    def test_it_expands_what_the_session_digest_collapsed(self):
+        self._fat(60)
+
+        self.led.compile("--softmax", "4000")
+
+        digest = self.led.digest()
+        full = self.led.read(self.FULL)
+        self.assertIn_("+el]", digest, "the fixture must outgrow the session budget")
+        self.assertNotIn_("+el]", full, "the full rendering collapses nothing")
+        self.assertIn_("Elaboration sentence 7 for record 0.", full)
+
+    def test_it_lists_what_the_entry_cap_left_out(self):
+        self.led.add_many(220)
+
+        self.led.compile()
+
+        listed = sum(1 for ln in self.led.digest_section("Records").splitlines()
+                     if ln.startswith("- "))
+        self.assertEqual(listed, 200, "the session digest caps at 200")
+        self.assertIn_("Unlisted live", self.led.digest())
+        full_listed = sum(1 for ln in self.led.read(self.FULL).splitlines()
+                          if ln.startswith("- "))
+        self.assertEqual(full_listed, 220)
+        self.assertNotIn_("Unlisted live", self.led.read(self.FULL))
+
+    def test_it_lists_dormant_records_the_digest_only_counts(self):
+        """A decayed record is the one most likely to be half-remembered and
+        the one the session digest is most right to leave out."""
+        self.led.add("fresh", "A current statement.")
+        self.led.add("stale", "A long-decayed note about an old migration.",
+                     date="2026-01-05", importance="minor", durability="days")
+
+        self.led.compile(today="2026-07-19")
+
+        self.assertNotIn_("long-decayed note", self.led.digest())
+        self.assertIn_("Dormant", self.led.digest())
+        self.assertIn_("long-decayed note", self.led.read(self.FULL))
+
+    def test_each_file_says_which_one_it_is(self):
+        """The failure to prevent is an agent reading the full rendering at
+        session start and paying for everything the ranking excluded."""
+        self.led.add("rule", "A statement.")
+
+        self.led.compile()
+
+        self.assertIn_("zamm-digest-full.md", self.led.digest(),
+                       "the session digest points at its companion")
+        full = self.led.read(self.FULL)
+        self.assertIn_("NOT the session read", full)
+        self.assertIn_("zamm-digest.md", full)
+
+    def test_it_publishes_no_sidecar_of_its_own(self):
+        """Counts, select rows and the remembered budget describe the digest a
+        session is handed; a second rendering with different caps must not
+        overwrite them."""
+        self.led.add_many(220)
+
+        self.led.compile()
+
+        rows = [ln for ln in self.led.read("zamm-memory/.compiled/state.tsv").splitlines()
+                if ln.startswith("select\t")]
+        self.assertEqual(len(rows), 200)
+
+    def test_a_write_refreshes_it_too(self):
+        self.led.add("rule", "A statement.")
+        self.led.compile()
+        self.assertNotIn_("Another statement.", self.led.read(self.FULL))
+
+        self.led.new_memory("--scope", "internals", "second", validate=True,
+                            body="Another statement.\n")
+
+        self.assertIn_("Another statement.", self.led.read(self.FULL))
+

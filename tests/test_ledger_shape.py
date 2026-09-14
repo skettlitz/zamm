@@ -305,8 +305,15 @@ class FilesystemRealitiesAreTolerated(ZammTest):
         self.assertIn_("exists both live and archived", c.err)
         self.assertIn_("the live copy is used", c.err)
 
-        self.assertCode(self.led.compile(), EXIT_OK)
+        r = self.led.compile()
+        self.assertCode(r, EXIT_OK)
         self.assertIn_("The live copy.", self.led.digest())
+        # Session start says it too, as a defect type rather than a stderr
+        # line: this is the one warning that renders nowhere else, so silence
+        # above the report would have been silence everywhere.
+        self.assertIn_("1 record live and archived", r.out)
+        self.assertIn_("memory archive",
+                       self.led.read("zamm-memory/.compiled/zamm-defects.md"))
 
     def test_identical_names_in_two_year_dirs_are_not_called_a_case_collision(self):
         """PRE-FIX: the case-fold check compared lowercased basenames without

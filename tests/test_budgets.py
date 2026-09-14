@@ -1,8 +1,8 @@
 """The bounded-attention claim.
 
 README leads with it and the protocol documents exact numbers, but until
-this file nothing pushed the caps: the largest fixture in the suite was 40
-records against a 75/150 budget, so the limits never engaged.
+this file nothing pushed the cap: the largest fixture in the suite was 40
+records against a 200-record ceiling, so the limit never engaged.
 
 These are ordinary tests, not regression locks — the budgets never broke, so
 there is no pre-fix version to falsify them against.
@@ -10,8 +10,7 @@ there is no pre-fix version to falsify them against.
 
 from harness import ZammTest
 
-DIGEST_MAX = 75
-HEADLINE_MAX = 150
+ENTRY_MAX = 200
 
 
 def _count_entries(text):
@@ -25,23 +24,20 @@ def _count_entries(text):
 
 
 class TestDigestBudget(ZammTest):
-    def test_layers_cap_at_their_documented_limits(self):
-        """250 live records against a 75 + 150 budget: the ranked layers fill
-        exactly, and everything past them is counted rather than listed."""
+    def test_the_section_caps_at_its_documented_limit(self):
+        """250 live records against a 200-record ceiling: the ranked section
+        fills exactly, and everything past it is counted rather than listed."""
         self.led.add_many(250)
 
         self.led.compile()
 
         self.assertIn_("live=250", self.header())
         self.assertEqual(
-            _count_entries(self.led.digest_section("Digest")), DIGEST_MAX
-        )
-        self.assertEqual(
-            _count_entries(self.led.digest_section("Headlines")), HEADLINE_MAX
+            _count_entries(self.led.digest_section("Records")), ENTRY_MAX
         )
         self.assertIn_(
-            f"Unlisted live (below Digests+Headlines entry caps; ledger stays greppable): "
-            f"{250 - DIGEST_MAX - HEADLINE_MAX}",
+            f"Unlisted live (below the {ENTRY_MAX}-record cap; ledger stays greppable): "
+            f"{250 - ENTRY_MAX}",
             self.led.digest(),
         )
 
@@ -53,9 +49,7 @@ class TestDigestBudget(ZammTest):
         self.led.compile()
         digest = self.led.digest()
 
-        listed = _count_entries(self.led.digest_section("Digest")) + _count_entries(
-            self.led.digest_section("Headlines")
-        )
+        listed = _count_entries(self.led.digest_section("Records"))
         unlisted = 0
         for ln in digest.splitlines():
             if ln.startswith("Unlisted live"):
@@ -68,32 +62,26 @@ class TestDigestBudget(ZammTest):
 
         self.led.compile()
 
-        self.assertEqual(_count_entries(self.led.digest_section("Digest")), 30)
+        self.assertEqual(_count_entries(self.led.digest_section("Records")), 30)
         self.assertNotIn_("Unlisted live", self.led.digest())
 
-    def test_headlines_carry_no_elaboration(self):
-        """The second layer is one line per record by definition — if
-        elaboration leaked in, the space budget would be meaningless."""
+    def test_a_collapsed_entry_carries_no_elaboration(self):
+        """What used to be the Headlines layer is now what the budget could
+        not afford: a collapsed entry is one line, marked +el. If elaboration
+        leaked into it the space budget would be meaningless."""
         for i in range(120):
             self.led.add(
                 f"rec-{i}",
-                f"Headline number {i}.\n\nElaboration {i} that belongs only to full blocks.",
+                f"Headline number {i}.\n\nElaboration {i} that only an expanded entry shows.",
             )
 
-        self.led.compile()
-        headlines = self.led.digest_section("Headlines")
+        self.led.compile("--softmax", "9000")
+        section = self.led.digest_section("Records")
 
-        self.assertGreater(_count_entries(headlines), 0)
-        self.assertNotIn_("that belongs only to full blocks", headlines)
-        for ln in headlines.splitlines():
-            if ln.startswith("Budget: "):
-                break
-            if not ln.strip() or ln.startswith("### "):
-                continue
-            self.assertTrue(
-                ln.startswith("- "),
-                f"headline section must be flat, got: {ln!r}",
-            )
+        collapsed = [ln for ln in section.splitlines() if "+el]" in ln]
+        self.assertGreater(len(collapsed), 0, "the fixture must outgrow the budget")
+        for ln in collapsed:
+            self.assertNotIn_("only an expanded entry shows", ln)
 
     def test_guardrails_are_admitted_before_the_budget(self):
         """Documented as bounded in its ranked layers, NOT in total size:
@@ -106,7 +94,7 @@ class TestDigestBudget(ZammTest):
         guardrail admission. Ordinary coverage of previously untested
         behaviour.
         """
-        over = DIGEST_MAX + 5
+        over = ENTRY_MAX + 5
         for i in range(over):
             self.led.add(
                 f"guard-{i}", f"Guardrail number {i}.",
@@ -116,12 +104,12 @@ class TestDigestBudget(ZammTest):
         r = self.led.compile()
 
         self.assertCode(r, 0)
-        blocks = _count_entries(self.led.digest_section("Digest"))
+        blocks = _count_entries(self.led.digest_section("Records"))
         self.assertEqual(
             blocks, over,
-            "every live guardrail must render, even past DIGEST_MAX",
+            "every live guardrail must render, even past ENTRY_MAX",
         )
-        self.assertGreater(blocks, DIGEST_MAX)
+        self.assertGreater(blocks, ENTRY_MAX)
 
     def test_guardrails_do_not_starve_the_rest_of_the_digest(self):
         """A handful of guardrails plus ordinary records: guardrails go
@@ -131,12 +119,12 @@ class TestDigestBudget(ZammTest):
                 f"guard-{i}", f"Guardrail {i}.",
                 importance="guardrail", durability="permanent",
             )
-        self.led.add_many(200)
+        self.led.add_many(250)
 
         self.led.compile()
-        section = self.led.digest_section("Digest")
+        section = self.led.digest_section("Records")
 
-        self.assertEqual(_count_entries(section), DIGEST_MAX)
+        self.assertEqual(_count_entries(section), ENTRY_MAX)
         self.assertEqual(
             sum(1 for ln in section.splitlines() if ln.startswith("- ! ")), 5
         )
@@ -147,7 +135,7 @@ class TestDormantAndUnlisted(ZammTest):
         """Two different reasons a record is absent from the digest, two
         different lines. Conflating them would hide decay behind budget
         pressure."""
-        self.led.add_many(230)
+        self.led.add_many(260)
         for i in range(10):
             self.led.add(
                 f"stale-{i}", f"Long-decayed note {i}.",
@@ -158,10 +146,10 @@ class TestDormantAndUnlisted(ZammTest):
         self.led.compile()
         digest = self.led.digest()
 
-        self.assertIn_("live=240", self.header())
+        self.assertIn_("live=270", self.header())
         self.assertIn_(
-            f"Unlisted live (below Digests+Headlines entry caps; ledger stays greppable): "
-            f"{230 - DIGEST_MAX - HEADLINE_MAX}",
+            f"Unlisted live (below the {ENTRY_MAX}-record cap; ledger stays greppable): "
+            f"{260 - ENTRY_MAX}",
             digest,
         )
         self.assertIn_(
@@ -220,9 +208,7 @@ class TestSpaceBudget(ZammTest):
     """
 
     def _entries(self):
-        return _count_entries(
-            self.led.digest_section("Digest")
-        ) + _count_entries(self.led.digest_section("Headlines"))
+        return _count_entries(self.led.digest_section("Records"))
 
     def test_a_bound_budget_collapses_blocks_and_keeps_every_entry(self):
         """The load-bearing claim: under pressure the digest says less about
@@ -347,7 +333,7 @@ class TestSpaceBudget(ZammTest):
 
         line = _budget_line(self.led.digest())
         self.assertRegex(
-            line, r"^Budget: \d+/9000 chars, ~\d+k tokens \(soft\)\. \d+ of \d+ digest entries"
+            line, r"^Budget: \d+/9000 chars, ~\d+k tokens \(soft\)\. \d+ of \d+ listed records"
         )
 
     def test_an_unbound_budget_changes_nothing(self):
@@ -366,9 +352,9 @@ class TestSpaceBudget(ZammTest):
 
 
 class TestAreaGrouping(ZammTest):
-    """Both record sections group under `### <area>` headings.
+    """The records group under `### <area>` headings.
 
-    The compiler used to group the Digest layer by FULL scope. In a mature
+    The compiler used to group them by FULL scope. In a mature
     ledger the subpaths are nearly unique per record — the ledger this was
     measured on produced 66 groups for 75 entries, 58 of them singletons — so
     the grouping produced headings rather than groups, and paid for them.
@@ -388,7 +374,7 @@ class TestAreaGrouping(ZammTest):
 
         self.led.compile()
 
-        self.assertEqual(self._headings("Digest"), ["internals"])
+        self.assertEqual(self._headings("Records"), ["internals"])
 
     def test_the_subpath_moves_onto_the_entry_as_its_label(self):
         """The area is context the heading already gave; what earns a place on
@@ -411,22 +397,21 @@ class TestAreaGrouping(ZammTest):
 
         self.assertIn_("- A statement with no subpath.", self.led.digest())
 
-    def test_both_layers_group(self):
-        """The Headlines layer is a topical lookup — "open the record when the
+    def test_grouping_survives_a_long_list(self):
+        """Reading the section is a topical lookup — "open the record when the
         topic matches" — and a flat ranked list is the one shape that cannot
-        serve one."""
+        serve one. Each area appears once, however many records are listed."""
         for i in range(120):
             area = ("internals", "contracts", "domain")[i % 3]
             self.led.add(f"rec-{i}", f"Statement {i}.", scope=f"{area}/sub-{i}")
 
         self.led.compile()
 
-        for section in ("Digest", "Headlines"):
-            heads = self._headings(section)
-            self.assertGreater(len(heads), 0, f"{section} must group")
-            self.assertEqual(len(heads), len(set(heads)), f"{section} repeats a heading")
-            for h in heads:
-                self.assertNotIn("/", h, f"{section} heading {h!r} is not an area")
+        heads = self._headings("Records")
+        self.assertGreater(len(heads), 0, "the section must group")
+        self.assertEqual(len(heads), len(set(heads)), "a heading is repeated")
+        for h in heads:
+            self.assertNotIn("/", h, f"heading {h!r} is not an area")
 
     def test_grouping_does_not_change_which_records_are_listed(self):
         """Presentation only: rank still decides membership."""

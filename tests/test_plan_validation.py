@@ -631,3 +631,78 @@ class TestAbandonHeuristic(ZammTest):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestWhySection(ZammTest):
+    """`## Why` applies to plans created from 2026-09-13. The checker requires
+    nothing of it: a plan without one predates the section and is fully
+    valid, and nothing is backfilled. What the template guarantees is that a
+    NEW plan is born with the prompts in front of the agent."""
+
+    def test_a_new_plan_carries_the_section(self):
+        r = self.led.plan_create("Deploy the thing")
+
+        self.assertCode(r, EXIT_OK)
+        text = self.led.read(r.out.strip())
+        why = text.index("## Why")
+        self.assertLess(why, text.index("## Scope"), "Why sits above Scope")
+        self.assertLess(text.index("Last updated:"), why)
+        for line in ("- now:", "- problem:", "- serves:"):
+            self.assertIn_(line, text)
+
+    def test_a_new_plan_passes_check_as_created(self):
+        """The placeholders must not read as a malformed section to anything
+        the checker parses — a fresh Draft is valid before a word is typed."""
+        self.led.plan_create("Deploy the thing")
+
+        self.assertCode(self.led.plan_check(), EXIT_OK)
+
+    def test_a_plan_without_the_section_stays_valid(self):
+        """Every plan the harness writes has no ## Why, and every status the
+        checker knows must still pass with one absent."""
+        for status in ("Draft", "Implementing", "Review", "Done", "Abandoned"):
+            self.led.add_plan(f"2026-01-05-old-{status.lower()}", status=status)
+
+        r = self.led.plan_check()
+
+        self.assertCode(r, EXIT_OK)
+        self.assertNotIn_("Why", r.err + r.out)
+
+    def test_both_scope_spellings_are_read(self):
+        """`## Scope` is a heading like every other section since 2026-09-13;
+        `Scope:` is every plan before it. The checker must find In/Out under
+        either, and must still refuse an Implementing plan with neither."""
+        r = self.led.plan_create("New spelling")
+        path = self.led.root / r.out.strip()
+        text = path.read_text().replace("* In:", "* In: real scope text")
+        text = text.replace("- [ ]\n", "- [ ] an outcome\n")
+        text = text.replace("Status: Draft", "Status: Implementing\nExecution-context-before: x\nComplexity-forecast: gecko")
+        path.write_text(text)
+        self.assertIn_("## Scope", text)
+        self.assertCode(self.led.plan_check(), EXIT_OK)
+
+        empty = text.replace("* In: real scope text", "* In:")
+        path.write_text(empty)
+        r = self.led.plan_check()
+        self.assertNotEqual(0, r.code)
+        self.assertIn_("Scope", r.err)
+
+    def test_a_filled_section_is_inert_to_the_checker(self):
+        """A Why with real content, and a Scope Out item carrying its reason,
+        must not disturb the Done-when census or any other section parse."""
+        r = self.led.plan_create("Deploy the thing")
+        path = self.led.root / r.out.strip()
+        text = path.read_text()
+        text = text.replace("- now:\n- problem:\n- serves:\n",
+                            "- now: human: the other project runs three commits behind\n"
+                            "- problem: derived: its agents follow a router that describes lines starting `!`\n"
+                            "- serves: derived: say it once, where it renders\n"
+                            "- assumes: not revealed\n")
+        text = text.replace("* In:", "* In: the deploy itself")
+        text = text.replace("* Out:", "* Out: backfilling old plans (never: they stay valid as written)")
+        text = text.replace("- [ ]\n", "- [ ] the other project's startup prints two lines\n")
+        text = text.replace("Status: Draft", "Status: Implementing\nExecution-context-before: two repos\nComplexity-forecast: gecko")
+        path.write_text(text)
+
+        self.assertCode(self.led.plan_check(), EXIT_OK)
+

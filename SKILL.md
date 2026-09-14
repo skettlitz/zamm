@@ -48,7 +48,8 @@ proceeding under the old rules.
 | a noteworthy episode: implies no action, asserts no durable fact | `journal add '<sentence>'` — never a `days` knowledge record, never a session-end ritual | `references/journal-writing.md` first |
 | someone asks what happened, or for a summary of a period | answer from `journal digest <period>` (compiled, never stored), `journal list`, `search`, `stats` — all read-only | `references/journal-reading.md` |
 | digest shows a `Journal:` line; or you are asked to STORE a period summary, or to record what you reviewed | `journal review` → distill → `journal settle`; or `journal elevate <kind> <period>` — writes, separate from answering | `references/journal-maintenance.md` first |
-| work that warrants a plan and none matches | `plan create '<title>'` | `references/plans-writing.md` first |
+| work that warrants a plan and none matches | `plan create '<title>'`, then fill `## Why` from the discussion, each line tagged `human:` / `derived:` / `not revealed` | `references/plans-writing.md` first |
+| a fork the plan did not anticipate | re-read the plan's `## Why`, choose against it, append the choice | `references/plans-maintenance.md` |
 | you cannot continue and the reason outlives the session | `plan block --kind human\|plan\|external\|defect <slug> '<sentence>'` — one sentence, no other ceremony; `plan unblock` when it clears | `references/plans-maintenance.md` |
 | plan moves to `Review` or `Abandoned` | learnings + votes record + telemetry fields | `references/plans-maintenance.md` |
 | plan `Done` (human-approved, from `Review` only) | archive flow | `references/plans-maintenance.md` |

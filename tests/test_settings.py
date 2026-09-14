@@ -55,7 +55,7 @@ class TestChainDepthCap(ZammTest):
         self.assertEqual(
             entries[0], stable,
             "the stable record must outrank the churned chain\n"
-            + self.led.digest_section("Digest"),
+            + self.led.digest_section("Records"),
         )
 
 

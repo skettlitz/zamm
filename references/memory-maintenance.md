@@ -20,8 +20,8 @@ There are no tiers, counters or consolidation rituals: the compiler derives
 liveness, vote totals, ranking and supersede chains from the records at read
 time. Score = author-rated importance decayed over the author-rated
 durability (its half-life), corrected by votes; fully decayed records go
-dormant (counted, unlisted, greppable). Two capped layers, ~75 Digest blocks
-and ~150 Headlines; digest seats are balanced across top-level areas by a
+dormant (counted, unlisted, greppable). One capped section, 200 records, each
+expanded while the space budget lasts; digest seats are balanced across areas by a
 per-area penalty (a weighted compromise, not a quota): a record with several
 area tags competes through its least-crowded area but pays a small score
 cost per extra tag, so precise tagging beats tag-sprawl. Live guardrails
@@ -64,7 +64,7 @@ only supersede another votes record.
 After a merge or pull, two branches may have superseded the same record
 independently. Both successors stay live (added files never conflict in
 git); the digest lists the group under `Needs reconciliation`, and each head
-keeps its full block in `## Digest` marked `~`, so nothing is hidden.
+keeps its full block under `## Records` marked `~`, so nothing is hidden.
 
 - When ground truth IS determinable — from code, git history, tests or
   context — write ONE record whose body merges the competing statements (or
