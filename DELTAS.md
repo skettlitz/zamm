@@ -2365,3 +2365,44 @@ replacing the manifest cache, and folding the skill stamp into the fingerprint
 — each remove a mechanism this session added and would each be a day. The
 deploy is the priority; they are written down here so they are not lost.
 
+Locked 2026-09-14 — the first run against a real ledger (Bricktrench: 475
+knowledge records, 397 live, 89 ideas, 19 active plans, 441 archived plans,
+1,439 markdown files), and what it changed.
+
+**The git tier had never run on a clean repository.** The directory guard
+reads the listed paths from a here-doc, and the here-doc of an EMPTY list is
+one empty line. `[ -d "$top/" ]` is true, so every repository with nothing
+dirty — the common case, the one the tier exists for — bailed into the tree
+read. The fixtures never noticed because their `.compiled/` was tracked and
+churned, which produced the same empty list after filtering. The sidecar now
+records which tier answered (`fingerprint\tgit|tree`), and a test holds a
+clean repository to `git`.
+
+**Three quarters of the bytes the tree tier read were archived plans.** 8.4 MB
+across 1,439 files, 6.4 MB of it under `archive/plans/` — whose CONTENT the
+digest never reads (the "recently archived" list is directory names and
+mtimes). Their paths stay in the fingerprint, so an archive or a restore is
+still a change; their bytes are no longer hashed. And `xargs cat` replaces
+the awk getline loop for the content that is read: six times faster over the
+same bytes, POSIX, and chunked — a single `cat $list` would have crossed
+ARG_MAX on a large ledger and hashed nothing, silently. The paths are made
+relative from the project root so a root with a space in it does not split.
+
+**Numbers, on that ledger.** Compile skip 0.66s → 0.20s (git) / 0.30s (tree);
+warm startup end to end 0.85s → 0.35s; cold compile 5.0s → 3.7s, because the
+fingerprint runs twice per compile and each read was 0.7s. The old compiler's
+cold compile was 3.3s; the 0.4s left over is the companion rendering. A
+validating `memory create` costs a check pass plus a compile.
+
+**What the deploy will look like there.** The project runs with a sticky
+`--softmax 160000`, not the 80k default — the value survives the update
+because it lives in the sidecar. At 160k the digest their agents read today is
+130k chars (~33k tokens): 75 full blocks plus 150 headlines, 225 records named,
+172 unlisted. After: 157k chars (~39k tokens), 200 records, every one with its
+elaboration, 197 unlisted; all 75 old blocks remain, 87 old headlines are now
+expanded, 63 old headlines are no longer named, 38 records are named that were
+not. Six thousand more tokens per session, for detail on 125 more records and
+names for 25 fewer. Nothing outside the vendored skill refers to the old
+section names. `status` will say `guardrails: 16/15 -- OVER`, `11 plans are
+Implementing`, `4 archive-ready`, and `check` passes.
+

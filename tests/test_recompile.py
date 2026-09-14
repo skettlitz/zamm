@@ -45,6 +45,13 @@ class TestRecompileOnlyWhenInputsMove(ZammTest):
         self.assertCode(r, EXIT_OK)
         self.assertEqual(before, self._stamp(), "nothing moved, so nothing should be rewritten")
 
+    def test_without_git_the_tree_is_read(self):
+        self.led.add("rule", "A statement.")
+
+        self.led.compile()
+
+        self.assertIn_("fingerprint\ttree", self.led.read(STATE))
+
     def test_the_companion_is_skipped_with_it(self):
         """One fingerprint covers every artifact the compile publishes."""
         self.led.add("rule", "A statement.")
@@ -345,6 +352,14 @@ class TestTheGitAnswer(ZammTest):
         self.led.compile()
 
         self.assertEqual(before, self._stamp())
+
+    def test_a_clean_repository_is_answered_by_git(self):
+        """The one that would have caught it: with nothing dirty, the list of
+        paths to check is empty, and an empty here-doc is one empty line — which
+        resolved to the repository root, read as a directory, and bailed every
+        clean repository out of the git tier into the tree read. The sidecar
+        now says which tier answered, and a clean repository must say git."""
+        self.assertIn_("fingerprint\tgit", self.led.read(STATE))
 
     def test_our_own_compiled_output_is_not_an_input(self):
         """.compiled is gitignored, and `--ignored` lists it file by file. Left

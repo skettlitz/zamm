@@ -469,7 +469,11 @@ git_fingerprint_inputs() {
   # hash nothing. Any listed path that is a directory means the answer is not
   # here: read the tree instead. (Ignored directories are not this case:
   # --untracked-files=all lists their files one by one.)
+  # An empty line — the here-doc of an EMPTY list is one empty line, and that
+  # is the common case, a clean repository — must not resolve to "$_fp_top/"
+  # and read as a directory: that bailed every clean repo out of this tier.
   while IFS= read -r _fp_p; do
+    [ -n "$_fp_p" ] || continue
     if [ -d "$_fp_top/$_fp_p" ]; then return 1; fi
   done <<EOF
 $(sed 's/^...//; s/.* -> //' "$_fp_all")
@@ -514,8 +518,11 @@ inputs_fingerprint() {
   # twice per real compile (before, and after to catch a write that landed
   # mid-compile), and the scripts are not part of that race.
   [ -n "${FP_SCRIPTS:-}" ] || FP_SCRIPTS=$(cat "$SCRIPT_DIR"/*.sh | zamm_hash)
+  # Prints "<tier> <hash>": the tier rides on the output because the caller
+  # takes this through a command substitution, where a variable set here would
+  # die with the subshell.
   if _fp_out=$(git_fingerprint_inputs) && [ -n "$_fp_out" ]; then
-    printf '%s\n' "$_fp_out"
+    printf 'git %s\n' "$_fp_out"
     return 0
   fi
   # No git, or a ledger it has never seen: read the tree. One traversal of
@@ -532,22 +539,38 @@ inputs_fingerprint() {
   # this run does not produce. ADDING a symlink is caught (a new path), and so
   # is deleting one. (The git answer above has the same shape: a symlink is a
   # path git knows about, so swapping one in is a status change.)
-  find "$_fp_mem" -name '.compiled' -prune -o -print > "$_fp_all" 2>/dev/null || return 1
+  # Relative paths, from the project root: they are what `xargs` below gets
+  # handed, and the root may carry a space where nothing under zamm-memory/ may
+  # (record and plan names are slugs by contract).
+  (cd "$PROJECT_ROOT" && find zamm-memory -name '.compiled' -prune -o -print) \
+    > "$_fp_all" 2>/dev/null || return 1
   {
     printf 'zamm-inputs-v1\troot=%s\tsoftmax=%s\ttoday=%s\n' "$PROJECT_ROOT" "$SOFTMAX" "$TODAY"
     LC_ALL=C sort "$_fp_all"
-    # awk reads the files itself: one process for 400 records instead of 400.
-    # The \f prefix keeps a path from being confused with a line of content.
-    grep '\.md$' "$_fp_all" | LC_ALL=C sort |
-      awk '{ print "\f" $0; while ((getline line < $0) > 0) print line; close($0) }'
+    # The content of every markdown file EXCEPT under archive/plans. The digest
+    # reads nothing from an archived plan but its directory name (and the
+    # directory mtime, which no fingerprint sees): on a real ledger those
+    # directories were three quarters of the bytes read for nothing. Their
+    # paths stay in the list above, so an archive or a restore is still a
+    # change. `xargs cat` chunks argv and is POSIX; an awk getline loop was
+    # six times slower over the same bytes, and a single `cat $list` would
+    # have hit ARG_MAX on a large ledger and hashed nothing, silently.
+    grep '\.md$' "$_fp_all" | grep -v '^zamm-memory/archive/plans/' | LC_ALL=C sort |
+      (cd "$PROJECT_ROOT" && xargs cat 2>/dev/null)
     printf 'scripts=%s\n' "$FP_SCRIPTS"
-  } | zamm_hash
+  } | zamm_hash | sed 's/^/tree /'
 }
 
 FP=""
 if [ "$READ_ONLY" -eq 0 ] && [ "$CHECK" -eq 0 ] && [ "$FULL" -eq 0 ] &&
    [ "$TREE" = "knowledge" ] && [ -z "$CANDIDATE" ]; then
-  FP=$(inputs_fingerprint) || FP=""
+  FP_TIER=""
+  if _fp_line=$(inputs_fingerprint) && [ -n "$_fp_line" ]; then
+    FP_TIER=${_fp_line%% *}
+    FP=${_fp_line#* }
+  else
+    FP=""
+  fi
   if [ "$FORCE" -eq 0 ] && [ -n "$FP" ] && [ -f "$STATE_FILE" ]; then
     _fp_prev=$(state_row inputs "$STATE_FILE")
     _fp_ok=1
@@ -4217,6 +4240,9 @@ else
     # the verdict, replayed verbatim by a skipped compile
     printf 'rc\t%s\n' "$rc" >> "$STATE_TMP"
     printf 'degnote\t%s\n' "$degnote" >> "$STATE_TMP"
+    # which tier answered — the git tier is the one that stays flat as the
+    # ledger grows, and a test holds a clean repository to it
+    [ -z "${FP_TIER:-}" ] || printf 'fingerprint\t%s\n' "$FP_TIER" >> "$STATE_TMP"
     # The fingerprint is stored only if re-reading the inputs still answers
     # what it answered before the compile: a record written while the compiler
     # was running is not described by what it just published, and storing that
@@ -4225,6 +4251,7 @@ else
     # nobody writes again.
     if [ -n "$FP" ] && [ "$TREE" = "knowledge" ]; then
       _fp_after=$(inputs_fingerprint) || _fp_after=""
+      _fp_after=${_fp_after#* }
       if [ -n "$_fp_after" ] && [ "$_fp_after" = "$FP" ] && [ "$FULL_OK" -eq 1 ]; then
         printf 'inputs\t%s\n' "$FP" >> "$STATE_TMP"
       fi
