@@ -39,11 +39,13 @@ them. Canonical skill name and folder: `zamm`.
 bash <zamm-skill>/scripts/zamm-run.sh startup
 ```
 
-It prints two lines — what the project holds, and the path of the digest:
+It prints two lines — what the project holds, and the path of the digest with its size,
+rounded up to whole KiB, so the reader can tell before choosing a tool whether one file read
+covers it:
 
 ```
 ZAMM v3 · 34 live · 3 guardrails · 2 plans (1 blocked) · 11 ideas (2 hot) · 47 episodes
-digest ready: zamm-memory/.compiled/zamm-digest.md
+digest ready: zamm-memory/.compiled/zamm-digest.md (12 KiB)
 ```
 
 Below them, two more lines when something is wrong with the project — never more than two:

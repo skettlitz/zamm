@@ -598,6 +598,26 @@ class TestDigestIsDeliveredAsAFile(ZammTest):
         self.assertIn_("digest ready: zamm-memory/.compiled/zamm-digest.md", r.out)
         self.assertNotIn_(str(self.led.root), r.out)
 
+    def test_the_path_carries_the_size_rounded_up_to_kib(self):
+        """An agent that reaches for `cat` gets the first ~30000 characters
+        and a preview of the rest, and goes on as if it had read memory. The
+        router says never to in words; the size is a number it can act on
+        BEFORE choosing a tool. Rounded up, so no digest reads as smaller than
+        it is."""
+        self.led.add_many(5)
+
+        r = self.led.compile()
+
+        line = [ln for ln in r.out.splitlines() if ln.startswith("digest ready: ")][0]
+        digest = os.path.join(str(self.led.root), "zamm-memory", ".compiled", "zamm-digest.md")
+        size = os.path.getsize(digest)
+        self.assertGreater(size, 0, "the fixture must produce a real digest")
+        kib = -(-size // 1024)
+        self.assertEqual(
+            line, f"digest ready: zamm-memory/.compiled/zamm-digest.md ({kib} KiB)", r
+        )
+        self.assertGreaterEqual(kib * 1024, size, "rounded UP, never down")
+
     def test_the_report_does_not_reteach_the_protocol(self):
         """How to read the file is in the router, read once per session from
         AGENTS.md. Repeating it here spends output on a reader who knows."""

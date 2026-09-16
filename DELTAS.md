@@ -2439,3 +2439,20 @@ on the one status transition an agent makes alone invites fighting the lock
 instead of writing the reason. The docs now say "should", name `zamm-wicked`
 as a suggestion rather than a requirement, and say that the method applies at
 any animal — kraken is where it is needed most, not where it is allowed.
+
+
+Locked 2026-09-14 — the digest's size on the startup line.
+
+**`digest ready:` now carries the file's size, rounded up to whole KiB.**
+The router has said in words since the rename: never `cat` the digest,
+command output is capped and the file would be cut silently. Words were not
+enough — an agent still reached for `cat` on a digest near 100 KiB, got the
+first ~30000 characters and a preview of the rest, and went on certain it
+had read memory (human finding, 2026-09-14). A number is something the agent
+can act on before it picks a tool: whether one file read covers the file,
+and how many pages it takes when it does not. Rounded UP so no digest ever
+reads as smaller than it is; in KiB because that is the unit paging is
+judged in; in parentheses after the path so every reader and test that
+anchors on the path still does; `wc -c` rather than `stat`, whose flags
+differ between BSD and GNU. The README example shows it, and
+`test_digest.py` pins the arithmetic against the real file.

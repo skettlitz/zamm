@@ -607,7 +607,22 @@ startup_report() {
   # update on every run is false half the time. It must also not say
   # "unchanged" — an agent that reads that will decide it already knows what
   # the file says, and the session read is not optional.
-  printf 'digest ready: %s\n' "$_sr_rel"
+  #
+  # The size rides along, rounded UP to whole KiB. An agent that reaches for
+  # `cat` gets the first ~30000 characters and a preview of the rest, and
+  # goes on as if it had read memory — the router says so in words, and words
+  # were not enough. A number is something the agent can act on before it
+  # picks a tool: whether one file read covers the file, how many pages it
+  # takes. Rounded up so no digest ever reads as smaller than it is; in
+  # parentheses after the path so everything that anchors on the path still
+  # does. `wc -c` because `stat` differs between BSD and GNU.
+  if [ -f "$_sr_d" ]; then
+    _sr_bytes=$(wc -c < "$_sr_d" | tr -d ' ')
+    _sr_kib=$(( (_sr_bytes + 1023) / 1024 ))
+    printf 'digest ready: %s (%s KiB)\n' "$_sr_rel" "$_sr_kib"
+  else
+    printf 'digest ready: %s\n' "$_sr_rel"
+  fi
 
   # ---- anything wrong with the project: two lines, and a file that explains.
   defects_report "$_sr_plans"
