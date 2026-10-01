@@ -616,6 +616,20 @@ class TestAbandonHeuristic(ZammTest):
         self.assertCode(r, EXIT_CONTRACT)
         self.assertIn_("Loose ends", r.err)
 
+    def test_template_vote_lines_are_not_a_rationale(self):
+        # The template puts Memory-upvotes/Memory-downvotes under ## Loose ends
+        # beside the telemetry fields; empty, they must not pass as the reason.
+        self._plan(
+            "# A draft we dropped\nStatus: Abandoned\n"
+            "Last updated: 2026-07-19\n\nScope:\n* In:\n* Out:\n\n"
+            "## Done-when\n- [ ] never started\n\n## Learnings\n\n"
+            "## Loose ends\n\n- (none yet)\n\nMemory-upvotes:\nMemory-downvotes:\n"
+            "Execution-friction-after:\nComplexity-felt:\n"
+        )
+        r = self.led.plan_check()
+        self.assertCode(r, EXIT_CONTRACT)
+        self.assertIn_("Loose ends", r.err)
+
     def test_work_done_abandon_still_requires_the_retrospective(self):
         self._plan(
             "# Abandoned mid-flight\nStatus: Abandoned\n"

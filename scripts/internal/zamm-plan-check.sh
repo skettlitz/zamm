@@ -543,13 +543,14 @@ EOF
       [ -n "$(field "$pf" "Execution-context-before")" ] && work_happened=1
       [ "${dw_valid:-0}" -gt "${dw_open:-0}" ] && work_happened=1
       # a Loose-ends rationale is required either way (the abandonment reason).
-      # The template places the trailing telemetry fields (Execution-friction-
-      # after:, Complexity-*, Done-approved-*) physically under ## Loose ends
-      # with no heading between, so filter those out — otherwise their mere
-      # presence would satisfy the rationale check even when it is empty.
+      # The template places the trailing vote and telemetry fields (Memory-
+      # upvotes:, Memory-downvotes:, Execution-friction-after:, Complexity-*,
+      # Done-approved-*) physically under ## Loose ends with no heading
+      # between, so filter those out — otherwise their mere presence would
+      # satisfy the rationale check even when it is empty.
       loose=$(section_body "$pf" "Loose ends" \
         | grep -v '^[[:space:]]*$' | grep -v '(none yet)' \
-        | grep -vE '^(Execution-friction-after|Complexity-felt|Complexity-delta|Done-approved-by|Done-approved-at|Done-approval-evidence):' \
+        | grep -vE '^(Memory-upvotes|Memory-downvotes|Execution-friction-after|Complexity-felt|Complexity-delta|Done-approved-by|Done-approved-at|Done-approval-evidence):' \
         || true)
       [ -z "$loose" ] &&
         err "$rel: status is Abandoned but ## Loose ends has no rationale/cleanup notes"
