@@ -2473,3 +2473,17 @@ router already sends an agent to at every status change — so the sentence
 arrives when the moment does. Policy only: no check, no field; a project
 without zamm-wiki reads past it. Same pattern as `zamm-wicked`, suggested for
 a kraken.
+
+
+Locked 2026-10-19 — one entry point name across the family.
+
+**`scripts/zamm-skill-run.sh scaffold` installs or updates any skill of the
+ZAMM family.** The human's rule, same day: every skill ships a scaffold, and
+one name for it unifies the interface even while `scaffold` is its only
+command. zamm-reflect, zamm-wicked and zamm-wiki carry the same dispatcher;
+here it hands `scaffold` to `zamm-run.sh scaffold`, flags and all, with
+`--project-root` accepted before or after the command as `zamm-run.sh`
+does. `zamm-run.sh` stays the runtime entry point the router, every
+adopting project and the ledger name, so no installed project changes; and
+`zamm-skill-run` is named so the two cannot be mistaken. The README's
+Updating section says it once.
