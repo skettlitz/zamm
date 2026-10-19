@@ -2487,3 +2487,11 @@ does. `zamm-run.sh` stays the runtime entry point the router, every
 adopting project and the ledger name, so no installed project changes; and
 `zamm-skill-run` is named so the two cannot be mistaken. The README's
 Updating section says it once.
+
+**Renamed the same day (human decision 2026-10-19): `<skill>-run.sh`, not
+one shared filename.** `zamm-run.sh scaffold` already was the pattern, so
+the family's entry point is `<skill>-run.sh <command>` — `zamm-reflect-run.sh`,
+`zamm-wicked-run.sh`, `zamm-wiki-run.sh` — and zamm needs no second entry
+point: `scripts/zamm-skill-run.sh` is gone again. The command, its flags and
+its behaviour are what is uniform; each command line names the skill it
+touches. Nothing had adopted the shared name.

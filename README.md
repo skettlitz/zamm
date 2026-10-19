@@ -289,7 +289,7 @@ Update the `zamm` skill directory, then have the agent run
 (`AGENTS.md` managed block, `.cursor/rules/zamm.mdc`, `.cursorignore`, `.cursorindexingignore`) from the installed skill.
 Rendered runtime files carry a skill-version stamp; agents notice the drift and offer this
 refresh on their own. Every skill of the ZAMM family installs and updates the same way,
-`bash <skill-dir>/scripts/zamm-skill-run.sh scaffold`; for zamm that runs `zamm-run.sh scaffold`. ZAMM writes no ignore rules into `.cursorignore` (in
+`bash <skill-dir>/scripts/<skill>-run.sh scaffold`, as zamm's own `zamm-run.sh scaffold` does. ZAMM writes no ignore rules into `.cursorignore` (in
 the Cursor sandbox an ignored path reads as EPERM, which breaks the commands
 that must enumerate the ledger); retired trees and plan scratch are hidden
 from search via `.cursorindexingignore` instead. A refresh removes the ignore
