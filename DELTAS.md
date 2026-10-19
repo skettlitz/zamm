@@ -2456,3 +2456,20 @@ judged in; in parentheses after the path so every reader and test that
 anchors on the path still does; `wc -c` rather than `stat`, whose flags
 differ between BSD and GNU. The README example shows it, and
 `test_digest.py` pins the arithmetic against the real file.
+
+
+Locked 2026-10-19 — a nudge for zamm-wiki at plan transitions.
+
+**`plans-maintenance.md` names zamm-wiki where a plan starts and where it
+closes out.** Two conditional sentences, nothing else: `Draft -> Implementing`
+reads the wiki pages the plan concerns, and step 4 of `Implementing -> Review`
+(and so `Implementing -> Abandoned`, which runs the same distillation) reads
+zamm-wiki's SKILL.md before distilling, since its close-out splits what the
+work taught between the wiki and the ledger. Human decision 2026-10-10, made
+now on the evidence of the zamm-wiki Opus 5.5 review (2026-10-19): an
+extension skill is read once and not re-read, instructions tied to a later
+moment decay with distance and compaction, and this reference is what the
+router already sends an agent to at every status change — so the sentence
+arrives when the moment does. Policy only: no check, no field; a project
+without zamm-wiki reads past it. Same pattern as `zamm-wicked`, suggested for
+a kraken.

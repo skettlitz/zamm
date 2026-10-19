@@ -17,7 +17,9 @@ Allowed transitions: `Draft -> Implementing | Abandoned`;
 - `Draft -> Implementing`: Scope and Done-when filled;
   `Execution-context-before` and `Complexity-forecast` filled. A `kraken`
   forecast should also carry `Frame-approved-by` and `Frame-approved-at` —
-  the human's yes to the `problem:` line; the checker warns otherwise.
+  the human's yes to the `problem:` line; the checker warns otherwise. If
+  the project runs zamm-wiki, read the wiki pages the plan concerns before
+  starting; its SKILL.md says how.
 - `Draft -> Abandoned`: rationale under `## Loose ends`. A never-started
   draft needs nothing more; the checker asks for the full retrospective only
   once work happened (an `Execution-context-before` was filled, or a
@@ -34,7 +36,9 @@ Allowed transitions: `Draft -> Implementing | Abandoned`;
      during the work — a trigger that turned out to be a symptom, an
      assumption that failed, an approach rejected mid-flight and why.
   4. Distill durable learnings into knowledge records
-     (`memory-writing.md`), superseding stale ones.
+     (`memory-writing.md`), superseding stale ones. If the project runs
+     zamm-wiki, read its SKILL.md first: the wiki check and the plan's
+     `Wiki:` line belong to this close-out.
   5. Fill `Memory-upvotes` / `Memory-downvotes` with the record ids that
      helped or misled, and write ONE votes record mirroring them —
      `memory create --type votes --plan <plan-dir> --up <ids> --down <ids>
