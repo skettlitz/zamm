@@ -29,20 +29,31 @@ Allowed transitions: `Draft -> Implementing | Abandoned`;
      the plan has a `## Why`, its `problem:` line is the item that matters:
      say under Done-when that it no longer happens, and how that was seen.
   2. Reconcile stale or conflicting live records touched by this work —
-     supersede them (`memory-maintenance.md`) — before adding new
-     learnings.
+     supersede or merge them (`memory-maintenance.md`) — before placing
+     new learnings.
   3. Fill `## Learnings` (required; if nothing durable emerged, say so with
      a reason). Include why it ended this way: what moved in the `## Why`
      during the work — a trigger that turned out to be a symptom, an
      assumption that failed, an approach rejected mid-flight and why.
-  4. Distill durable learnings into knowledge records
-     (`memory-writing.md`), superseding stale ones. If the project runs
-     zamm-wiki, read its SKILL.md first: the wiki check and the plan's
-     `Wiki:` line belong to this close-out.
+  4. Place each durable learning where its next reader meets it,
+     preferring what already exists: correct or sharpen the record that
+     already covers it (supersede); fold the records on the topic into one
+     when the work showed they overlap or have gone stale (merge: one record
+     whose `supersedes:` lists them all, keeping every identifier, value
+     and caveat a later action needs); put how something works in the
+     project's documentation and let a record link it. Write a new record
+     (`memory-writing.md`) only for what nothing carries yet. The
+     candidates are the records this work touched, relied on or found on
+     its topic, most of them in the vote lists of step 5; this is never a
+     sweep of the ledger. Under `## Learnings`, say where each learning
+     went. If the project runs zamm-wiki, read its SKILL.md first: the wiki
+     check and the plan's `Wiki:` line belong to this close-out.
   5. Fill `Memory-upvotes` / `Memory-downvotes` with the record ids that
      helped or misled, and write ONE votes record mirroring them —
      `memory create --type votes --plan <plan-dir> --up <ids> --down <ids>
-     <slug>`, empty body. Skip only when both lists are empty.
+     <slug>`, empty body. Skip only when both lists are empty. A record
+     this close-out supersedes or merges takes no downvote: votes travel
+     down the chain, so its correction would inherit them.
   6. Fill `Execution-friction-after` (what actually cost time: tooling
      failures, flaky steps, missing docs, rework, waiting on answers),
      `Complexity-felt` (same animal scale) and `Complexity-delta`

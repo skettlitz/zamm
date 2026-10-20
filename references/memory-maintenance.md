@@ -38,8 +38,10 @@ below, and `memory archive`). Every correction is a new record:
 
 - Update: a new record with `supersedes: <old-id>`. The old file stays; the
   compiler hides it and links the chain.
-- Merge duplicates: ONE record whose body unifies the statements and whose
-  `supersedes:` lists every merged id.
+- Merge duplicates, or consolidate a topic's fragments: ONE record whose
+  body unifies the statements and whose `supersedes:` lists every merged
+  id. Keep every identifier, value and caveat a later action needs; a
+  merge that drops a still-true rule is a loss, not a tidy-up.
 - Retire: a tombstone — `memory create --type tombstone --supersedes <id>
   <slug>`, body a one-line reason.
 - Suspected stale but unverified: supersede with a `suspected drift` record

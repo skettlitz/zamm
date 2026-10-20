@@ -95,8 +95,8 @@ yet worth a trace: the **journal**. The archive is the exit for all four.
   through one predicate grammar and a versioned TSV export.
 - **Plans** — `plan create '<title>'` opens a directory with a mutable plan file. Status runs
   Draft, Implementing, Review, then Done or Abandoned; only a human approves Done. Close-out
-  writes learnings and a votes record into the ledger, and `plan archive` moves the directory
-  out of active memory.
+  corrects or merges the records it touched before adding any and writes a votes record;
+  `plan archive` moves the directory out of active memory.
 - **Blocked** — `plan block --kind <human|plan|external|defect> '<sentence>'` is how an agent
   says "I cannot continue, and the reason will outlive this session". The class says who
   clears it; the reason leads the digest Plans tail, above Review, so the whole team sees it

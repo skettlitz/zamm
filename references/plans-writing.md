@@ -27,9 +27,11 @@ by best match and ask only when ambiguity remains.
 - The human approving Review → Done reads `## Why` against Done-when: is
   the problem gone, not only is the list ticked. Then `## Learnings` and
   the approval evidence.
-- The distiller at close-out reads Learnings to write knowledge records:
-  write each learning as a candidate record — trigger, rule, why — not as a
-  diary of the work.
+- The agent closing out reads Learnings to place each one: write each
+  learning so it can become a correction, a merge, a page or a record —
+  trigger, rule, why — not as a diary of the work, and say where it went.
+  Each line in `## Why` and `## Learnings` carries one claim; a line that
+  needs a paragraph is carrying Approach or Background.
 - The reader a year later, in the archive, reads `## Loose ends` and the
   telemetry to understand why it ended as it did and how the estimate held
   up.

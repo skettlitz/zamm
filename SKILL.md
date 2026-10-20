@@ -52,7 +52,7 @@ proceeding under the old rules.
 | a plan forecast `kraken` (or any plan whose problem is contested) | frame first: the human's yes to its `problem:` line, recorded as `Frame-approved-by:` / `Frame-approved-at:` before `Implementing` — `plan check` warns on a kraken without them and the Plans tail shows `frame pending`; the method skill `zamm-wicked` is suggested, at any animal | `references/complexity-animals.md` ("The frame") |
 | a fork the plan did not anticipate | re-read the plan's `## Why`, choose against it, append the choice | `references/plans-maintenance.md` |
 | you cannot continue and the reason outlives the session | `plan block --kind human\|plan\|external\|defect <slug> '<sentence>'` — one sentence, no other ceremony; `plan unblock` when it clears | `references/plans-maintenance.md` |
-| plan moves to `Review` or `Abandoned` | learnings + votes record + telemetry fields | `references/plans-maintenance.md` |
+| plan moves to `Review` or `Abandoned` | learnings placed (corrected or merged records first, new ones last) + votes record + telemetry fields | `references/plans-maintenance.md` |
 | plan `Done` (human-approved, from `Review` only) | archive flow | `references/plans-maintenance.md` |
 | an IDE planning mode wrote an offsite `.plan.md` | mirror it into a ZAMM plan the same turn | `references/plans-writing.md` |
 | secrets or personal data landed in a record | exceptional erasure, written INTO THE TREE THE RECORD LIVES IN (`memory create` / `backlog add` / `journal add --type erasure --erases <id>`), then delete the file; history rewriting needs separate human approval | that tree's `-maintenance.md` |

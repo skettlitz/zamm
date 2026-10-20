@@ -41,7 +41,7 @@ Each writing layer opens with who reads the record and at what zoom, because tha
 - One file is one immutable record; the filename is its id. Never edit, rename, move or delete a record once written — correct it with a new record carrying `supersedes:`, retire it with a tombstone. The add-only layout is what keeps merges conflict-free. Sole exceptions: erasure of a secret, written into the tree the record lives in (that tree's `-maintenance.md`), and the archive commands, which move whole retired chains.
 - Write through the entrypoint (`memory create`, `backlog add`, `journal add`, `plan create`): each validates first and lands the record atomically, or prints why not and writes nothing.
 - Never store secrets, tokens or credentials: records are effectively permanent. Never quote the human verbatim: paraphrase the substance and describe the emotion where the register matters. Records are team-visible; do not immortalize heat-of-the-moment phrasing or characterize anyone's performance or mood.
-- Brevity is part of the contract. A digest block is reread at every session start by every agent; a Background section by whoever opens the record. Limits are ceilings, not space to fill: a one-sentence record that says the thing is complete, and a paragraph that could have been a sentence is a defect. Every word saved saves context and money for every reader after you.
+- Precision and brevity are part of the contract, on every surface: record, idea, episode, plan. Name the real thing — the file, flag, command, id, value — say it once, and stop. A digest block is reread at every session start by every agent; a Background section by whoever opens the record; a plan by the next agent and by the human approving it. Limits are ceilings, not space to fill: a one-sentence record that says the thing is complete, and a paragraph that could have been a sentence is a defect. Every word saved saves context and money for every reader after you.
 - Records are advisory, never authoritative. Code, tests and contracts outrank them; a record that conflicts with them is drift — verify, then supersede it with a `suspected drift` record.
 - Prefer correction over accretion: read the tree before adding (`memory list --all --scope <area>` — without `--all` the list is only what the digest selected; `backlog list`; `journal list`) and supersede, merge or vote instead of duplicating.
 - Everything about a record lives in its own tree — votes, tombstones, erasures. No cross-tree `supersedes:` or vote edges: an idea that became a fact is a knowledge record plus a backlog tombstone.
@@ -64,7 +64,7 @@ After a merge or pull, two branches may have superseded the same record independ
 ## Session End (MUST)
 
 1. Apply transition bookkeeping to touched plans per `<zamm-skill>/references/plans-maintenance.md`, and keep their `Last updated:` current.
-2. Ensure durable learnings were distilled into knowledge records and stale touched records superseded — plan-less sessions included.
+2. Ensure durable learnings landed where they belong — in the records that already carry their topic, corrected or merged; in the project's documentation; as new records only where nothing carried them — and stale touched records superseded; plan-less sessions included.
 3. If the digest showed `Needs reconciliation` and it is unresolved, resolve it now.
 4. If plans are terminal or the human asks for cleanup, run `bash <zamm-skill>/scripts/zamm-run.sh plan archive`.
 

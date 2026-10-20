@@ -2495,3 +2495,30 @@ the family's entry point is `<skill>-run.sh <command>` — `zamm-reflect-run.sh`
 point: `scripts/zamm-skill-run.sh` is gone again. The command, its flags and
 its behaviour are what is uniform; each command line names the skill it
 touches. Nothing had adopted the shared name.
+
+
+Locked 2026-10-20 — close-out places learnings; precision and brevity on every surface.
+
+**A learning goes where its next reader meets it, and what already exists comes
+first.** `plans-maintenance.md` step 4 said "distill durable learnings into
+knowledge records", so every close-out added records: in the zamm-wiki Opus 5.5
+probe (2026-10-19) all three close-out runs wrote new ones and none corrected or
+merged an existing one, and Bricktrench's ledger shows where that leads. The
+human's correction (2026-10-20): a learning may sharpen an existing record, fold
+several outdated or overlapping ones into one, or update the wiki, and a new
+record is the last resort. Step 4 now says so, bounded to the records the work
+touched, relied on or found on its topic — never a sweep — and asks Learnings to
+say where each one went. A merge keeps every identifier, value and caveat a later
+action needs (`memory-maintenance.md`): lossy consolidation deletes what a later
+action looks up. Step 5 gains one sentence: a record this close-out supersedes or
+merges takes no downvote, because votes aggregate down the chain and the
+correction would inherit them. `plans-writing.md`, `protocol.md` Session End,
+the SKILL.md dispatch row and the README follow.
+
+**Precision and brevity are anchored for every surface, not only records.** The
+shared rule in `protocol.md` named digest blocks and Backgrounds; plans had no
+length rule at all, and a plan is required reading for the next agent and the
+human approving it. It now covers record, idea, episode and plan — name the real
+thing, say it once, stop — and `plans-writing.md` adds that each `## Why` and
+`## Learnings` line carries one claim. No check, no field; the checker and the
+template are unchanged.
