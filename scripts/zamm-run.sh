@@ -79,12 +79,17 @@ Backlog
   backlog add '<sentence>'
                        capture an idea; one sentence is enough
   backlog list [--scope <tag>]
-                       the whole live backlog, hot to cold (--all: dormant
-                       too; --scope filters, e.g. domain/lobby)
+                       the whole live backlog, hot to cold (--all: parked
+                       and dormant too; --scope filters, e.g. domain/lobby)
   backlog show <slug>  one idea in full
-  backlog mark <slug>  select an idea for implementation (pushed into the digest)
+  backlog mark <slug> ['<why now>'] [--until YYYY-MM-DD]
+                       select an idea for implementation (pushed into the digest)
   backlog unmark <slug>
                        deselect a marked idea
+  backlog park <slug> '<reason>' [--until YYYY-MM-DD]
+                       set an idea aside on purpose (out of the list, kept)
+  backlog unpark <slug>
+                       bring a parked idea back
   backlog promote <slug> ['<plan title>']
                        turn an idea into a plan and retire it
   backlog check        validate the backlog ledger
@@ -259,22 +264,42 @@ Usage: zamm-run.sh backlog <command> [args...]
                        the lens, opened by backlog show), stdin with its own
                        headings is used verbatim. Optional: --scope <tag>,
                        --slug <slug>, --supersedes <id> (re-up: sharpen an
-                       existing idea), --importance useful|minor, --durability
-                       days..permanent. For other record types (--type
+                       existing idea; it keeps its lane), --importance
+                       useful|minor, --durability days..permanent. To decide
+                       the lane in the same record rather than writing the
+                       idea twice: --mark or --park, each with --reason
+                       '<why>' (a first park needs one) and --until
+                       YYYY-MM-DD, or with --supersedes, --unmark or
+                       --unpark; the rules are those of the lane commands
+                       below. For other record types (--type
                        tombstone|votes|erasure) the positional is the SLUG,
                        as in memory create.
   list [--all] [--scope <tag>]
                        recompile and print the lens: marked lane first, then
                        every live idea clustered by subpath inside its area
-                       (headings carry the counts), dormant collapsed to
-                       counts (--all lists dormant ids too). --scope prints a
-                       filtered row listing instead — any tag, prefix match,
-                       so --scope domain also finds domain/lobby.
+                       (headings carry the counts), parked and dormant
+                       collapsed to counts (--all lists them too, parked with
+                       their reasons). --scope prints a filtered row listing
+                       instead — any tag, prefix match, so --scope domain
+                       also finds domain/lobby.
   show <slug|id>       one idea in full
-  mark <slug|id>       select an idea for implementation: it enters the
+  mark <slug|id> ['<why now>'] [--until YYYY-MM-DD]
+                       select an idea for implementation: it enters the
                        session digest and stops decaying until promoted,
-                       unmarked, or tombstoned
+                       unmarked, or tombstoned. The reason shows beside it.
+                       With --until the mark ends by itself on that day and
+                       the idea returns to the list, fresh. Marking a marked
+                       idea again replaces what you pass and keeps the rest;
+                       marking a parked one lifts the park
   unmark <slug|id>     deselect (writes the explicit marked: no decision)
+  park <slug|id> '<reason>' [--until YYYY-MM-DD]
+                       set an idea aside on purpose: it leaves the list and
+                       stops decaying, and the reason is kept with it. With
+                       --until the park ends by itself on that day and the
+                       idea returns to the list, fresh. Parking a parked idea
+                       again replaces what you pass and keeps the rest;
+                       parking a marked one withdraws the mark
+  unpark <slug|id>     bring it back as a fresh idea (writes parked: no)
   promote <slug|id> ['<plan title>']
                        create the plan (title defaults to the idea headline),
                        retire the idea with a tombstone linking both ways
@@ -1268,10 +1293,15 @@ print_status() {
       printf '          run: zamm-run.sh startup\n'
     elif ! pair_coherent "$_blens" "$_bstate" ||
          ! _bvals=$(awk -F"$(printf '\t')" '
-             $1 == "live"   { l = $2 }
-             $1 == "hot"    { h = $2 }
-             $1 == "marked" { m = $2 }
-             END { print l "\t" h "\t" m }
+             $1 == "live"    { l = $2 }
+             $1 == "hot"     { h = $2 }
+             $1 == "marked"  { m = $2 }
+             $1 == "parked"  { p = $2 }
+             END {
+               # never an empty field: the read below splits on blanks
+               print ((l == "") ? "?" : l) " " ((h == "") ? "?" : h) " " \
+                 ((m == "") ? "?" : m) " " ((p == "") ? 0 : p)
+             }
            ' "$_bstate" 2>/dev/null); then
       # same coherence rule as the knowledge sidecar (pair_coherent): the
       # lens and its state are two renames, so a crash between them — or a
@@ -1282,12 +1312,13 @@ print_status() {
       printf 'Backlog   lens/state pair incoherent (interrupted compile, or a deleted sidecar)\n'
       printf '          run: zamm-run.sh startup\n'
     else
-      _btab=$(printf '\t')
-      _blive=${_bvals%%"$_btab"*}
-      _bmark=${_bvals##*"$_btab"}
-      _bhot=${_bvals#*"$_btab"}; _bhot=${_bhot%"$_btab"*}
-      printf 'Backlog   %s live ideas, %s hot, %s marked\n' \
-        "${_blive:-?}" "${_bhot:-?}" "${_bmark:-?}"
+      read -r _blive _bhot _bmark _bpark <<EOF
+$_bvals
+EOF
+      _bpk=""
+      if [ "${_bpark:-0}" -gt 0 ]; then _bpk=", $_bpark parked"; fi
+      printf 'Backlog   %s live ideas, %s hot, %s marked%s\n' \
+        "${_blive:-?}" "${_bhot:-?}" "${_bmark:-?}" "$_bpk"
       # same watch as the digest: idea files newer than the lens read STALE,
       # and an unreadable backlog tree fails closed (G3)
       if ! _bnw=$(find "$ROOT/zamm-memory/backlog" -type f -name '*.md' -newer "$_blens"); then
@@ -2404,9 +2435,10 @@ backlog_list() {
   fi
   cat "$ROOT/zamm-memory/.compiled/backlog.md"
   if [ "$_bl_all" -eq 1 ]; then
-    # dormant ids = live rows the lens did not select. Two invocations of
-    # the same toolchain; a write between them is ordinary eventual
-    # consistency (each side is a truthful reading of some real state).
+    # parked ids come from the pselect rows, with their reasons; dormant ids
+    # = the other live rows the lens did not select. Two invocations of the
+    # same toolchain; a write between them is ordinary eventual consistency
+    # (each side is a truthful reading of some real state).
     _bl_tab=$(printf '\t')
     sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" --tree backlog --list-live |
       awk -F"$_bl_tab" -v statef="$ROOT/zamm-memory/.compiled/backlog-state.tsv" '
@@ -2414,16 +2446,24 @@ backlog_list() {
           while ((getline line < statef) > 0) {
             n = split(line, f, "\t")
             if (n >= 2 && f[1] == "select") sel[f[2]] = 1
+            if (n >= 5 && f[1] == "pselect")
+              pk[f[3]] = "(parked " f[2] ((f[4] != "-") ? ", until " f[4] : "") ": " f[5] ")"
           }
           close(statef)
         }
-        !($1 in sel) {
-          if (!hdr) {
+        ($1 in pk) { prow[++np] = "- " $1 ": " $4 " " pk[$1]; next }
+        !($1 in sel) { drow[++nd] = "- " $1 ": " $4 }
+        END {
+          if (np > 0) {
+            print ""
+            print "Parked ideas (set aside on purpose; backlog unpark brings one back):"
+            for (i = 1; i <= np; i++) print prow[i]
+          }
+          if (nd > 0) {
             print ""
             print "Dormant ideas (cooled below the floor; supersede or vote to re-up):"
-            hdr = 1
+            for (i = 1; i <= nd; i++) print drow[i]
           }
-          print "- " $1 ": " $4
         }
       '
   fi
@@ -2546,14 +2586,185 @@ fm_body() {
   ' "$1"
 }
 
-backlog_markctl() {
+# mark, unmark, park and unpark are the lane decisions. An idea sits in one
+# lane at a time: marking a parked idea lifts the park, parking a marked
+# idea withdraws the mark, both in the same record. Deciding again in the
+# same lane keeps the first date; a reason or end date passed replaces the
+# current one, and one omitted is kept, so extending the date never drops the
+# reason. A decision whose date has passed is over and is not carried. Only a
+# first park requires a reason: a park without one cannot be told from
+# neglect, while a first mark may go without, as every mark written before
+# reasons existed did.
+#
+# A decision is written two ways: by the lane commands, which copy the idea
+# through unchanged, and by a rewrite that decides in the same record
+# (backlog add --mark/--unmark/--park/--unpark), because a lane command after
+# a rewrite writes the whole idea a second time. Both go through the three
+# helpers below, so the rules cannot drift between them.
+
+# lane_cell ROW COLUMN: one cell of idea _ld_id's mselect or pselect row, both
+# lanes sharing a layout (date, id, end date, reason, headline); empty for -.
+lane_cell() {
+  awk -F"$(printf '\t')" -v r="$1" -v c="$2" -v id="$_ld_id" \
+    '$1 == r && $3 == id { if ($c != "-") print $c; exit }' \
+    "$ROOT/zamm-memory/.compiled/backlog-state.tsv"
+}
+
+# lane_decide ACTION ID REASON UNTIL CMD: apply the lane rules to one decision
+# on idea ID, empty for an idea not written yet. Sets _ld_today, _ld_mdate and
+# _ld_pdate (the lanes the idea is in now), _ld_again (the first date, when it
+# decides again in its own lane), and _ld_reason and _ld_until (what the
+# record will carry). A refusal dies naming CMD, before anything is written.
+lane_decide() {
+  _ld_action=$1; _ld_id=$2; _ld_reason=$3; _ld_until=$4; _ld_cmd=$5
+  _ld_today=${ZAMM_TODAY:-$(date +%Y-%m-%d)}
+  if [ -n "$_ld_until" ]; then
+    case "$_ld_until" in
+      [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+      *) die "$_ld_cmd: --until must be a YYYY-MM-DD date" ;;
+    esac
+    # a new decision looks forward: an end date of today or earlier would
+    # have ended it the moment it was written
+    if [ "$(printf '%s\n%s\n' "$_ld_until" "$_ld_today" | sort | tail -n 1)" = "$_ld_today" ]; then
+      die "$_ld_cmd: --until $_ld_until is not after today ($_ld_today)"
+    fi
+  fi
+  _ld_mdate=""; _ld_pdate=""; _ld_again=""
+  if [ -n "$_ld_id" ]; then
+    # effective lane state comes from the compiled lens, never from the head
+    # file alone: a lane is inherited through the chain (see lanenode in
+    # zamm-compile.sh), so the head may carry no lane key and still be in it
+    rc=0
+    sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" --tree backlog >/dev/null || rc=$?
+    if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
+      die "$_ld_cmd: the backlog did not compile (rc=$rc)"
+    fi
+    _ld_mdate=$(lane_cell mselect 2)
+    _ld_pdate=$(lane_cell pselect 2)
+  fi
+  case "$_ld_action" in
+    unmark)
+      [ -n "$_ld_mdate" ] || die "$_ld_cmd: $_ld_id is not marked" ;;
+    unpark)
+      [ -n "$_ld_pdate" ] || die "$_ld_cmd: $_ld_id is not parked" ;;
+    mark)
+      if [ -n "$_ld_mdate" ] && [ -z "$_ld_reason$_ld_until" ]; then
+        die "$_ld_cmd: $_ld_id is already marked (since $_ld_mdate); pass a reason or --until to change it"
+      fi
+      _ld_again=$_ld_mdate
+      if [ -n "$_ld_again" ]; then
+        if [ -z "$_ld_reason" ]; then _ld_reason=$(lane_cell mselect 5); fi
+        if [ -z "$_ld_until" ]; then _ld_until=$(lane_cell mselect 4); fi
+      fi ;;
+    park)
+      if [ -n "$_ld_pdate" ] && [ -z "$_ld_reason$_ld_until" ]; then
+        die "$_ld_cmd: $_ld_id is already parked (since $_ld_pdate); pass a reason or --until to change it"
+      fi
+      _ld_again=$_ld_pdate
+      if [ -n "$_ld_again" ]; then
+        if [ -z "$_ld_reason" ]; then _ld_reason=$(lane_cell pselect 5); fi
+        if [ -z "$_ld_until" ]; then _ld_until=$(lane_cell pselect 4); fi
+      fi
+      if [ -z "$_ld_reason" ]; then
+        case "$_ld_cmd" in
+          "backlog park") die "backlog park: need a reason: backlog park <slug|id> '<why it is set aside>' [--until YYYY-MM-DD]" ;;
+          *) die "$_ld_cmd: need a reason: --reason '<why it is set aside>'" ;;
+        esac
+      fi ;;
+  esac
+}
+
+# lane_write ACTION SLUG WRITER-FLAGS...: write one record carrying the
+# decision lane_decide resolved, its body on stdin. The caller passes the
+# record's own flags (scope, rating, --supersedes); the lane keys are added
+# here. Prints what the writer prints: the new record's path.
+lane_write() {
+  _lw_action=$1; _lw_slug=$2; shift 2
+  case "$_lw_action" in
+    mark)
+      set -- "$@" --marked "${_ld_mdate:-$_ld_today}"
+      if [ -n "$_ld_reason" ]; then set -- "$@" --mark-reason "$_ld_reason"; fi
+      if [ -n "$_ld_until" ]; then set -- "$@" --mark-until "$_ld_until"; fi
+      if [ -n "$_ld_pdate" ]; then set -- "$@" --parked no; fi ;;
+    unmark)
+      set -- "$@" --marked no ;;
+    park)
+      set -- "$@" --parked "${_ld_pdate:-$_ld_today}" --park-reason "$_ld_reason"
+      if [ -n "$_ld_until" ]; then set -- "$@" --park-until "$_ld_until"; fi
+      if [ -n "$_ld_mdate" ]; then set -- "$@" --marked no; fi ;;
+    unpark)
+      set -- "$@" --parked no ;;
+  esac
+  sh "$INTERNAL/zamm-new-memory.sh" --project-root "$ROOT" --tree backlog "$@" "$_lw_slug"
+}
+
+# lane_report ACTION ID: what the decision just written did, about idea ID
+lane_report() {
+  case "$1" in
+    mark)
+      if [ -n "$_ld_again" ]; then
+        echo "Marked again (since $_ld_again): $2"
+      else
+        echo "Marked for implementation ($_ld_today): $2"
+        echo "  It now appears in the session digest and stops decaying until"
+        echo "  promoted, unmarked, or tombstoned."
+      fi
+      if [ -n "$_ld_reason" ]; then echo "  why: $_ld_reason"; fi
+      if [ -n "$_ld_until" ]; then echo "  The mark ends by itself on $_ld_until; the idea then returns to the list."; fi
+      if [ -n "$_ld_pdate" ]; then echo "  It was parked (since $_ld_pdate); the park is lifted."; fi ;;
+    unmark)
+      echo "Unmarked: $2" ;;
+    park)
+      if [ -n "$_ld_again" ]; then
+        echo "Parked again (since $_ld_again): $2"
+      else
+        echo "Parked ($_ld_today): $2"
+      fi
+      echo "  why: $_ld_reason"
+      if [ -n "$_ld_until" ]; then
+        echo "  It stays out of the list until $_ld_until, then comes back by itself."
+      else
+        echo "  It stays out of the list until unparked (backlog list --all shows it)."
+      fi
+      if [ -n "$_ld_mdate" ]; then echo "  It was marked (since $_ld_mdate); the mark is withdrawn."; fi ;;
+    unpark)
+      echo "Unparked: $2"
+      echo "  It is back in the list as a fresh idea and decays from today." ;;
+  esac
+}
+
+backlog_lanectl() {
   _mk_action="$1"; shift
   case "${1-}" in -h|--help) group_usage backlog 0 ;; esac
-  [ $# -ge 1 ] || die "backlog $_mk_action: need a slug or record id"
-  [ $# -le 1 ] || die "backlog $_mk_action: too many arguments (one slug or id)"
+  _mk_needle=""; _mk_reason=""; _mk_until=""
+  if [ "$_mk_action" = "mark" ] || [ "$_mk_action" = "park" ]; then
+    _mk_npos=0
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --until)
+          [ $# -ge 2 ] || die "backlog $_mk_action: --until requires a YYYY-MM-DD date"
+          _mk_until="$2"; shift 2 ;;
+        --until=*) _mk_until="${1#--until=}"; shift ;;
+        -*) die "backlog $_mk_action: unknown option: $1" ;;
+        *)
+          _mk_npos=$((_mk_npos + 1))
+          case "$_mk_npos" in
+            1) _mk_needle="$1" ;;
+            2) _mk_reason="$1" ;;
+            *) die "backlog $_mk_action: too many arguments (a slug or id, then the reason in quotes)" ;;
+          esac
+          shift ;;
+      esac
+    done
+    [ -n "$_mk_needle" ] || die "backlog $_mk_action: need a slug or record id"
+  else
+    [ $# -ge 1 ] || die "backlog $_mk_action: need a slug or record id"
+    [ $# -le 1 ] || die "backlog $_mk_action: too many arguments (one slug or id)"
+    _mk_needle="$1"
+  fi
   require_backlog_tree
   _mk_tab=$(printf '\t')
-  _mk_row=$(resolve_live_idea "$1") || {
+  _mk_row=$(resolve_live_idea "$_mk_needle") || {
     _mk_rc=$?
     # ambiguity and no-match are both operator errors (exit 1, diagnostics
     # already printed); an unreadable tree keeps its G3 code
@@ -2561,49 +2772,19 @@ backlog_markctl() {
     exit 1
   }
   _mk_id=${_mk_row%%"$_mk_tab"*}
-  # effective marked state comes from the compiled lens, never from the head
-  # file alone: the lane is inherited through the chain (see effmark in
-  # zamm-compile.sh), so the head may carry no marked: key and still be in it
-  rc=0
-  sh "$INTERNAL/zamm-compile.sh" --project-root "$ROOT" --tree backlog >/dev/null || rc=$?
-  if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
-    die "backlog $_mk_action: the backlog did not compile (rc=$rc)"
-  fi
-  _mk_date=$(awk -F"$_mk_tab" -v id="$_mk_id" \
-    '$1 == "mselect" && $3 == id { print $2; exit }' \
-    "$ROOT/zamm-memory/.compiled/backlog-state.tsv")
-  if [ "$_mk_action" = "mark" ] && [ -n "$_mk_date" ]; then
-    die "backlog mark: $_mk_id is already marked (since $_mk_date)"
-  fi
-  if [ "$_mk_action" = "unmark" ] && [ -z "$_mk_date" ]; then
-    die "backlog unmark: $_mk_id is not marked"
-  fi
+  lane_decide "$_mk_action" "$_mk_id" "$_mk_reason" "$_mk_until" "backlog $_mk_action"
   _mk_path=$(resolve_record "$_mk_id" backlog)
   _mk_scope=$(fm_field "$_mk_path" scope)
   _mk_imp=$(fm_field "$_mk_path" importance)
   _mk_dur=$(fm_field "$_mk_path" durability)
-  _mk_slug=$(id_to_slug "$_mk_id")
-  if [ "$_mk_action" = "mark" ]; then
-    _mk_val=${ZAMM_TODAY:-$(date +%Y-%m-%d)}
-  else
-    _mk_val="no"
-  fi
-  # the marking decision is an ordinary superseding record: same body, the
-  # marked: key toggled — so G1 and candidate validation apply unchanged,
-  # and the decision is greppable history like everything else
-  fm_body "$_mk_path" | sh "$INTERNAL/zamm-new-memory.sh" \
-    --project-root "$ROOT" --tree backlog \
-    --scope "$_mk_scope" \
-    --importance "${_mk_imp:-useful}" --durability "${_mk_dur:-months}" \
-    --supersedes "$_mk_id" --marked "$_mk_val" "$_mk_slug" >/dev/null ||
+  # the decision is an ordinary superseding record: same body, scope and
+  # rating, the lane keys set — so G1 and candidate validation apply
+  # unchanged, and the decision is greppable history like everything else
+  fm_body "$_mk_path" | lane_write "$_mk_action" "$(id_to_slug "$_mk_id")" \
+    --scope "$_mk_scope" --importance "${_mk_imp:-useful}" \
+    --durability "${_mk_dur:-months}" --supersedes "$_mk_id" >/dev/null ||
     die "backlog $_mk_action: could not write the superseding record"
-  if [ "$_mk_action" = "mark" ]; then
-    echo "Marked for implementation ($_mk_val): $_mk_id"
-    echo "  It now appears in the session digest and stops decaying until"
-    echo "  promoted, unmarked, or tombstoned."
-  else
-    echo "Unmarked: $_mk_id"
-  fi
+  lane_report "$_mk_action" "$_mk_id"
 }
 
 backlog_promote() {
@@ -2851,18 +3032,35 @@ backlog_promote() {
 backlog_add() {
   case "${1-}" in -h|--help) group_usage backlog 0 ;; esac
   _ba_scope=""; _ba_slug=""; _ba_type="memory"; _ba_pos=""
-  _ba_fwd=""
+  _ba_fwd=""; _ba_sup=""; _ba_raw=""
+  _ba_lane=""; _ba_reason=""; _ba_until=""; _ba_hasreason=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --scope) [ $# -ge 2 ] || die "backlog add: --scope requires a value"; _ba_scope="$2"; shift 2 ;;
       --slug)  [ $# -ge 2 ] || die "backlog add: --slug requires a value"; _ba_slug="$2"; shift 2 ;;
       --type)  [ $# -ge 2 ] || die "backlog add: --type requires a value"; _ba_type="$2"; shift 2 ;;
+      # the lane decision, written into this record instead of a second copy
+      # of the idea (see lane_decide)
+      --mark|--unmark|--park|--unpark)
+        [ -z "$_ba_lane" ] || die "backlog add: one lane decision per record (--$_ba_lane and $1)"
+        _ba_lane=${1#--}; shift ;;
+      --reason)
+        [ $# -ge 2 ] || die "backlog add: --reason requires a value"
+        _ba_reason="$2"; _ba_hasreason=1; shift 2 ;;
+      --until)
+        [ $# -ge 2 ] || die "backlog add: --until requires a YYYY-MM-DD date"
+        _ba_until="$2"; shift 2 ;;
+      --until=*) _ba_until="${1#--until=}"; shift ;;
       --supersedes|--importance|--durability|--date|--marked|--up|--down|--erases)
         [ $# -ge 2 ] || die "backlog add: $1 requires a value"
         # these values are charset-limited downstream (ids, dates, keywords);
         # refusing whitespace here keeps the accumulated list word-splittable
         case "$2" in
           *[!A-Za-z0-9,-]*) die "backlog add: $1 value contains characters the record contract refuses" ;;
+        esac
+        case "$1" in
+          --supersedes) _ba_sup="$2" ;;
+          --date|--marked) _ba_raw="$1" ;;
         esac
         _ba_fwd="$_ba_fwd $1 $2"
         shift 2
@@ -2875,6 +3073,25 @@ backlog_add() {
         ;;
     esac
   done
+
+  if [ -n "$_ba_lane" ]; then
+    [ "$_ba_type" = "memory" ] ||
+      die "backlog add: --$_ba_lane decides an idea's lane; a --type $_ba_type record has none"
+    [ -z "$_ba_raw" ] ||
+      die "backlog add: --$_ba_lane cannot be combined with $_ba_raw: the decision is written with today's date"
+    case "$_ba_sup" in
+      *,*) die "backlog add: --$_ba_lane decides one idea's lane; merge the heads first, then decide" ;;
+    esac
+    case "$_ba_lane" in
+      unmark|unpark)
+        [ -n "$_ba_sup" ] ||
+          die "backlog add: --$_ba_lane needs --supersedes <id>: a new idea is in no lane"
+        [ "$_ba_hasreason" -eq 0 ] && [ -z "$_ba_until" ] ||
+          die "backlog add: --reason and --until go with --mark or --park" ;;
+    esac
+  elif [ "$_ba_hasreason" -eq 1 ] || [ -n "$_ba_until" ]; then
+    die "backlog add: --reason and --until go with --mark or --park"
+  fi
 
   if [ "$_ba_type" != "memory" ]; then
     # tombstone/votes/erasure mirror memory create: the positional is the SLUG
@@ -2915,6 +3132,17 @@ $_ba_extra"
 $_ba_extra"
       fi
     fi
+  fi
+  if [ -n "$_ba_lane" ]; then
+    # the rules are the lane commands' own; a refusal writes nothing
+    lane_decide "$_ba_lane" "$_ba_sup" "$_ba_reason" "$_ba_until" "backlog add --$_ba_lane"
+    # shellcheck disable=SC2086 -- forwarded flags are whitespace-refusing by construction
+    _ba_out=$(printf '%s\n' "$_ba_body" | lane_write "$_ba_lane" "$_ba_slug" \
+      --scope "${_ba_scope:-other}" $_ba_fwd) || exit $?
+    printf '%s\n' "$_ba_out"
+    _ba_new=${_ba_out##*/}
+    lane_report "$_ba_lane" "${_ba_new%.md}"
+    return
   fi
   # shellcheck disable=SC2086 -- forwarded flags are whitespace-refusing by construction
   printf '%s\n' "$_ba_body" | sh "$INTERNAL/zamm-new-memory.sh" \
@@ -4348,8 +4576,10 @@ case "$cmd" in
       add)     require_root; require_version; backlog_add "$@"; exit 0 ;;
       list)    require_root; require_version; backlog_list "$@"; exit 0 ;;
       show)    require_root; require_version; backlog_show "$@"; exit 0 ;;
-      mark)    require_root; require_version; backlog_markctl mark "$@"; exit 0 ;;
-      unmark)  require_root; require_version; backlog_markctl unmark "$@"; exit 0 ;;
+      mark)    require_root; require_version; backlog_lanectl mark "$@"; exit 0 ;;
+      unmark)  require_root; require_version; backlog_lanectl unmark "$@"; exit 0 ;;
+      park)    require_root; require_version; backlog_lanectl park "$@"; exit 0 ;;
+      unpark)  require_root; require_version; backlog_lanectl unpark "$@"; exit 0 ;;
       promote) require_root; require_version; backlog_promote "$@"; exit 0 ;;
       check)   require_root; require_version; backlog_check "$@"; exit 0 ;;
       help|--help|-h) group_usage backlog 0 ;;

@@ -30,7 +30,7 @@ Each tree has an index and three layers under `<zamm-skill>/references/`; load t
 | tree | index | reading | writing | maintenance |
 | --- | --- | --- | --- | --- |
 | knowledge | `memory.md` | `memory-reading.md` | `memory-writing.md` | `memory-maintenance.md` (supersede, votes, reconciliation, erasure, archive) |
-| backlog | `backlog.md` | `backlog-reading.md` | `backlog-writing.md` | `backlog-maintenance.md` (decay, mark, promote) |
+| backlog | `backlog.md` | `backlog-reading.md` | `backlog-writing.md` | `backlog-maintenance.md` (decay, mark, park, promote) |
 | plans | `plans.md` | `plans-reading.md` | `plans-writing.md` (incl. IDE-written plans) | `plans-maintenance.md` (transitions, close-out, archive) |
 | journal | `journal.md` | `journal-reading.md` (incl. `journal digest`, the compiled summary) | `journal-writing.md` | `journal-maintenance.md` (review/settle, elevate: the stored claims) |
 

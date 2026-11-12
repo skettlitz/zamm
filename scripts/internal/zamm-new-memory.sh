@@ -15,7 +15,10 @@
 #                           [--erases <id[,id...]>] [--up <id[,id...]>] [--down <id[,id...]>]
 #                           [--importance guardrail|useful|minor]
 #                           [--durability days|weeks|months|years|permanent]
-#                           [--plan <plan-dir-slug>] [--marked YYYY-MM-DD|no]
+#                           [--plan <plan-dir-slug>] [--marked YYYY-MM-DD|no
+#                           [--mark-reason '<one line>'] [--mark-until YYYY-MM-DD]]
+#                           [--parked YYYY-MM-DD|no [--park-reason '<one line>']
+#                           [--park-until YYYY-MM-DD]]
 #                           [--date YYYY-MM-DD] [--x <key=value>]...
 #                           journal only: [--cue <slug>] [--salience 1..10]
 #                           [--axis <name=value>]... [--agent <token>] [--user <token>]
@@ -26,7 +29,9 @@
 #
 # --tree backlog writes an idea into the backlog ledger (validated against
 # the backlog tree, no guardrail importance, no --plan); --marked puts a
-# backlog idea into (a date) or out of (no) the marked lane.
+# backlog idea into (a date) or out of (no) the marked lane, a date taking an
+# optional --mark-reason (one printable line) and --mark-until end date;
+# --parked does the same for the parked lane, where --park-reason is required.
 # --tree journal writes an episode (type memory), an elevation (--type
 # digest with --digest/--covers) or a watermark (--reviewed-through) into
 # the journal; no guardrails, no votes, no --plan; durability defaults to
@@ -60,6 +65,11 @@ IMPORTANCE="useful"
 DURABILITY="months"
 PLAN=""
 MARKED=""
+MARK_REASON=""
+MARK_UNTIL=""
+PARKED=""
+PARK_REASON=""
+PARK_UNTIL=""
 RDATE=""
 SLUG=""
 UP=""
@@ -106,6 +116,11 @@ while [ $# -gt 0 ]; do
     --type)       need_val "$@"; RTYPE="$2"; shift 2 ;;
     --tree)       need_val "$@"; TREE="$2"; shift 2 ;;
     --marked)     need_val "$@"; MARKED="$2"; shift 2 ;;
+    --mark-reason) need_val "$@"; MARK_REASON="$2"; shift 2 ;;
+    --mark-until) need_val "$@"; MARK_UNTIL="$2"; shift 2 ;;
+    --parked)     need_val "$@"; PARKED="$2"; shift 2 ;;
+    --park-reason) need_val "$@"; PARK_REASON="$2"; shift 2 ;;
+    --park-until) need_val "$@"; PARK_UNTIL="$2"; shift 2 ;;
     --scope)      need_val "$@"; SCOPE="$2"; shift 2 ;;
     --supersedes) need_val "$@"; SUPERSEDES="$2"; shift 2 ;;
     --erases)     need_val "$@"; ERASES="$2"; shift 2 ;;
@@ -410,15 +425,88 @@ if [ "$TREE" = "backlog" ]; then
     exit 1
   fi
 fi
-if [ -n "$MARKED" ]; then
+# one printable line, so a lane reason can never break out of its key, and
+# short, because the lens shows it whole
+lane_reason_ok() {
+  case "$2" in
+    *[![:print:]]*)
+      echo "ERROR: $1 must be one printable line" >&2
+      exit 1
+      ;;
+  esac
+  if [ "${#2}" -gt 200 ]; then
+    echo "ERROR: $1 is ${#2} characters (max 200); the depth belongs in the idea" >&2
+    exit 1
+  fi
+}
+if [ -n "$MARKED$MARK_REASON$MARK_UNTIL" ]; then
   if [ "$TREE" != "backlog" ] || [ "$RTYPE" != "memory" ]; then
-    echo "ERROR: --marked is only meaningful on a backlog memory record" >&2
+    echo "ERROR: --marked/--mark-reason/--mark-until are only meaningful on a backlog memory record" >&2
     exit 1
   fi
   case "$MARKED" in
-    no|[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+    ""|no|[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
     *)
       echo "ERROR: --marked must be a YYYY-MM-DD date or \"no\"" >&2
+      exit 1
+      ;;
+  esac
+  case "$MARKED" in
+    no)
+      if [ -n "$MARK_REASON$MARK_UNTIL" ]; then
+        echo "ERROR: --marked no takes no --mark-reason/--mark-until" >&2
+        exit 1
+      fi
+      ;;
+    "")
+      echo "ERROR: --mark-reason/--mark-until belong to a marking decision and need --marked <date>" >&2
+      exit 1
+      ;;
+  esac
+  lane_reason_ok --mark-reason "$MARK_REASON"
+  case "$MARK_UNTIL" in
+    ""|[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+    *)
+      echo "ERROR: --mark-until must be a YYYY-MM-DD date" >&2
+      exit 1
+      ;;
+  esac
+fi
+# the parked lane: shape checks here, so the author hears them before the
+# write; the compiler holds the rest (reason required, end date after
+# the park date, one lane per record) for hand-written files too
+if [ -n "$PARKED$PARK_REASON$PARK_UNTIL" ]; then
+  if [ "$TREE" != "backlog" ] || [ "$RTYPE" != "memory" ]; then
+    echo "ERROR: --parked/--park-reason/--park-until are only meaningful on a backlog memory record" >&2
+    exit 1
+  fi
+  case "$PARKED" in
+    no)
+      if [ -n "$PARK_REASON$PARK_UNTIL" ]; then
+        echo "ERROR: --parked no takes no --park-reason/--park-until" >&2
+        exit 1
+      fi
+      ;;
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
+      if [ -z "$PARK_REASON" ]; then
+        echo "ERROR: --parked needs --park-reason (one line: why it is set aside)" >&2
+        exit 1
+      fi
+      ;;
+    "")
+      echo "ERROR: --park-reason/--park-until belong to a parking decision and need --parked <date>" >&2
+      exit 1
+      ;;
+    *)
+      echo "ERROR: --parked must be a YYYY-MM-DD date or \"no\"" >&2
+      exit 1
+      ;;
+  esac
+  lane_reason_ok --park-reason "$PARK_REASON"
+  case "$PARK_UNTIL" in
+    ""|[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+    *)
+      echo "ERROR: --park-until must be a YYYY-MM-DD date" >&2
       exit 1
       ;;
   esac
@@ -688,6 +776,11 @@ emit_frontmatter() {
     fm "durability: $DURABILITY"
   fi
   if [ -n "$MARKED" ]; then fm "marked: $MARKED"; fi
+  if [ -n "$MARK_REASON" ]; then fm "mark-reason: $MARK_REASON"; fi
+  if [ -n "$MARK_UNTIL" ]; then fm "mark-until: $MARK_UNTIL"; fi
+  if [ -n "$PARKED" ]; then fm "parked: $PARKED"; fi
+  if [ -n "$PARK_REASON" ]; then fm "park-reason: $PARK_REASON"; fi
+  if [ -n "$PARK_UNTIL" ]; then fm "park-until: $PARK_UNTIL"; fi
   if [ -n "$PLAN" ]; then fm "plan: $PLAN"; fi
   if [ "$RTYPE" = "votes" ]; then
     fm "up:${UP:+ $UP}"
@@ -842,11 +935,37 @@ if [ "$VALIDATE" -eq 1 ]; then
     # elevations (digest) are read through their targets and never get a
     # `select` row, so this note said "no session will be handed it" about
     # every single one of them - false, and firing on 100% of instrument
-    # writes trains the reader to skip the note where it is true.
+    # writes trains the reader to skip the note where it is true. A parked
+    # idea (a pselect row) is out of the lens on purpose, which is the
+    # opposite of written to nobody.
     if [ "$RTYPE" = "memory" ] && [ -f "$_state" ] &&
-       ! awk -F'\t' -v id="$BASE" '$1=="select" && $2==id{f=1} END{exit !f}' "$_state"; then
+       ! awk -F'\t' -v id="$BASE" '($1=="select" && $2==id) || ($1=="pselect" && $3==id) {f=1} END{exit !f}' "$_state"; then
       echo "note: $BASE is below the digest entry caps, so no session will be handed" >&2
       echo "      it. It stays greppable and can rank back in as others decay." >&2
+    fi
+    # A plain rewrite keeps the idea's lane (lanenode in zamm-compile.sh):
+    # sharpening the text is not a decision about when. A parked idea is out
+    # of every list, so a rewriter who is not told believes the sharpened
+    # idea is back. Name the lane it stays in, with its reason, at the one
+    # moment someone is looking at the idea, and the command that leaves it.
+    # A record carrying a lane key is that decision itself and needs no note.
+    if [ "$TREE" = backlog ] && [ "$RTYPE" = "memory" ] && [ -n "$SUPERSEDES" ] &&
+       [ -z "$MARKED$PARKED" ] && [ -f "$_state" ]; then
+      _lane=$(awk -F'\t' -v id="$BASE" '
+        ($1 == "mselect" || $1 == "pselect") && $3 == id {
+          s = (($1 == "pselect") ? "parked" : "marked") " (since " $2
+          if ($4 != "-") s = s ", until " $4
+          if ($5 != "-") s = s ": " $5
+          print s ")"; exit
+        }' "$_state")
+      case "$_lane" in
+        parked*)
+          echo "note: the rewrite stays $_lane; a rewrite keeps its lane" >&2
+          echo "      unless it passes --unpark. To bring it back now: zamm-run.sh backlog unpark $BASE" >&2 ;;
+        marked*)
+          echo "note: the rewrite stays $_lane; a rewrite keeps its lane" >&2
+          echo "      unless it passes --unmark. To withdraw it now: zamm-run.sh backlog unmark $BASE" >&2 ;;
+      esac
     fi
   fi
 fi

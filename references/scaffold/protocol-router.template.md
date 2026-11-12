@@ -20,7 +20,7 @@ One step: it validates the record and lands it, or prints why not. Never edit or
 
 **Plans (ZAMM owns them):** work that spans sessions runs in a plan directory — `plan create '<title>'`, `plan list`, `plan check`, `plan archive`. Status flow Draft -> Implementing -> Review -> Done/Abandoned; close-out needs learnings, telemetry and a votes record (full protocol).
 
-**Backlog (ideas; latent work):** an idea worth keeping but not starting goes into the backlog, never into a Draft plan: `backlog add 'One sentence.'` (depth on stdin; `--scope area/subpath` when the topic is known). Read `backlog list` first and supersede or vote instead of duplicating. Ideas fade on their own; `backlog mark` pushes one into the digest, `backlog promote` turns it into a plan.
+**Backlog (ideas; latent work):** an idea worth keeping but not starting goes into the backlog, never into a Draft plan: `backlog add 'One sentence.'` (depth on stdin; `--scope area/subpath` when the topic is known). Read `backlog list` first and supersede or vote instead of duplicating. Ideas fade on their own; `backlog mark` pushes one into the digest, `backlog park` sets one aside with a reason, either for a time with `--until`, `backlog promote` turns it into a plan.
 
 **Journal (episodes; backward-looking):** something that happened and is worth a trace but implies no action and asserts no durable fact — a side quest, an outage, a considered non-action — is `journal add 'One sentence.'`, never a short-lived knowledge record. Cue-driven, never a session-end ritual.
 

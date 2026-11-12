@@ -1019,8 +1019,11 @@ append_backlog_summary() {
       echo "## Marked backlog (implement or unmark)"
       echo ""
       grep "^mselect${tab}" "$bstate" | sort -t "$tab" -k2,2 -k3,3 |
-        while IFS="$tab" read -r _ mdate mid mhl; do
-          echo "- $mhl [$mid] (marked $mdate)"
+        while IFS="$tab" read -r _ mdate mid muntil mreason mhl; do
+          mtail="marked $mdate"
+          if [ "$muntil" != "-" ]; then mtail="$mtail, until $muntil"; fi
+          if [ "$mreason" != "-" ]; then mtail="$mtail: $mreason"; fi
+          echo "- $mhl [$mid] ($mtail)"
         done
       if grep -q "^marked_over${tab}" "$bstate"; then
         echo "(over the soft cap - promote what is starting, unmark what is not)"
@@ -1212,11 +1215,11 @@ BEGIN {
 
   VALID_AREAS = " domain contracts conventions internals quality tooling ops meta "
   # every key the compiler acts on; anything else is a typo until proven
-  # otherwise (x- prefix reserved for deliberate extensions). `marked` is
-  # meaningful only in the backlog tree, but it belongs in this list for BOTH
-  # trees: its knowledge-side rejection below is a policy error naming the
-  # remedy, not an unknown-key typo warning.
-  KNOWN_KEYS = " type scope supersedes erases created schema plan up down importance durability seed-up seed-dn migrated-from marked cue salience time agent user reviewed-through pass digest covers covered "
+  # otherwise (x- prefix reserved for deliberate extensions). `marked` and
+  # the park keys are meaningful only in the backlog tree, but they belong in
+  # this list for BOTH trees: their knowledge-side rejection below is a
+  # policy error naming the remedy, not an unknown-key typo warning.
+  KNOWN_KEYS = " type scope supersedes erases created schema plan up down importance durability seed-up seed-dn migrated-from marked mark-reason mark-until parked park-reason park-until cue salience time agent user reviewed-through pass digest covers covered "
   # the journal-only keys (plus the axis- prefix family): refused in every
   # other tree as a policy error, validated per class inside the journal
   JOURNAL_KEYS = " cue salience time agent user reviewed-through pass digest covers covered "
@@ -1408,6 +1411,11 @@ function read_record(path, base,   id, line, state, firstline, fmclosed, pos, ke
         else if (key == "seed-dn")    rseeddn[id] = val
         else if (key == "migrated-from") rmigfrom[id] = val
         else if (key == "marked")     { rmarked[id] = val; hasmark[id] = 1 }
+        else if (key == "mark-reason") { rmreason[id] = val; hasmreason[id] = 1 }
+        else if (key == "mark-until") { rmuntil[id] = val; hasmuntil[id] = 1 }
+        else if (key == "parked")     { rparked[id] = val; haspark[id] = 1 }
+        else if (key == "park-reason") { rpreason[id] = val; haspreason[id] = 1 }
+        else if (key == "park-until") { rpuntil[id] = val; haspuntil[id] = 1 }
         else if (key == "cue")        rcue[id] = val
         else if (key == "salience")   rsal[id] = val
         else if (key == "time")       rtime[id] = val
@@ -1603,6 +1611,52 @@ function read_record(path, base,   id, line, state, firstline, fmclosed, pos, ke
     else if (rmarked[id] != "no" && !validdate(rmarked[id]))
       rerr(id, path ": marked: must be a real YYYY-MM-DD date or \"no\" (got \"" rmarked[id] "\")")
   }
+  # A marking decision may carry why now (mark-reason:, one line) and the day
+  # it ends (mark-until:, after the mark date). Both are optional, so
+  # every mark written before they existed stays valid, and both belong to
+  # that decision and to nothing else.
+  if ((id in hasmreason) || (id in hasmuntil)) {
+    if (lens != "backlog")
+      rerr(id, path ": mark-reason:/mark-until: are backlog keys; a " lens " record cannot sit in the marked lane")
+    else if (rtype[id] != "memory")
+      rerr(id, path ": mark-reason:/mark-until: are only meaningful on a memory record (this is a " rtype[id] ")")
+    else if (!(id in hasmark))
+      rerr(id, path ": mark-reason:/mark-until: belong to a marking decision and need marked: <date>")
+    else if (rmarked[id] == "no")
+      rerr(id, path ": marked: no takes no mark-reason:/mark-until: (they belong to a marking decision)")
+    else if ((id in hasmreason) && trim(rmreason[id]) == "")
+      rerr(id, path ": mark-reason: is empty (leave the key out instead)")
+    else if ((id in hasmuntil) && !validdate(rmuntil[id]))
+      rerr(id, path ": mark-until: must be a real YYYY-MM-DD date (got \"" rmuntil[id] "\")")
+    else if ((id in hasmuntil) && rmuntil[id] <= rmarked[id])
+      rerr(id, path ": mark-until: must come after the mark date " rmarked[id])
+  }
+  # parked: is the backlog's other lane — set aside on purpose, the mirror
+  # of marked. A date (the day first parked) or the explicit `no`. A parking
+  # decision carries its reason (park-reason:, one line) and may carry the
+  # day it ends (park-until:, after the park date); both belong to that
+  # decision and to nothing else. One record cannot put an
+  # idea in both lanes at once.
+  if ((id in haspark) || (id in haspreason) || (id in haspuntil)) {
+    if (lens != "backlog")
+      rerr(id, path ": parked:/park-reason:/park-until: are backlog keys; a " lens " record cannot be parked")
+    else if (rtype[id] != "memory")
+      rerr(id, path ": parked: is only meaningful on a memory record (this is a " rtype[id] ")")
+    else if (!(id in haspark))
+      rerr(id, path ": park-reason:/park-until: belong to a parking decision and need parked: <date>")
+    else if (rparked[id] != "no" && !validdate(rparked[id]))
+      rerr(id, path ": parked: must be a real YYYY-MM-DD date or \"no\" (got \"" rparked[id] "\")")
+    else if (rparked[id] == "no" && ((id in haspreason) || (id in haspuntil)))
+      rerr(id, path ": parked: no takes no park-reason:/park-until: (they belong to a parking decision)")
+    else if (rparked[id] != "no" && trim(rpreason[id]) == "")
+      rerr(id, path ": parked: needs a park-reason: (one line: why it is set aside)")
+    else if ((id in haspuntil) && !validdate(rpuntil[id]))
+      rerr(id, path ": park-until: must be a real YYYY-MM-DD date (got \"" rpuntil[id] "\")")
+    else if ((id in haspuntil) && rpuntil[id] <= rparked[id])
+      rerr(id, path ": park-until: must come after the park date " rparked[id])
+    else if (rparked[id] != "no" && (id in hasmark) && rmarked[id] != "no")
+      rerr(id, path ": marked: and parked: both carry a date; an idea sits in one lane (write marked: no)")
+  }
   # Journal keys are refused outside the journal whatever the record type
   # (a journal-only key on a knowledge record is a misfile, not a typo).
   if ((id in jkeys) && lens != "journal")
@@ -1708,6 +1762,7 @@ function emit_state(   i, j, id, k, pm, cu, mk, mp, g, gp, n, nm2, fs) {
     # single authority for the cap: the digest compile prints its section
     # nag from this row instead of re-owning the MARKED_MAX constant
     if (nmarked > MARKED_MAX) printf "marked_over\t%d\n", nmarked > statefile
+    printf "parked\t%d\n", nparked > statefile
   }
   for (i = 1; i <= nrec; i++) {
     id = order[i]
@@ -1777,17 +1832,30 @@ function emit_state(   i, j, id, k, pm, cu, mk, mp, g, gp, n, nm2, fs) {
     }
   }
   # The marked rows feed the digest compile, which renders the ## Marked
-  # backlog section from this sidecar. mark-date first so a plain sort
-  # yields oldest-first; the headline is TAB-sanitized because record
-  # content must never smuggle a column separator into a TSV surface (the
-  # norm_list rule).
+  # backlog section from this sidecar, and mark/unmark: mark date, id, end
+  # date (- for none), reason (- for none), headline. Mark-date first so a
+  # plain sort yields oldest-first; no column is ever empty, since
+  # a tab-split read would close the gap and shift the rest; reason and
+  # headline are TAB-sanitized because record content must never smuggle a
+  # column separator into a TSV surface (the norm_list rule).
   if (lens == "backlog") {
     for (i = 1; i <= nrec; i++) {
       id = order[i]
       if (!(id in markedof)) continue
-      mh = headline(id)
-      gsub(/\t/, " ", mh)
-      printf "mselect\t%s\t%s\t%s\n", markedof[id], id, mh > statefile
+      mn = markby[id]
+      mh = headline(id); gsub(/\t/, " ", mh)
+      mr = rmreason[mn]; gsub(/\t/, " ", mr)
+      printf "mselect\t%s\t%s\t%s\t%s\t%s\n", markedof[id], id, ((mn in hasmuntil) ? rmuntil[mn] : "-"), ((mr == "") ? "-" : mr), mh > statefile
+    }
+    # The park rows feed `backlog list --all` and `park`/`unpark`, in the
+    # same layout: park date, id, end date (- for none), reason, headline.
+    for (i = 1; i <= nrec; i++) {
+      id = order[i]
+      if (!(id in parkedof)) continue
+      pn = parkedof[id]
+      mh = headline(id); gsub(/\t/, " ", mh)
+      pr = rpreason[pn]; gsub(/\t/, " ", pr)
+      printf "pselect\t%s\t%s\t%s\t%s\t%s\n", rparked[pn], id, ((pn in haspuntil) ? rpuntil[pn] : "-"), pr, mh > statefile
     }
   }
   close(statefile)
@@ -2438,11 +2506,12 @@ function tarjan(   i, id, u, ci, v, par) {
 
 # durability credit: only single-target supersessions count — a hop that
 # merged several heads (reconciliation) was forced by concurrency and proves
-# nothing about the statement having survived repeated updates
+# nothing about the statement having survived repeated updates. Nor does a
+# lane decision that leaves the idea's text as it was (see lanecopy).
 function chaindepth(id,   r, hops, d) {
   r = id; hops = 0; d = 0
   while ((r in parent) && hops < 200) {
-    if (nsup[r] == 1) d++
+    if (nsup[r] == 1 && !lanecopy(r)) d++
     r = parent[r]; hops++
   }
   # capped: lineage length is weak evidence of truth — a supersede may be a
@@ -2450,6 +2519,25 @@ function chaindepth(id,   r, hops, d) {
   # Uncapped it compounds with inherited ancestor votes, so the statements
   # revised most often (the least settled) would rank highest.
   return (d > CHAINDEPTH_MAX) ? CHAINDEPTH_MAX : d
+}
+
+# A lane decision (a record carrying marked: or parked:) whose body is its
+# predecessor's: what mark, unmark, park and unpark write, copying the idea
+# through and flipping a key. That says nothing about the idea surviving
+# revision, and counted, the credit never decays, so one mark and unmark left
+# an idea hot forever and unpark could never let it fade. A rewrite that
+# decides its lane in the same record (backlog add --supersedes --park) is
+# still a rewrite: it earns what the same rewrite written alone would, so the
+# one-record form never scores below the two-record one. A predecessor whose
+# body is not loaded cannot be compared, and the decision counts as a copy.
+function lanecopy(r,   p, a, b) {
+  if (!(r in hasmark) && !(r in haspark)) return 0
+  p = parent[r]
+  if (!(p in rbody)) return 1
+  a = rbody[r]; b = rbody[p]
+  sub(/^[ \t\n]+/, "", a); sub(/[ \t\n]+$/, "", a)
+  sub(/^[ \t\n]+/, "", b); sub(/[ \t\n]+$/, "", b)
+  return a == b
 }
 
 # author-rated base weight; guardrails are rare, load-bearing rules
@@ -2471,7 +2559,7 @@ function halflife(v) {
 function decayw(id,   h, a) {
   h = halflife(rdur[id])
   if (h == 0) return 1
-  a = tdn - daynum(rcreated[id])
+  a = tdn - daynum((id in clockfrom) ? clockfrom[id] : rcreated[id])
   if (a < 0) a = 0
   return exp(-0.693147 * a / h)
 }
@@ -2639,8 +2727,10 @@ function build_tombkill(   i, id, qh, qt, m, tg, t, tgt, cur) {
   }
 }
 
-# Effective marked state of a backlog head, resolved by GRAPH PRECEDENCE:
-# a decision made on a descendant record overrides every decision on its
+# Effective lane state of a backlog head, resolved by GRAPH PRECEDENCE —
+# one walk for both lanes, passed the lane's decision set (hasmark or
+# haspark), because two hand-copied walks are how lane resolution drifts.
+# A decision made on a descendant record overrides every decision on its
 # ancestors, because superseding IS the act of revising — id order proves
 # nothing (same-day ids differ only by a random suffix, so a lexical
 # "newest id wins" let a mark resurface after a same-day unmark). The
@@ -2653,12 +2743,13 @@ function build_tombkill(   i, id, qh, qt, m, tg, t, tgt, cur) {
 # itself is PURE ANCESTRY with no tombstone wall: a wall there severed real
 # descent and handed comparable decisions to the suffix tiebreak — the
 # pathology this function exists to prevent (round-3 review finding,
-# reproduced). Returns the marked date, or "" when the decision is "no" or
-# none exists — a superseding record that OMITS the key inherits the lane.
+# reproduced). Returns the DECIDING record id, or "" when none exists — a
+# superseding record that OMITS the key inherits the lane. The callers read
+# the date, reason and end date off that record.
 # Walks asup[] only, like the vote aggregation, so a quarantined ancestor
 # cannot decide.
-function effmark(id,   q, qh, qt, cur, nm, i2, best) {
-  if (id in hasmark) return mkval(id)
+function lanenode(id, has,   q, qh, qt, cur, nm, i2, best) {
+  if (id in has) return id
   # collect the reachable, still-living decision nodes
   mkepoch++
   nm = 0; qh = 1; qt = 1; q[1] = id
@@ -2666,7 +2757,7 @@ function effmark(id,   q, qh, qt, cur, nm, i2, best) {
     cur = q[qh++]
     if (mkseen[cur] == mkepoch) continue
     mkseen[cur] = mkepoch
-    if ((cur in hasmark) && !(cur in tombkilled)) mkm[++nm] = cur
+    if ((cur in has) && !(cur in tombkilled)) mkm[++nm] = cur
     qt = pushsups(q, qt, cur)
   }
   if (nm == 0) return ""
@@ -2684,16 +2775,58 @@ function effmark(id,   q, qh, qt, cur, nm, i2, best) {
     cur = q[qh++]
     if (mkseen[cur] == mkepoch) continue
     mkseen[cur] = mkepoch
-    if (cur in hasmark) mkdom[cur] = 1
+    if (cur in has) mkdom[cur] = 1
     qt = pushsups(q, qt, cur)
   }
   best = ""
   for (i2 = 1; i2 <= nm; i2++)
     if (!mkdom[mkm[i2]] && mkm[i2] > best) best = mkm[i2]
-  return mkval(best)
+  return best
 }
 
-function mkval(x) { return (rmarked[x] == "no") ? "" : rmarked[x] }
+# the record holding the live marking decision (its marked:, mark-reason:
+# and mark-until: are read together), or "" when unmarked
+function effmark(id,   n) {
+  n = lanenode(id, hasmark)
+  return (n == "" || rmarked[n] == "no") ? "" : n
+}
+
+# the same for the parked lane
+function effpark(id,   n) {
+  n = lanenode(id, haspark)
+  return (n == "" || rparked[n] == "no") ? "" : n
+}
+
+# A lane decision with a date lasts until that date (mark-until:, park-until:;
+# no date, no end). From then on the idea is an ordinary one again. The
+# compiler never writes, so this is derived at read time: nothing has to be
+# decided and no record marks the moment. The line says what it had been, and
+# the decay clock restarts at the date, or a long park would come back already
+# cold. Marked wins a conflict, which only hand-written forks can produce: a
+# commitment is never hidden.
+function resolve_lanes(id,   mn, pn) {
+  mn = effmark(id)
+  if (mn != "" && (mn in hasmuntil) && rmuntil[mn] <= today) {
+    lane_ended(id, "was marked " rmarked[mn], rmreason[mn], rmuntil[mn])
+    mn = ""
+  }
+  if (mn != "") { markedof[id] = rmarked[mn]; markby[id] = mn; nmarked++ }
+  pn = effpark(id)
+  if (pn != "" && (pn in haspuntil) && rpuntil[pn] <= today) {
+    lane_ended(id, "was parked " rparked[pn], rpreason[pn], rpuntil[pn])
+    pn = ""
+  }
+  if (pn == "") return
+  if (id in markedof)
+    warn(id ": both marked and parked (conflicting decisions on its forks); it stays marked - run backlog unmark or backlog unpark")
+  else { parkedof[id] = pn; nparked++ }
+}
+
+function lane_ended(id, what, why, until) {
+  wasin[id] = (why == "") ? what : what ": " why
+  if (until > rcreated[id] && (!(id in clockfrom) || until > clockfrom[id]))
+    clockfrom[id] = until
+}
 
 # ranking: score desc, then id desc (newer/later name wins ties) — deterministic
 # total order: score desc, then id desc (newer/later name wins ties).
@@ -2813,7 +2946,7 @@ function scopelabel(id, mode,   s) {
 
 function renderline(id, mode, nomark,   pre) {
   pre = nomark ? ((rimp[id] == "guardrail") ? "! " : "") : markpfx(id)
-  return "- " pre scopelabel(id, mode) headline(id) " " pointer(id)
+  return "- " pre scopelabel(id, mode) headline(id) " " pointer(id) ((id in wasin) ? " (" wasin[id] ")" : "")
 }
 
 # full entry: headline line + elaboration lines (rest of the digest block).
@@ -3229,15 +3362,18 @@ END {
     if (rimp[id] == "guardrail") nguard++
     r = group(id)
     livecnt[r]++
+    # lanes first: one that has ended restarts the clock the score reads
+    if (lens == "backlog") resolve_lanes(id)
     sc[id] = ibase(rimp[id]) * decayw(id) + chainagg(id, 3) + 0.4 * chaindepth(id)
     if (lens == "backlog") {
       # Marked ideas are the selected lane: exempt from dormancy the way
       # guardrails are in the knowledge tree — a selected item never fades
-      # silently; it leaves by promote, unmark, or tombstone.
-      em = effmark(id)
-      if (em != "") { markedof[id] = em; nmarked++ }
-      if (sc[id] >= HOT) nhot++
-      if (sc[id] < FLOOR && !(id in markedof)) dormant[id] = 1
+      # silently; it leaves by promote, unmark, tombstone, or the date it was
+      # marked until. Parked ideas are the other lane: set aside on purpose,
+      # out of the hot list and out of dormancy alike — a deliberate "not
+      # now" must not read as "nobody cared".
+      if (sc[id] >= HOT && !(id in parkedof)) nhot++
+      if (sc[id] < FLOOR && !(id in markedof) && !(id in parkedof)) dormant[id] = 1
     } else if (sc[id] < FLOOR && rimp[id] != "guardrail") dormant[id] = 1
     add_sorted(id)
   }
@@ -3677,9 +3813,10 @@ END {
   # non-dormant idea is listed as a headline, because this file is read by
   # someone who chose triage mode and a triage read wants the whole live
   # list. The dormant tail collapses to counts (decay is the only cap), and
-  # the marked lane renders first, oldest commitment on top.
+  # the marked lane renders first, oldest commitment on top. Parked ideas
+  # collapse to counts like the dormant ones.
   if (lens == "backlog") {
-    printf "# ZAMM Backlog (%s: files=%d parsed=%d live=%d hot=%d marked=%d quarantined=%d; generated file - do not edit)\n", today, nfiles, nrec - nbad, nlive, nhot, nmarked, nquar
+    printf "# ZAMM Backlog (%s: files=%d parsed=%d live=%d hot=%d marked=%d parked=%d quarantined=%d; generated file - do not edit)\n", today, nfiles, nrec - nbad, nlive, nhot, nmarked, nparked, nquar
     print ""
     if (nlive == 0) {
       print "(no ideas in the backlog)"
@@ -3714,7 +3851,11 @@ END {
         }
         tmpm = mklist[i]; mklist[i] = mklist[best]; mklist[best] = tmpm
         id = mklist[i]
-        print "- " headline(id) " " pointer(id) " (marked " markedof[id] ")"
+        mn = markby[id]
+        s = " (marked " markedof[id]
+        if (mn in hasmuntil) s = s ", until " rmuntil[mn]
+        if (rmreason[mn] != "") s = s ": " rmreason[mn]
+        print "- " headline(id) " " pointer(id) s ")"
         printed[id] = 1
       }
       if (nmarked > MARKED_MAX)
@@ -3733,7 +3874,7 @@ END {
     hdr = 0
     for (i = 1; i <= nsort; i++) {
       id = sorted[i]
-      if ((id in printed) || (id in dormant)) continue
+      if ((id in printed) || (id in dormant) || (id in parkedof)) continue
       a = area(id)
       if (a in areadone) continue
       areadone[a] = 1
@@ -3743,7 +3884,7 @@ END {
       atot = 0; nsp = 0
       for (j = i; j <= nsort; j++) {
         jd = sorted[j]
-        if ((jd in printed) || (jd in dormant)) continue
+        if ((jd in printed) || (jd in dormant) || (jd in parkedof)) continue
         if (area(jd) != a) continue
         atot++
         p = pscope[jd]
@@ -3762,12 +3903,12 @@ END {
       # render pass: one adjacent run per primary scope
       for (j = i; j <= nsort; j++) {
         jd = sorted[j]
-        if ((jd in printed) || (jd in dormant)) continue
+        if ((jd in printed) || (jd in dormant) || (jd in parkedof)) continue
         if (area(jd) != a) continue
         p = pscope[jd]
         for (k = j; k <= nsort; k++) {
           kd = sorted[k]
-          if ((kd in printed) || (kd in dormant)) continue
+          if ((kd in printed) || (kd in dormant) || (kd in parkedof)) continue
           if (area(kd) != a || pscope[kd] != p) continue
           # the scope prefix only earns its ink when it adds a subpath
           # the section heading does not already say
@@ -3791,6 +3932,23 @@ END {
         s = s ((i > 1) ? ", " : "") dcount[dareas[i]] " " dareas[i]
       print ""
       print "Dormant (cooled below the floor; re-up by superseding or voting, or see backlog list --all): " s
+    }
+    # the parked tail, counted per area like the dormant one
+    npk = 0; npa = 0
+    for (i = 1; i <= nsort; i++) {
+      id = sorted[i]
+      if ((id in printed) || !(id in parkedof)) continue
+      a = area(id)
+      if (!(a in pcount)) pareas[++npa] = a
+      pcount[a]++
+      npk++
+    }
+    if (npk > 0) {
+      s = ""
+      for (i = 1; i <= npa; i++)
+        s = s ((i > 1) ? ", " : "") pcount[pareas[i]] " " pareas[i]
+      print ""
+      print "Parked (set aside on purpose; backlog list --all shows why, backlog unpark brings one back): " s
     }
     emit_state()
     close("cat 1>&2")

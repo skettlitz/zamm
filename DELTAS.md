@@ -2522,3 +2522,77 @@ human approving it. It now covers record, idea, episode and plan — name the re
 thing, say it once, stop — and `plans-writing.md` adds that each `## Why` and
 `## Learnings` line carries one claim. No check, no field; the checker and the
 template are unchanged.
+
+
+Locked 2026-11-12 — the parked lane, a reason and a timeout on both lanes, and lane flags on a rewrite.
+
+**Decay could not say "not now".** The human asked for a way to mark backlog
+ideas inactive without deleting them, because they may come back. Decay was
+the only triage, and it is slow (an untouched `useful`/`months` idea goes
+dormant after about a year) and mute: a deliberately set-aside idea and one
+nobody cared about look the same, and the reason is lost. People handle this
+with an explicit someday/icebox list and a reason; fading alone (stale bots) is
+the model they dislike. `backlog park <id> '<reason>' [--until <date>]`
+supersedes the idea with `parked: <date>`, `park-reason:` and optional
+`park-until:`. A parked idea leaves the lens (a count, like the dormant tail),
+is neither hot nor dormant, and is listed with its reason by `backlog list
+--all`. The lane resolves through the marked lane's own graph walk (`effmark`
+became `lanenode`, passed the lane's decision set): a plain re-up inherits the
+park and its reason, a tombstone ends it, and one record cannot hold both lanes
+— `mark` on a parked idea writes `parked: no` beside the date, `park` on a
+marked idea writes `marked: no`. The reason lives in frontmatter, one printable
+line of at most 200 characters, so the idea's body is copied through every lane
+hop unchanged. No VERSION bump: an older v3 toolchain warns on the unknown keys
+and shows a parked idea as an ordinary one.
+
+**The marked lane gets the same reason and date.** `backlog mark <id> ['<why
+now>'] [--until <date>]` writes `mark-reason:` and `mark-until:` beside
+`marked:`, and the reason shows beside the headline in the digest. Unlike a
+park's, a mark's reason is optional: every existing `marked:` record has none
+and must stay valid, plain `backlog mark <id>` is what agents already call, and
+a mark without a reason does not lose information the way a park without one
+does. In both lanes, deciding again keeps the first date; a reason or date
+passed replaces the current one and one omitted is kept, so extending the date
+never drops the reason. The `mselect` state row gained the end date and reason,
+and shares `pselect`'s layout.
+
+**`--until` is a timeout, not a reminder.** The first cut kept an idea in its
+lane past the date and asked: a `due` flag, a lens section, `, 1 park due` on
+the digest line, until someone wrote a decision. The human asked for a timeout
+instead, and it is the simpler design: on the date the decision is over, derived
+at read time, with nothing to decide and nothing written. The idea's line says
+`(was parked <date>: <reason>)`, and its decay clock restarts at the date (the
+later of that and the record's own), or a long park would come back already cold
+and go straight to dormant. That does let a dated mark leave the digest
+unannounced, which the lane's "a selected item never fades silently" rule was
+written against; the date is the human's explicit choice, and a mark with no
+date still leaves only by promote, unmark or tombstone. There is deliberately
+no default timeout: a default could be added later, whereas adding one now
+would change what every existing `marked:` record means.
+
+**A rewrite keeps its lane, or decides it in the same record.** The first
+sketch let a rewrite bring a parked idea back, on the view that touching an
+idea makes it live. It does not: sharpening the text is not a decision about
+when, and a park that any edit undid would not hold. But every lane decision
+is a whole copy of the idea (records never move or change), so a rewrite
+followed by `backlog unpark` wrote the idea twice; the human pointed this out
+at review. `backlog add` therefore takes `--mark`, `--unmark`, `--park` and
+`--unpark`, with `--reason` and `--until`, and writes the rewrite and the
+decision as one record; `--park` and `--mark` also work on a new idea. The
+lane commands and these flags share `lane_decide`, `lane_write` and
+`lane_report`, so the rules cannot drift between them. A plain rewrite onto
+an idea in a lane gets a note naming the lane it stays in, with its reason,
+because a parked idea is out of every list and its rewriter would otherwise
+believe it back.
+
+**Lane copies earn no durability credit.** Every single-target supersede
+added `0.4` to a record's score for good (the chain-depth credit, capped at
+two hops), and mark and unmark are supersedes, so an idea marked and unmarked
+once stayed hot forever: reproduced on a copy of the lab ledger, a
+three-year-old chain with a 30-day half-life still counted as hot while its
+untouched twin was dormant. Unpark would have done the same. A hop to a record
+that carries `marked:` or `parked:` with its predecessor's body unchanged (what
+the lane commands write) now counts for nothing. A rewrite earns its credit
+whether or not it decides the lane too, so the one-record form never scores
+below the two-record one. One re-up still keeps an idea above the dormancy
+floor for good; that half of the problem is a separate decision.

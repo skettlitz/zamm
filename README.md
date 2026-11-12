@@ -87,7 +87,9 @@ yet worth a trace: the **journal**. The archive is the exit for all four.
 - **Backlog** — `backlog add 'One sentence.'` captures; `backlog list` is the lens, hot to
   cold. Ideas cool into dormancy on their own unless superseded or voted up; `backlog mark`
   pushes one into the digest until `backlog promote` turns it into a plan or `unmark` drops
-  it. Never a Draft plan for an idea nobody is starting.
+  it, and `backlog park` sets one aside on purpose, with a reason. With `--until`, either one
+  ends by itself on that day and the idea returns to the list, fresh. Never a Draft plan for
+  an idea nobody is starting.
 - **Journal** — `journal add 'One sentence.'` records an episode: a side quest, an outage, a
   considered non-action. `journal list` is the timeline; `journal digest <period>` compiles a
   period view and stores nothing; `journal review` and `settle` triage behind a claim
@@ -338,14 +340,21 @@ memory discard <slug>
 memory archive       move superseded and retired records into archive/
 
 backlog add '<sentence>'
-                     capture an idea; one sentence is enough
+                     capture an idea; one sentence is enough (--supersedes
+                     <id> rewrites one; --mark, --unmark, --park or --unpark
+                     decides its lane in the same record)
 backlog list [--scope <tag>]
-                     the whole live backlog, hot to cold (--all: dormant
-                     too; --scope filters, e.g. domain/lobby)
+                     the whole live backlog, hot to cold (--all: parked
+                     and dormant too; --scope filters, e.g. domain/lobby)
 backlog show <slug>  one idea in full
-backlog mark <slug>  select an idea for implementation (pushed into the digest)
+backlog mark <slug> ['<why now>'] [--until YYYY-MM-DD]
+                     select an idea for implementation (pushed into the digest)
 backlog unmark <slug>
                      deselect a marked idea
+backlog park <slug> '<reason>' [--until YYYY-MM-DD]
+                     set an idea aside on purpose (out of the list, kept)
+backlog unpark <slug>
+                     bring a parked idea back
 backlog promote <slug> ['<plan title>']
                      turn an idea into a plan and retire it
 backlog check        validate the backlog ledger

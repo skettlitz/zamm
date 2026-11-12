@@ -603,6 +603,594 @@ class TestMarkedLane(ZammTest):
                         "the cap warns; it must not degrade the digest")
         self.assertIn_("over the soft cap", self.led.digest())
 
+    def test_a_mark_may_carry_a_reason_and_review_date(self):
+        self.led.backlog("add", "A chosen idea.")
+        r = self.led.backlog("mark", "a-chosen-idea", "The pilot needs it.",
+                             "--until", "2026-09-01")
+        self.assertCode(r, EXIT_OK)
+        self.assertIn_("why: The pilot needs it.", r.out)
+        self.assertIn_("The mark ends by itself on 2026-09-01", r.out)
+        tail = "(marked 2026-07-19, until 2026-09-01: The pilot needs it.)"
+        self.assertIn_(tail, self.led.backlog("list").out)
+        self.assertCode(self.led.compile(), EXIT_OK)
+        self.assertIn_(tail, self.led.digest())
+
+    def test_a_mark_without_them_reads_as_it_always_did(self):
+        self.led.backlog("add", "A plain pick.")
+        self.assertCode(self.led.backlog("mark", "a-plain-pick"), EXIT_OK)
+        self.assertIn_("(marked 2026-07-19)", self.led.backlog("list").out)
+
+    def test_a_mark_ends_on_its_date(self):
+        """A true timeout: on the date the idea is ordinary again, with no
+        decision and no write. The line says what it had been."""
+        self.led.add_idea("stale-pick", "A stale pick.", date="2026-07-01",
+                          marked="2026-07-01", mark_reason="For the release.",
+                          mark_until="2026-07-15")
+        for today in ("2026-07-15", "2026-07-19"):
+            with self.subTest(today=today):
+                r = self.led.backlog("list", today=today)
+                self.assertNotIn_("## Marked", r.out)
+                self.assertIn_("marked=0", r.out)
+                self.assertIn_("A stale pick.", r.out)
+                self.assertIn_("(was marked 2026-07-01: For the release.)", r.out)
+                self.assertCode(self.led.compile(today=today), EXIT_OK)
+                digest = self.led.digest()
+                self.assertNotIn_("## Marked backlog", digest)
+                self.assertNotIn_("A stale pick.", digest)
+                self.assertIn_("Backlog: 1 live (1 hot) -", digest)
+
+        # the day before it is still a commitment in every session
+        r = self.led.backlog("list", today="2026-07-14")
+        self.assertIn_("## Marked", r.out)
+        self.assertCode(self.led.compile(today="2026-07-14"), EXIT_OK)
+        self.assertIn_("(marked 2026-07-01, until 2026-07-15: For the release.)",
+                       self.led.digest())
+
+    def test_a_mark_without_a_date_never_ends(self):
+        self.led.add_idea("forever", "A standing pick.", date="2026-07-01",
+                          marked="2026-07-01", mark_reason="Core work.")
+        self.assertIn_("## Marked", self.led.backlog("list", today="2036-01-01").out)
+
+    def test_after_its_date_a_mark_is_over(self):
+        """Nothing carries over from an ended decision: unmark has nothing to
+        undo, and marking again is a new mark with today's date."""
+        self.led.add_idea("over", "An idea.", date="2026-07-01",
+                          marked="2026-07-01", mark_reason="Old reason.",
+                          mark_until="2026-07-15")
+        r = self.led.backlog("unmark", "over")
+        self.assertNotEqual(r.code, 0)
+        self.assertIn_("not marked", r.output)
+        self.assertCode(self.led.backlog("mark", "over"), EXIT_OK)
+        r = self.led.backlog("list")
+        self.assertIn_("(marked 2026-07-19)", r.out)
+        self.assertNotIn_("Old reason.", r.out.split("## Ideas")[0])
+
+    def test_marking_again_keeps_the_date_and_what_is_not_passed(self):
+        self.led.add_idea("again", "An idea.", date="2026-07-01",
+                          marked="2026-07-01", mark_reason="First reason.",
+                          mark_until="2026-08-01")
+        r = self.led.backlog("mark", "again", "--until", "2026-09-01")
+        self.assertCode(r, EXIT_OK)
+        self.assertIn_("Marked again (since 2026-07-01)", r.out)
+        self.assertIn_("(marked 2026-07-01, until 2026-09-01: First reason.)",
+                       self.led.backlog("list").out,
+                       "extending the date must not drop the reason")
+
+        r = self.led.backlog("mark", "again", "Second reason.")
+        self.assertCode(r, EXIT_OK)
+        self.assertIn_("(marked 2026-07-01, until 2026-09-01: Second reason.)",
+                       self.led.backlog("list").out,
+                       "changing the reason must not drop the date")
+
+    def test_a_plain_supersede_inherits_the_reason_and_review_date(self):
+        old = self.led.add_idea("keeper", "The first cut.", date="2026-07-01",
+                                marked="2026-07-02", mark_reason="Why now.",
+                                mark_until="2026-09-01")
+        self.led.add_idea("keeper", "The sharpened cut.", date="2026-07-10",
+                          supersedes=old)
+        self.assertIn_("(marked 2026-07-02, until 2026-09-01: Why now.)",
+                       self.led.backlog("list").out)
+
+    def test_a_rewrite_says_it_keeps_the_mark(self):
+        """The rewriter is told the lane its rewrite stays in, and only
+        when there is one: an idea in no lane, or one whose mark has ended,
+        gets no note."""
+        old = self.led.add_idea("keeper", "The first cut.", date="2026-07-01",
+                                marked="2026-07-02", mark_reason="Why now.")
+        r = self.led.backlog("add", "--scope", "tooling", "--supersedes", old,
+                             "The sharpened cut.")
+        self.assertCode(r, EXIT_OK)
+        self.assertIn_("the rewrite stays marked (since 2026-07-02: Why now.)",
+                       r.output)
+        self.assertIn_("zamm-run.sh backlog unmark ", r.output)
+
+        for slug, until in (("plain", None), ("ended", "2026-07-10")):
+            with self.subTest(slug=slug):
+                rid = self.led.add_idea(
+                    slug, "An idea.", date="2026-07-01",
+                    **({"marked": "2026-07-02", "mark_until": until}
+                       if until else {}))
+                r = self.led.backlog("add", "--scope", "tooling",
+                                     "--supersedes", rid,
+                                     f"The {slug} idea, sharper.")
+                self.assertCode(r, EXIT_OK)
+                self.assertNotIn_("keeps its lane", r.output)
+
+    def test_a_rewrite_decides_the_mark_in_the_same_record(self):
+        old = self.led.add_idea("keeper", "The first cut.", date="2026-07-01",
+                                parked="2026-07-02", park_reason="Later.")
+        r = self.led.backlog("add", "--scope", "tooling", "--supersedes", old,
+                             "--mark", "--reason", "Now it fits.",
+                             "The sharpened cut.")
+        self.assertCode(r, EXIT_OK)
+        self.assertIn_("the park is lifted", r.out)
+        self.assertIn_("The sharpened cut. [", self.led.digest())
+        self.assertIn_("(marked 2026-07-19: Now it fits.)", self.led.digest())
+
+        head = r.out.splitlines()[0].rsplit("/", 1)[1][:-3]
+        r = self.led.backlog("add", "--scope", "tooling", "--supersedes", head,
+                             "--mark", "The cut, sharper again.")
+        self.assertNotEqual(r.code, 0)
+        self.assertIn_("already marked (since 2026-07-19)", r.output)
+        r = self.led.backlog("add", "--scope", "tooling", "--supersedes", head,
+                             "--unmark", "The cut, sharper again.")
+        self.assertCode(r, EXIT_OK)
+        self.assertNotIn_("## Marked", self.led.backlog("list").out)
+
+    def test_mark_refuses_a_bad_reason_or_review_date(self):
+        self.led.backlog("add", "An idea.")
+        for args, needle in (
+            (("Two\nlines.",), "one printable line"),
+            (("x" * 201,), "max 200"),
+            (("--until", "2026-07-19"), "not after today"),
+            (("--until", "soon"), "YYYY-MM-DD"),
+            (("Why.", "Extra."), "too many arguments"),
+            (("--bogus",), "unknown option"),
+        ):
+            with self.subTest(args=args):
+                r = self.led.backlog("mark", "an-idea", *args)
+                self.assertNotEqual(r.code, 0)
+                self.assertIn_(needle, r.output)
+        self.assertNotIn_("## Marked", self.led.backlog("list").out,
+                          "a refused mark writes nothing")
+
+    def test_malformed_mark_decisions_quarantine(self):
+        for i, (extra, needle) in enumerate((
+            ({"mark-reason": "x"}, "need marked: <date>"),
+            ({"marked": "no", "mark-reason": "x"}, "takes no mark-reason"),
+            ({"marked": "2026-07-01", "mark-until": "later"}, "must be a real"),
+            ({"marked": "2026-07-01", "mark-until": "2026-06-01"},
+             "must come after the mark date"),
+            ({"marked": "2026-07-01", "mark-reason": ""}, "is empty"),
+        )):
+            with self.subTest(extra=extra):
+                led = self.led.__class__(self.led.root / f"q{i}")
+                led.add("a-fact", "A statement.")
+                led.add_idea("bad", "An idea.", date="2026-07-01", extra=extra)
+                r = led.backlog("check")
+                self.assertNotEqual(r.code, 0)
+                self.assertIn_(needle, r.output)
+
+    def test_mark_keys_are_refused_on_a_knowledge_record(self):
+        self.led.add("a-marked-fact", "A statement.",
+                     extra={"mark-reason": "No."})
+        r = self.led.check()
+        self.assertNotEqual(r.code, 0)
+        self.assertIn_("are backlog keys", r.output)
+
+
+class TestParkedLane(ZammTest):
+    """Set aside on purpose: out of the list, kept, with a reason and an
+    optional day it comes back by itself. The mirror of the marked lane,
+    resolved by the same graph walk."""
+
+    def setUp(self):
+        super().setUp()
+        self.led.add("a-fact", "A statement.")
+
+    def test_park_and_unpark_roundtrip(self):
+        self.led.backlog("add", "A set-aside idea.")
+        r = self.led.backlog("park", "a-set-aside-idea", "Not this quarter.")
+        self.assertCode(r, EXIT_OK)
+        self.assertIn_("why: Not this quarter.", r.out)
+        self.assertNotIn_("below the digest entry caps", r.output,
+                          "out of the list on purpose is not written to nobody")
+
+        r = self.led.backlog("list")
+        self.assertNotIn_("A set-aside idea.", r.out,
+                          "a parked idea leaves the list")
+        self.assertIn_("Parked (set aside on purpose", r.out)
+
+        r = self.led.backlog("list", "--all")
+        self.assertIn_("Parked ideas", r.out)
+        self.assertIn_(": Not this quarter.)", r.out,
+                       "--all shows the reason")
+
+        r = self.led.backlog("unpark", "a-set-aside-idea")
+        self.assertCode(r, EXIT_OK)
+        r = self.led.backlog("list")
+        self.assertIn_("A set-aside idea.", r.out)
+        self.assertNotIn_("Parked (set aside", r.out)
+
+        r = self.led.backlog("unpark", "a-set-aside-idea")
+        self.assertNotEqual(r.code, 0, "unparking the unparked must refuse")
+        self.assertIn_("not parked", r.output)
+
+    def test_park_needs_a_reason(self):
+        self.led.backlog("add", "An idea.")
+        r = self.led.backlog("park", "an-idea")
+        self.assertNotEqual(r.code, 0)
+        self.assertIn_("need a reason", r.output)
+
+    def test_park_refuses_a_bad_reason_or_review_date(self):
+        self.led.backlog("add", "An idea.")
+        for args, needle in (
+            (("Two\nlines.",), "one printable line"),
+            (("x" * 201,), "max 200"),
+            (("Why.", "--until", "2026-07-19"), "not after today"),
+            (("Why.", "--until", "soon"), "YYYY-MM-DD"),
+        ):
+            with self.subTest(args=args):
+                r = self.led.backlog("park", "an-idea", *args)
+                self.assertNotEqual(r.code, 0)
+                self.assertIn_(needle, r.output)
+        r = self.led.backlog("list")
+        self.assertIn_("An idea.", r.out, "a refused park writes nothing")
+
+    def test_a_parked_idea_is_neither_hot_nor_dormant(self):
+        """A deliberate "not now" must not read as "nobody cared": a
+        parked idea is out of the hot count and out of the dormant tail,
+        however old it is."""
+        self.led.add_idea("cold-park", "A cold parked idea.",
+                          date="2026-01-05", importance="minor",
+                          durability="days", parked="2026-01-05",
+                          park_reason="Waiting on the engine rewrite.")
+        self.led.add_idea("fresh-park", "A fresh parked idea.",
+                          date="2026-07-18", parked="2026-07-18",
+                          park_reason="Not now.")
+        r = self.led.backlog("list", "--all")
+        self.assertCode(r, EXIT_OK)
+        self.assertIn_("hot=0", r.out)
+        self.assertIn_("parked=2", r.out)
+        parked = r.out.split("Parked ideas", 1)[1]
+        self.assertIn_("A cold parked idea.", parked)
+        self.assertNotIn_("Dormant ideas", r.out)
+
+    def test_a_plain_supersede_inherits_the_park_and_its_reason(self):
+        old = self.led.add_idea("keeper", "The first cut.", date="2026-07-01",
+                                parked="2026-07-02", park_reason="Later.")
+        self.led.add_idea("keeper", "The sharpened cut.", date="2026-07-10",
+                          supersedes=old)
+        r = self.led.backlog("list", "--all")
+        self.assertNotIn_("## Ideas", r.out)
+        self.assertIn_("The sharpened cut. (parked 2026-07-02: Later.)", r.out)
+
+    def test_a_rewrite_says_it_keeps_the_park(self):
+        """A parked idea is out of every list, so a rewriter who is not told
+        believes the sharpened idea is back: the write names the park, its
+        reason and the way out. The park command itself is the decision and
+        needs no note."""
+        old = self.led.add_idea("keeper", "The first cut.", date="2026-07-01",
+                                parked="2026-07-02", park_reason="Later.",
+                                park_until="2026-09-01")
+        r = self.led.backlog("add", "--scope", "tooling", "--supersedes", old,
+                             "The sharpened cut.")
+        self.assertCode(r, EXIT_OK)
+        self.assertIn_("the rewrite stays parked (since 2026-07-02, until "
+                       "2026-09-01: Later.)", r.output)
+        self.assertIn_("zamm-run.sh backlog unpark ", r.output)
+
+        r = self.led.backlog("park", "the-sharpened-cut", "--until",
+                             "2026-10-01")
+        self.assertCode(r, EXIT_OK)
+        self.assertNotIn_("keeps its lane", r.output)
+
+    def backlog_files(self):
+        return len(list((self.led.root / "zamm-memory" / "backlog").rglob("*.md")))
+
+    def test_a_rewrite_decides_the_park_in_the_same_record(self):
+        """A lane command after a rewrite writes the whole idea a second
+        time, so the rewrite takes the decision itself, under the lane
+        commands' rules, as one record."""
+        old = self.led.add_idea("keeper", "The first cut.", date="2026-07-01")
+        n = self.backlog_files()
+        r = self.led.backlog("add", "--scope", "tooling", "--supersedes", old,
+                             "--park", "--reason", "Later.", "--until",
+                             "2026-09-01", "The sharpened cut.")
+        self.assertCode(r, EXIT_OK)
+        self.assertEqual(self.backlog_files(), n + 1, "one record, not two")
+        self.assertIn_("Parked (2026-07-19)", r.out)
+        self.assertNotIn_("keeps its lane", r.output)
+        self.assertIn_("The sharpened cut. (parked 2026-07-19, until "
+                       "2026-09-01: Later.)", self.led.backlog("list", "--all").out)
+
+        head = r.out.splitlines()[0].rsplit("/", 1)[1][:-3]
+        r = self.led.backlog("add", "--scope", "tooling", "--supersedes", head,
+                             "--unpark", "The cut, now it fits.")
+        self.assertCode(r, EXIT_OK)
+        self.assertEqual(self.backlog_files(), n + 2)
+        self.assertIn_("Unparked:", r.out)
+        r = self.led.backlog("list")
+        self.assertIn_("The cut, now it fits.", r.out)
+        self.assertNotIn_("Parked", r.out)
+
+    def test_a_new_idea_can_be_parked_from_the_start(self):
+        n = self.backlog_files()
+        r = self.led.backlog("add", "--park", "--reason", "After v4.",
+                             "An idea for later.")
+        self.assertCode(r, EXIT_OK)
+        self.assertEqual(self.backlog_files(), n + 1)
+        self.assertIn_("An idea for later. (parked 2026-07-19: After v4.)",
+                       self.led.backlog("list", "--all").out)
+
+    def test_add_refuses_a_lane_decision_it_cannot_write(self):
+        plain = self.led.add_idea("plain", "An idea in no lane.",
+                                  date="2026-07-01")
+        n = self.backlog_files()
+        for args, needle in (
+            (("--park", "A new idea."), "need a reason"),
+            (("--unpark", "A new idea."), "needs --supersedes"),
+            (("--supersedes", plain, "--unpark", "Sharper."), "is not parked"),
+            (("--supersedes", plain, "--unmark", "Sharper."), "is not marked"),
+            (("--park", "--mark", "A new idea."), "one lane decision"),
+            (("--reason", "Why.", "A new idea."), "go with --mark or --park"),
+            (("--until", "2026-09-01", "A new idea."), "go with --mark or --park"),
+            (("--supersedes", plain, "--unpark", "--reason", "Why.", "Sharper."),
+             "go with --mark or --park"),
+            (("--park", "--reason", "Why.", "--until", "2026-07-19",
+              "A new idea."), "not after today"),
+            (("--mark", "--marked", "2026-07-19", "A new idea."),
+             "cannot be combined with --marked"),
+            (("--type", "tombstone", "--park", "a-slug"), "has none"),
+            (("--supersedes", f"{plain},{plain}", "--park", "--reason", "Why.",
+              "Sharper."), "merge the heads first"),
+        ):
+            with self.subTest(args=args):
+                r = self.led.backlog("add", *args)
+                self.assertNotEqual(r.code, 0)
+                self.assertIn_(needle, r.output)
+        self.assertEqual(self.backlog_files(), n, "a refusal writes nothing")
+
+    def test_a_rewrite_that_decides_its_lane_keeps_the_rewrite_credit(self):
+        """The credit is withheld from lane copies only: a rewrite that
+        decides in the same record earns what the same rewrite written alone
+        would, so the one-record form never scores below the two-record
+        one. Long-cooled chains read the credit off directly: 0.4 keeps an
+        idea above the dormancy floor, nothing lets it go dormant."""
+        for slug, new_text, lane in (
+            ("plain", "Rewritten, plain.", {}),
+            ("both", "Rewritten, unparked.", {"parked": "no"}),
+            ("copy", "Unparked, unchanged.", {"parked": "no"}),
+        ):
+            first = new_text if slug == "copy" else f"The first {slug} cut."
+            born = {} if slug == "plain" else {"parked": "2025-01-01",
+                                               "park_reason": "Later."}
+            a = self.led.add_idea(slug, first, date="2025-01-01",
+                                  durability="weeks", **born)
+            self.led.add_idea(slug, new_text, date="2025-01-02",
+                              durability="weeks", supersedes=a, **lane)
+        r = self.led.backlog("list", "--all")
+        self.assertCode(r, EXIT_OK)
+        live, dormant = r.out.split("Dormant ideas", 1)
+        self.assertIn_("Rewritten, plain.", live)
+        self.assertIn_("Rewritten, unparked.", live)
+        self.assertIn_("Unparked, unchanged.", dormant)
+
+    def test_mark_lifts_a_park_and_park_withdraws_a_mark(self):
+        """An idea sits in one lane: each command writes both keys in one
+        record, so no hand-off is ever half done."""
+        self.led.backlog("add", "A torn idea.")
+        self.led.backlog("park", "a-torn-idea", "Not now.")
+        r = self.led.backlog("mark", "a-torn-idea")
+        self.assertCode(r, EXIT_OK)
+        self.assertIn_("the park is lifted", r.out)
+        r = self.led.backlog("list")
+        self.assertIn_("## Marked", r.out)
+        self.assertNotIn_("Parked", r.out)
+
+        r = self.led.backlog("park", "a-torn-idea", "Changed course.")
+        self.assertCode(r, EXIT_OK)
+        self.assertIn_("the mark is withdrawn", r.out)
+        r = self.led.backlog("list")
+        self.assertNotIn_("## Marked", r.out)
+        self.assertIn_("Parked (set aside", r.out)
+
+    def test_parking_again_keeps_the_first_date(self):
+        self.led.add_idea("again", "An idea.", date="2026-07-01",
+                          parked="2026-07-01", park_reason="First reason.")
+        r = self.led.backlog("park", "again", "Second reason.",
+                             "--until", "2026-09-01")
+        self.assertCode(r, EXIT_OK)
+        self.assertIn_("Parked again (since 2026-07-01)", r.out)
+        r = self.led.backlog("list", "--all")
+        self.assertIn_("(parked 2026-07-01, until 2026-09-01: Second reason.)",
+                       r.out)
+        self.assertNotIn_("First reason.", r.out)
+
+    def test_parking_again_keeps_what_is_not_passed(self):
+        self.led.add_idea("again", "An idea.", date="2026-07-01",
+                          parked="2026-07-01", park_reason="The reason.",
+                          park_until="2026-08-01")
+        r = self.led.backlog("park", "again", "--until", "2026-09-01")
+        self.assertCode(r, EXIT_OK)
+        self.assertIn_("(parked 2026-07-01, until 2026-09-01: The reason.)",
+                       self.led.backlog("list", "--all").out)
+
+        r = self.led.backlog("park", "again")
+        self.assertNotEqual(r.code, 0, "parking again with nothing new must refuse")
+        self.assertIn_("already parked", r.output)
+
+    def test_a_park_ends_on_its_date(self):
+        """A true timeout, like snoozed mail: on the date the idea is back in
+        the list by itself, saying why it had been set aside. Nothing to
+        decide, nothing written, nothing pushed into the digest."""
+        self.led.add_idea("snoozed", "A snoozed idea.", date="2026-07-01",
+                          parked="2026-07-01", park_reason="After the release.",
+                          park_until="2026-07-15")
+        self.led.add_idea("sleeping", "A sleeping idea.", date="2026-07-01",
+                          parked="2026-07-01", park_reason="No date.")
+        for today in ("2026-07-15", "2026-07-19"):
+            with self.subTest(today=today):
+                r = self.led.backlog("list", today=today)
+                ideas = r.out.split("## Ideas", 1)[1]
+                self.assertIn_("A snoozed idea.", ideas)
+                self.assertIn_("(was parked 2026-07-01: After the release.)", ideas)
+                self.assertNotIn_("A sleeping idea.", r.out,
+                                  "a park without a date stays out of sight")
+                self.assertIn_("parked=1", r.out)
+                self.assertIn_("hot=1", r.out)
+                self.assertCode(self.led.compile(today=today), EXIT_OK)
+                self.assertIn_("Backlog: 2 live (1 hot) -", self.led.digest())
+
+        # the day before it is still out of the list
+        r = self.led.backlog("list", today="2026-07-14")
+        self.assertNotIn_("A snoozed idea.", r.out)
+        self.assertIn_("parked=2", r.out)
+        r = self.led.backlog("list", "--all", today="2026-07-14")
+        self.assertIn_("(parked 2026-07-01, until 2026-07-15: After the release.)",
+                       r.out)
+
+    def test_an_idea_that_comes_back_is_fresh(self):
+        """The decay clock restarts at the date. Without that a long park
+        would come back already cold, or straight into the dormant tail, and
+        the way back would lead nowhere. Then it fades like any other."""
+        self.led.add_idea("long-park", "A long-parked idea.", date="2025-01-01",
+                          durability="weeks", parked="2025-01-01",
+                          park_reason="Next year.", park_until="2026-07-15")
+        self.led.add_idea("untouched", "An untouched idea.", date="2025-01-01",
+                          durability="weeks")
+        r = self.led.backlog("list")
+        self.assertIn_("hot=1", r.out)
+        self.assertIn_("A long-parked idea.", r.out)
+        self.assertNotIn_("An untouched idea.", r.out,
+                          "falsification: the same age without a park is dormant")
+
+        r = self.led.backlog("list", "--all", today="2027-07-15")
+        self.assertNotIn_("## Ideas", r.out)
+        self.assertIn_("A long-parked idea.", r.out.split("Dormant ideas", 1)[1])
+
+    def test_a_rewrite_during_the_park_ends_with_it(self):
+        old = self.led.add_idea("keeper", "The first cut.", date="2026-07-01",
+                                parked="2026-07-01", park_reason="Later.",
+                                park_until="2026-07-15")
+        self.led.add_idea("keeper", "The sharpened cut.", date="2026-07-10",
+                          supersedes=old)
+        self.assertNotIn_("The sharpened cut.",
+                          self.led.backlog("list", today="2026-07-14").out)
+        self.assertIn_("The sharpened cut.", self.led.backlog("list").out)
+        self.assertIn_("(was parked 2026-07-01: Later.)", self.led.backlog("list").out)
+
+    def test_a_park_without_a_date_never_ends(self):
+        self.led.add_idea("forever", "A long sleep.", date="2026-07-01",
+                          parked="2026-07-01", park_reason="No date.")
+        r = self.led.backlog("list", today="2036-01-01")
+        self.assertNotIn_("A long sleep.", r.out)
+        self.assertIn_("parked=1", r.out)
+
+    def test_after_its_date_a_park_is_over(self):
+        """Nothing carries over from an ended decision: unpark has nothing to
+        undo, and parking again is a new park that needs its own reason."""
+        self.led.add_idea("over", "An idea.", date="2026-07-01",
+                          parked="2026-07-01", park_reason="Old reason.",
+                          park_until="2026-07-15")
+        r = self.led.backlog("unpark", "over")
+        self.assertNotEqual(r.code, 0)
+        self.assertIn_("not parked", r.output)
+        r = self.led.backlog("park", "over")
+        self.assertNotEqual(r.code, 0)
+        self.assertIn_("need a reason", r.output)
+        r = self.led.backlog("park", "over", "New reason.")
+        self.assertCode(r, EXIT_OK)
+        self.assertIn_("Parked (2026-07-19)", r.out)
+        self.assertIn_("(parked 2026-07-19: New reason.)",
+                       self.led.backlog("list", "--all").out)
+
+    def test_parked_ideas_cost_the_digest_nothing(self):
+        self.led.add_idea("an-idea", "A statement.", date="2026-07-18")
+        self.led.add_idea("parked", "A parked one.", date="2026-07-18",
+                          parked="2026-07-18", park_reason="Later.")
+        self.assertCode(self.led.compile(), EXIT_OK)
+        digest = self.led.digest()
+        self.assertIn_("Backlog: 2 live (1 hot) - zamm-run.sh backlog list",
+                       digest)
+        self.assertNotIn_("A parked one.", digest)
+        self.assertNotIn_("park", digest.split("Backlog:", 1)[1])
+
+    def test_status_counts_what_is_still_parked(self):
+        self.led.add_idea("p1", "One.", date="2026-07-01", parked="2026-07-01",
+                          park_reason="Later.", park_until="2026-07-10")
+        self.led.add_idea("p2", "Two.", date="2026-07-01", parked="2026-07-01",
+                          park_reason="Later.")
+        self.assertCode(self.led.compile(), EXIT_OK)
+        self.assertIn_("0 marked, 1 parked", self.led.status().out)
+
+    def test_reviving_a_tombstoned_chain_does_not_inherit_the_park(self):
+        a = self.led.add_idea("phoenix", "The parked one.", date="2026-07-01",
+                              parked="2026-07-01", park_reason="Later.")
+        t = self.led.add_idea("phoenix", "Retired.", date="2026-07-02",
+                              type="tombstone", supersedes=a, scope=None,
+                              importance=None, durability=None)
+        self.led.add_idea("phoenix", "The revival.", date="2026-07-03",
+                          supersedes=t)
+        r = self.led.backlog("list")
+        self.assertIn_("The revival.", r.out)
+        self.assertNotIn_("Parked", r.out)
+
+    def test_lane_decisions_earn_no_durability_credit(self):
+        """PRE-FIX (2026-10-31, reproduced on a live ledger copy): every
+        single-target supersede added 0.4 to the score for good, and mark,
+        unmark, park and unpark are supersedes — so an idea marked and
+        unmarked once stayed hot forever, and unpark would have done the
+        same. A lane decision now counts for nothing; a sharpening still
+        does."""
+        a = self.led.add_idea("flip", "Marked once, long ago.",
+                              date="2025-01-01", durability="weeks")
+        m = self.led.add_idea("flip", "Marked once, long ago.",
+                              date="2025-01-02", durability="weeks",
+                              supersedes=a, marked="2025-01-02")
+        self.led.add_idea("flip", "Marked once, long ago.",
+                          date="2025-01-03", durability="weeks",
+                          supersedes=m, marked="no")
+        p = self.led.add_idea("flop", "Parked once, long ago.",
+                              date="2025-01-01", durability="weeks",
+                              parked="2025-01-01", park_reason="Later.")
+        self.led.add_idea("flop", "Parked once, long ago.",
+                          date="2025-01-02", durability="weeks",
+                          supersedes=p, parked="no")
+        r = self.led.backlog("list", "--all")
+        self.assertCode(r, EXIT_OK)
+        self.assertNotIn_("## Ideas", r.out,
+                          "both chains must have cooled below the floor")
+        dormant = r.out.split("Dormant ideas", 1)[1]
+        self.assertIn_("Marked once, long ago.", dormant)
+        self.assertIn_("Parked once, long ago.", dormant)
+
+    def test_park_keys_are_refused_on_a_knowledge_record(self):
+        self.led.add("a-parked-fact", "A statement.",
+                     extra={"parked": "2026-01-05", "park-reason": "No."})
+        r = self.led.check()
+        self.assertNotEqual(r.code, 0)
+        self.assertIn_("are backlog keys", r.output)
+
+    def test_malformed_park_decisions_quarantine(self):
+        for i, (extra, needle) in enumerate((
+            ({"parked": "2026-07-01"}, "needs a park-reason"),
+            ({"parked": "someday", "park-reason": "x"}, "must be a real"),
+            ({"park-reason": "x"}, "need parked: <date>"),
+            ({"parked": "no", "park-reason": "x"}, "takes no park-reason"),
+            ({"parked": "2026-07-01", "park-reason": "x",
+              "park-until": "2026-06-01"}, "must come after the park date"),
+            ({"parked": "2026-07-01", "park-reason": "x",
+              "marked": "2026-07-01"}, "an idea sits in one lane"),
+        )):
+            with self.subTest(extra=extra):
+                led = self.led.__class__(self.led.root / f"q{i}")
+                led.add("a-fact", "A statement.")
+                led.add_idea("bad", "An idea.", date="2026-07-01", extra=extra)
+                r = led.backlog("check")
+                self.assertNotEqual(r.code, 0)
+                self.assertIn_(needle, r.output)
+
 
 class TestPromote(ZammTest):
     """backlog promote: idea -> plan, rerun-convergent (guarantee 2)."""

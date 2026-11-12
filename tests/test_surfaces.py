@@ -416,6 +416,7 @@ class TestRoutingFromTheRouter(ZammTest):
         "erase a secret from the journal": ("journal-maintenance.md", "journal add --type erasure"),
         "capture an idea": ("backlog-writing.md", "backlog add"),
         "promote an idea": ("backlog-maintenance.md", "backlog promote"),
+        "park an idea": ("backlog-maintenance.md", "backlog park"),
         "create a plan": ("plans-writing.md", "plan create"),
         "close out a plan": ("plans-maintenance.md", "Review -> Done"),
         "record an episode": ("journal-writing.md", "journal add"),

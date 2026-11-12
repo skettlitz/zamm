@@ -34,7 +34,9 @@ lens shows the headline with `+bg`.
 
 - Read `backlog list` BEFORE adding. Prefer correction over accretion:
   supersede an existing idea to sharpen or re-up it (`--supersedes <id>`;
-  superseding refreshes its decay clock), or vote on it (`backlog add --type
+  superseding refreshes its decay clock and keeps the idea's lane, unless
+  the rewrite decides one with `--mark`, `--unmark`, `--park` or `--unpark`:
+  `backlog-maintenance.md`), or vote on it (`backlog add --type
   votes --up <id> <slug>`; triage votes carry no `plan:`), instead of adding
   a near-duplicate.
 - One idea = one thing you would promote. Siblings you might start

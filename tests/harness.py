@@ -166,15 +166,29 @@ class Ledger:
         return rid
 
     def add_idea(self, slug, body="A synthetic idea for testing.", *,
-                 scope="tooling", durability="months", marked=None, **kw) -> str:
+                 scope="tooling", durability="months", marked=None,
+                 mark_reason=None, mark_until=None, parked=None,
+                 park_reason=None, park_until=None, **kw) -> str:
         """Write a well-formed backlog record; returns its id.
 
         Ideas are ordinary records in the backlog tree — same writer, other
-        root. `marked` lands as the marked: frontmatter key (a date or "no").
+        root. `marked` lands as the marked: frontmatter key (a date or "no"),
+        `mark_reason`/`mark_until` beside it, and `parked`/`park_reason`/
+        `park_until` as the parked-lane keys.
         """
         extra = dict(kw.pop("extra", None) or {})
         if marked is not None:
             extra["marked"] = marked
+        if mark_reason is not None:
+            extra["mark-reason"] = mark_reason
+        if mark_until is not None:
+            extra["mark-until"] = mark_until
+        if parked is not None:
+            extra["parked"] = parked
+        if park_reason is not None:
+            extra["park-reason"] = park_reason
+        if park_until is not None:
+            extra["park-until"] = park_until
         return self.add(slug, body, tree="backlog", scope=scope,
                         durability=durability, extra=extra, **kw)
 

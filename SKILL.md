@@ -44,7 +44,7 @@ proceeding under the old rules.
 | a distillation cue fires: remember-this; a correction or standing rule; strong emotion with substance; the same failure twice; a pointable research result | ledger write (below) | `references/memory-writing.md` first; the cues in full: `references/distillation-triggers.md` |
 | correcting, merging or retiring a record; voting; erasing a secret | a new record, never an edit | `references/memory-maintenance.md` |
 | an idea worth keeping but not starting | `backlog list`, then `backlog add '<sentence>'` or supersede/vote an existing idea; never a Draft plan | `references/backlog-writing.md` first |
-| marking an idea for implementation, or promoting one into a plan | `backlog mark` / `backlog promote` | `references/backlog-maintenance.md` |
+| marking an idea for implementation, parking one that does not fit now, or promoting one into a plan | `backlog mark` / `backlog park` / `backlog promote` | `references/backlog-maintenance.md` |
 | a noteworthy episode: implies no action, asserts no durable fact | `journal add '<sentence>'` — never a `days` knowledge record, never a session-end ritual | `references/journal-writing.md` first |
 | someone asks what happened, or for a summary of a period | answer from `journal digest <period>` (compiled, never stored), `journal list`, `search`, `stats` — all read-only | `references/journal-reading.md` |
 | digest shows a `Journal:` line; or you are asked to STORE a period summary, or to record what you reviewed | `journal review` → distill → `journal settle`; or `journal elevate <kind> <period>` — writes, separate from answering | `references/journal-maintenance.md` first |
