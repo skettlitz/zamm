@@ -2707,7 +2707,11 @@ lane_report() {
       else
         echo "Marked for implementation ($_ld_today): $2"
         echo "  It now appears in the session digest and stops decaying until"
-        echo "  promoted, unmarked, or tombstoned."
+        if [ -n "$_ld_until" ]; then
+          echo "  promoted, unmarked, tombstoned, or its end date below."
+        else
+          echo "  promoted, unmarked, or tombstoned."
+        fi
       fi
       if [ -n "$_ld_reason" ]; then echo "  why: $_ld_reason"; fi
       if [ -n "$_ld_until" ]; then echo "  The mark ends by itself on $_ld_until; the idea then returns to the list."; fi

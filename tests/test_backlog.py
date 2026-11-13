@@ -609,6 +609,8 @@ class TestMarkedLane(ZammTest):
                              "--until", "2026-09-01")
         self.assertCode(r, EXIT_OK)
         self.assertIn_("why: The pilot needs it.", r.out)
+        self.assertIn_("tombstoned, or its end date below.", r.out,
+                       "a dated mark does not claim to last until a decision")
         self.assertIn_("The mark ends by itself on 2026-09-01", r.out)
         tail = "(marked 2026-07-19, until 2026-09-01: The pilot needs it.)"
         self.assertIn_(tail, self.led.backlog("list").out)
