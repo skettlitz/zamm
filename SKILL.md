@@ -8,7 +8,8 @@ description: Operate ZAMM project memory, backlog, journal and plans. Use when a
 Definitions:
 - `<zamm-skill>` = the directory containing this SKILL.md.
 - `<repo-root>` = the target project root (contains, or will contain, `zamm-memory/`).
-  Pass `--project-root <repo-root>` unless the working directory is positively the repo root.
+  The entrypoint finds it from the working directory; pass `--project-root <repo-root>` only
+  when the working directory is outside the target project.
 
 ## Authority
 
@@ -86,12 +87,12 @@ reference for flags and semantics — read it rather than guessing.
   refuses a pre-v3 tree), `status`, `check` (every tree, one exit code), `whatis <ref>...` (what
   a path, `qmd://` URL, id or slug is and whether it still counts: tree, standing, supersede
   chain, the live head and its body; read-only, every tree, live and archive), `help`.
-- `memory`: `digest`, `list [--all] [--scope]` (default: the digest's records; `--all`: every live one), `show`, `create`, `check`, `archive`;
+- `memory`: `list [--all] [--scope]` (default: the digest's records; `--all`: every live one), `show`, `create`, `check`, `archive`;
   hand-composed drafts: `publish`, `drafts`, `discard`.
-- `backlog`: `add`, `list [--all] [--scope]`, `show`, `mark` / `unmark`, `promote`, `check`.
+- `backlog`: `add`, `list [--all] [--scope]`, `show`, `mark` / `unmark`, `park` / `unpark`, `promote`, `check`.
 - `journal`: `add`, `list`, `show`, `search`, `stats`, `digest`, `export`, `review`, `settle`,
   `elevate`, `check`.
-- `plan`: `create`, `list`, `show`, `check`, `archive`.
+- `plan`: `create`, `list`, `show`, `check`, `block` / `unblock`, `archive`.
 
 ## Gated guides
 

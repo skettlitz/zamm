@@ -45,8 +45,6 @@ Its anatomy, top to bottom:
 - `## Needs reconciliation` — only after a merge left two live successors of
   one record: an index of the competing heads. Resolve it this session;
   `memory-maintenance.md` says how.
-- `## Marked backlog` — only when ideas are marked: the ideas someone
-  selected for implementation, one headline each. Implement or unmark.
 - `## Records (ranked)` — up to 200 live records grouped under `### area`
   headings (the fixed eight), balanced across areas so one hot topic cannot
   drown the rest. Each is `- subpath: headline [record-id votes +bg]`; the
@@ -73,6 +71,8 @@ Its anatomy, top to bottom:
   context on everything the ranking already decided not to push.
 - `## Plans` — every active plan (status, progress, title) and the recently
   archived ones; `plans-reading.md`.
+- `## Marked backlog` — only when ideas are marked: the ideas someone
+  selected for implementation, one headline each. Implement or unmark.
 - `Backlog:` — one line of counts. `Journal:` — one line, only when
   digestion is due.
 

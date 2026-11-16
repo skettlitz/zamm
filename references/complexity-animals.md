@@ -1,7 +1,8 @@
 # Animal scale for complexity estimation
 
-Plans rate `Complexity-forecast:` and `Complexity-felt:` on this nine-animal
-scale (see `Execution Telemetry` in the protocol). The compact canonical
+Plans rate `Complexity-forecast:` and `Complexity-felt:` on this scale:
+nine animals and the off-scale `kraken` (the fields are listed under
+`Telemetry fields` in `plans-maintenance.md`). The compact canonical
 definitions travel as a comment in `references/templates/plan.template.md`;
 this file holds the fuller cues for calibration.
 

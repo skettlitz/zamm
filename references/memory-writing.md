@@ -8,7 +8,7 @@ the most expensive text in the system, and the most useful when it is right.
 
 Not you, and not now. Write for these readers, most frequent first:
 
-- An agent at session start, mid-task, scanning up to ~75 digest blocks for
+- An agent at session start, mid-task, scanning up to 200 digest entries for
   the one that applies to what it is doing now. It sees
   `- headline [id +bg]` with the elaboration indented under it, grouped by
   area. It is not reading; it is matching. The first words must name the

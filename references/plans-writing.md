@@ -83,7 +83,7 @@ anticipate, and the human's approval question becomes "is the problem gone?".
 `references/templates/plan.template.md` and says what to fill next;
 `backlog promote <id>` does the same from an idea, with `Origin-idea:`
 provenance. Then recompile the digest (`startup`) so the Plans tail
-lists it.
+lists it; you created the plan, so there is nothing to reread.
 
 Layout: one directory is one plan context; the main file carries the
 `.plan.md` suffix (recommended `<plan-dir>.plan.md`, date-first slug);
