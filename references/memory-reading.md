@@ -5,39 +5,17 @@ changes the ledger.
 
 ## The digest
 
-`bash <zamm-skill>/scripts/zamm-run.sh startup` recompiles the digest when
-anything has moved since the last compile, and hands back its path. (Most
-startups rebuild nothing: the compiler fingerprints the ledger, the plans and
-its own scripts, and skips the work when the answer cannot have changed. Your
-own writes recompile as they land.) **Reading that file, whole, is the session read.**
-The command's own output is a handoff: two lines — what the project holds and
-where the digest is — plus two more when something is wrong with the project,
-naming the defect types and the report that explains them
-(`.compiled/zamm-defects.md`). It is not the digest, and an agent that stops
-there has read nothing. How to read the file is not repeated there; it
-is in the router the same agent read from `AGENTS.md` moments earlier.
+`startup` hands back the digest's path. Reading that file once, whole, with a
+file-reading tool is the session read; the router in `AGENTS.md` carries the
+rule. An agent harness may cap command output, so a digest piped through
+`cat` can be cut without notice. `--inline` prints the digest to stdout for a
+reader with no file tool, and warns when the output will not survive the trip.
 
-Open the file with a file-reading tool. Do NOT `cat`, `head` or `tail` it:
-command output is capped by the harness (Claude Code cuts a Bash result at
-30000 characters and replaces the rest with a short preview), so a real
-ledger piped that way is truncated silently — which reads to the session as
-a memory that was consulted rather than one that was cut. The file itself has
-no such limit. `--inline` prints the digest to stdout for a reader with no
-file tool, and warns when the output will not survive the trip.
-
-**Read it once per session.** Do not reread it after writing a record. The
-digest is re-sent with every subsequent request for the rest of the session,
-so a second read does not refresh anything — it puts a whole second copy in
-the context, and a session that writes three records and rereads each time
-carries four. On a large ledger that is the difference between one memory
-read and four, for no new information: you already know what you just wrote,
-and `memory create` reports the two things you could not have known — whether
-the write left a reconciliation group open, and whether the record landed
-below the entry caps where no session will be handed it.
-
-Writes also recompile, so the file is already current for the NEXT session.
-Reread within a session only if something outside it changed the ledger — a
-pull, or another agent writing to the same tree.
+Your own writes recompile the file and report the two things you could not
+have known: whether a reconciliation group is open, and whether the record
+landed below the entry cap. Reread within a session only when something
+outside it changed the ledger — a pull, or another agent writing to the same
+tree.
 
 Its anatomy, top to bottom:
 
