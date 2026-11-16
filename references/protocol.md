@@ -82,4 +82,3 @@ After a merge or pull, two branches may have superseded the same record independ
 - The protocol version lives in `zamm-memory/VERSION`; update it only after completing a migration. Major-version migration details belong in `<zamm-skill>/references/migrations/`, not in ledger records.
 - Eternal doctrine belongs in `<zamm-skill>/references/eternal/knowledge.md`, not in the ledger.
 - An empty ledger means active memory has not been initialized: ask before running initialization, and never add placeholder records.
-- What the toolchain guarantees, and what it deliberately does not, is `<zamm-skill>/references/invariants.md`: read it before reporting a defect or adding a safeguard.

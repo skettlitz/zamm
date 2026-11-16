@@ -5,14 +5,9 @@ reconciling after a merge, before erasing, and before archiving. Reading
 needs none of it (`memory-reading.md`); a first record needs
 `memory-writing.md`.
 
-## What the toolchain guarantees
-
-`references/invariants.md` states it: every output is a truthful reading of
-some state the ledger actually had, every failure is repairable by
-rerunning, and bytes are never destroyed. Staleness, a digest one record
-behind, and a half-finished archive are normal operation — rerun the
-command. A hostile process running as your own user is out of scope. Read
-it before reporting a defect or adding a safeguard.
+A stale digest or a half-finished archive is normal operation: rerun the
+command. Read `references/invariants.md` before reporting a defect or
+adding a safeguard.
 
 ## How ranking works
 
