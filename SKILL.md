@@ -15,10 +15,10 @@ Definitions:
 
 The operating contract is layered so an agent loads only what it is about to do. The spine,
 `<zamm-skill>/references/protocol.md`, holds session start and end, the
-boundary test between the four trees and the rules they share. Each tree — knowledge, backlog,
-plans, journal — has an index (`references/memory.md`, `backlog.md`, `plans.md`, `journal.md`)
-over three layers: `<tree>-reading.md`, `<tree>-writing.md` (opening with who reads what you
-write, and at what zoom) and `<tree>-maintenance.md`. The scaffold renders only the always-on
+boundary test between the four trees and the rules they share. Each tree — knowledge (its files
+are named `memory-*`), backlog, plans, journal — has three layers under `references/`:
+`<tree>-reading.md`, `<tree>-writing.md` (opening with who reads what you write, and at what
+zoom) and `<tree>-maintenance.md`. The scaffold renders only the always-on
 ROUTER (`references/scaffold/protocol-router.template.md`) into `AGENTS.md` (managed block) and
 `.cursor/rules/zamm.mdc`; the router maps actions to layers and copies none of them. README.md
 is explanatory, never authoritative.

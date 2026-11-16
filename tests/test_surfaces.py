@@ -403,9 +403,7 @@ class TestRoutingFromTheRouter(ZammTest):
     ROUTER = SKILL_DIR / "references" / "scaffold" / "protocol-router.template.md"
     SPINE = SKILL_DIR / "references" / "protocol.md"
     SURFACES = ["SKILL.md", "references/protocol.md",
-                "references/scaffold/protocol-router.template.md",
-                "references/memory.md", "references/backlog.md",
-                "references/plans.md", "references/journal.md"]
+                "references/scaffold/protocol-router.template.md"]
 
     # action -> (file the router must name, a command or rule that file must carry)
     ROUTES = {

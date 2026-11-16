@@ -25,14 +25,14 @@ Everything an agent keeps goes into one of four trees under `zamm-memory/`, all 
 - commits to doing something → PLAN (`active/plans/`; mutable, with transitions and human-approved closure)
 - happened, noteworthy, and neither → JOURNAL (`journal/`; a pulled timeline)
 
-Each tree has an index and three layers under `<zamm-skill>/references/`; load the layer for what you are about to do, and only that:
+Each tree has three layers under `<zamm-skill>/references/`; load the layer for what you are about to do, and only that:
 
-| tree | index | reading | writing | maintenance |
-| --- | --- | --- | --- | --- |
-| knowledge | `memory.md` | `memory-reading.md` | `memory-writing.md` | `memory-maintenance.md` (supersede, votes, reconciliation, erasure, archive) |
-| backlog | `backlog.md` | `backlog-reading.md` | `backlog-writing.md` | `backlog-maintenance.md` (decay, mark, park, promote) |
-| plans | `plans.md` | `plans-reading.md` | `plans-writing.md` (incl. IDE-written plans) | `plans-maintenance.md` (transitions, close-out, archive) |
-| journal | `journal.md` | `journal-reading.md` (incl. `journal digest`, the compiled summary) | `journal-writing.md` | `journal-maintenance.md` (review/settle, elevate: the stored claims) |
+| tree | reading | writing | maintenance |
+| --- | --- | --- | --- |
+| knowledge | `memory-reading.md` | `memory-writing.md` | `memory-maintenance.md` (supersede, votes, reconciliation, erasure, archive) |
+| backlog | `backlog-reading.md` | `backlog-writing.md` | `backlog-maintenance.md` (decay, mark, park, promote) |
+| plans | `plans-reading.md` | `plans-writing.md` (incl. IDE-written plans) | `plans-maintenance.md` (transitions, close-out, archive) |
+| journal | `journal-reading.md` (incl. `journal digest`, the compiled summary) | `journal-writing.md` | `journal-maintenance.md` (review/settle, elevate: the stored claims) |
 
 Each writing layer opens with who reads the record and at what zoom, because that is what decides how to write it. A file that is not about the action you are taking costs context and answers nothing.
 

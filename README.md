@@ -431,9 +431,9 @@ In **development and testing**; the structure is still evolving and tested on in
   loaded on demand; the scaffold renders only the always-on router
   (`protocol-router.template.md`) into each project's runtime files
 - Agent entry point and dispatcher: `SKILL.md`
-- Each tree in layers an agent loads one at a time: an index (`<zamm-skill>/references/memory.md`,
-  `backlog.md`, `plans.md`, `journal.md`) over `<tree>-reading.md`, `<tree>-writing.md` (which
-  opens with who reads what you write) and `<tree>-maintenance.md`
+- Each tree in layers an agent loads one at a time: `<zamm-skill>/references/<tree>-reading.md`,
+  `<tree>-writing.md` (which opens with who reads what you write) and `<tree>-maintenance.md`;
+  the knowledge tree's files are named `memory-*`
 - Plan template: `<zamm-skill>/references/templates/plan.template.md`
 - Memory record template: `<zamm-skill>/references/templates/memory-record.template.md`
 - Existing project initialization: `<zamm-skill>/references/initialization/existing-project.md`
