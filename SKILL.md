@@ -62,21 +62,16 @@ proceeding under the old rules.
 
 ## Ledger write
 
-1. Compose the body (`references/memory-writing.md` says who reads each part, and at what
-   zoom). The first paragraph is the headline: one imperative statement an agent mid-task can
-   recognize as its situation and act on alone. Elaborate only where it changes what they do;
-   detail read on demand goes under `## Background`. Say it once, in as few words as it takes — the digest is reread at every
-   session start by every agent on the project. Paraphrase the human, never quote; no secrets.
-2. Land it in one step. It validates first; on rejection it prints the violations and writes
-   nothing (an unknown scope area is refused with the valid set):
-   ```sh
-   bash <zamm-skill>/scripts/zamm-run.sh memory create --scope '<area[/subpath][, area2]>' <topic-slug> <<'EOF'
-   <the record body>
-   EOF
-   ```
-   Flags as applicable: `--type`, `--importance`, `--durability`, `--supersedes`, `--erases`,
-   `--up`/`--down`, `--plan`.
-3. Never edit a written record; correct it with a new one carrying `supersedes:`.
+`references/memory-writing.md` is the rule; read it before the first record. The command:
+
+```sh
+bash <zamm-skill>/scripts/zamm-run.sh memory create --scope '<area[/subpath][, area2]>' <topic-slug> <<'EOF'
+<the record body>
+EOF
+```
+
+It validates the record and lands it, or prints the violations and writes nothing. Never edit a
+written record; correct it with a new one carrying `supersedes:`.
 
 ## Commands
 
