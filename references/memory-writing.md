@@ -59,19 +59,12 @@ instruction, not detail.
 - `## Background` holds what only matters when working the topic: full
   reasoning, evidence paths, history, what was ruled out. Optional — omit it
   when the block carries everything. Its presence is the `+bg` marker.
-- Brevity is part of the contract. The block is reread at every session
-  start by every agent; the Background by whoever opens the record. Limits
-  are ceilings, not space to fill: a one-sentence record that says the thing
-  is complete, and a paragraph that could have been a sentence is a defect.
-  Cut the preamble, the restated context and the hedges; keep the trigger,
-  the rule and the why. Every word saved saves context and money for every
-  reader after you.
-- Never store secrets, tokens or credentials: records are effectively
-  permanent, git history included. Never quote the human verbatim:
-  paraphrase the substance and, where the register matters, describe the
-  emotion ("strong frustration with rebuild times"). Records are
-  team-visible; do not immortalize heat-of-the-moment phrasing, and do not
-  characterize anyone's performance or mood.
+- Brevity is part of the contract (spine, "Rules every tree shares"): cut the
+  preamble, the restated context and the hedges; keep the trigger, the rule
+  and the why.
+- No secrets, no verbatim quotes of the human, no characterizations of
+  anyone's performance or mood: the same section of the spine has the rule
+  and its reasons.
 - Other types: a `tombstone` body is a one-line reason; a `votes` body is
   empty; an `erasure` body says why the content had to go (required — it is
   the only account of a redaction that survives it).
@@ -140,53 +133,29 @@ surface and a naming rule → `contracts/cli-flags, conventions`.
     <the record body>
     EOF
 
-One step. The record is composed in a private temporary file, validated by
-a full compile, and only then linked into the ledger under its final name —
-so it is either absent or complete and valid, and a rejected one leaves
-nothing behind but the printed violations. It prints the record path on
-success; that is the whole transaction, digest recompiled. Flags:
+One step: the record is validated and lands under its final name, or the
+violations are printed and nothing is written. It prints the record path,
+and the digest is recompiled. Flags:
 `--importance`, `--durability`, `--supersedes <id[,id]>`,
 `--type tombstone|votes|erasure`, `--erases <id>`, `--up`/`--down <ids>`
 and `--plan <plan-dir>` for votes, `--edit` to compose in `$EDITOR`,
 `--no-validate` for bulk migration only (then `zamm-run.sh check` once at
 the end).
 
-The filename is the record id: `YYYY-MM-DD-<topic-slug>-<suffix>.md` —
-lowercase `[a-z0-9-]`, slug at most 40 characters, date = creation date,
-suffix 5 random characters from `23456789abcdefghjkmnpqrstvwxyz` so that
-uncoordinated writers cannot collide. Hand-written files follow the same
-rules: compose `<id>.md.draft` from
-`references/templates/memory-record.template.md` and land it with
-`memory publish <id>` (`memory drafts` lists the unpublished, `memory
-discard` removes one). Frontmatter is flat `key: value` lines between two
-`---` lines — every value a plain string, lists comma-separated, unknown
-keys ignored, empty keys omitted: `type` (`memory` | `tombstone` | `votes`
-| `erasure`), `scope`, `importance`, `durability`, `supersedes`, `created`
-(must match the filename date), `schema: 3`. A votes record adds `plan`,
-`up`, `down` and carries no body; an erasure record adds `erases`.
+The filename is the record id, `YYYY-MM-DD-<topic-slug>-<suffix>.md`, and
+the writer makes it. A hand-written record is the exception: name it by the
+same pattern (lowercase `[a-z0-9-]`, suffix 5 random characters from
+`23456789abcdefghjkmnpqrstvwxyz`), compose `<id>.md.draft` from
+`references/templates/memory-record.template.md`, which carries the header
+fields, and land it with `memory publish <id>` (`memory drafts` lists the
+unpublished, `memory discard` removes one).
 
-## When to write one
+## Before writing one
 
-The cues are deliberately coarse; full semantics in
-`references/distillation-triggers.md`:
-
-- the human says remember this — same turn, no damping
-- the human corrects you or states a standing rule, in any tone — else it
-  evaporates at session end (`conventions` for project rules, `meta` for
-  collaboration norms)
-- the human shows strong emotion, complaint or praise, with substance
-  behind it — record the substance, short-lived, never the words
-- the same failure hits twice — cause + workaround now; still stuck, a
-  short-lived dead-end record (goal, tried, ruled out)
-- research yields a conclusion whose details live in a pointable file —
-  conclusion + pointer; never a free-floating value with nowhere to recheck
-  it
-
-Do not write: external changes that broke nothing; churn during primary
-work (batch ordinary learnings into plan close-out). Prefer correction over
-accretion: `memory list --all --scope <area>` first — without `--all` the
-list is only what the digest selected, and the record you would duplicate
-may be an unlisted or dormant one — then supersede a stale record or merge
-overlaps before adding one that could duplicate or conflict. Never
-edit a written record; the correction path is a new record carrying
-`supersedes:` (`memory-maintenance.md`).
+The cues that call for a record are in the spine ("Distillation") and, in
+full, in `references/distillation-triggers.md`. Look first:
+`memory list --all --scope <area>` — without `--all` the list is only what
+the digest selected, and the record you would duplicate may be an unlisted
+or dormant one. Then supersede a stale record or merge overlaps
+(`memory-maintenance.md`) instead of adding one that duplicates or
+conflicts.

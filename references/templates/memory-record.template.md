@@ -25,6 +25,11 @@ reread at every session start by every agent, so say it once and stop.>
 on demand (+bg marker). Delete this whole section when the digest block
 carries everything. Delete the supersedes line when not replacing an older
 record. This template is for a hand-composed
-`<id>.md.draft` landed with `zamm-run.sh memory publish`; the one-step path
+`<id>.md.draft` landed with `zamm-run.sh memory publish`. Frontmatter uses
+flat `key: value` lines between `---` delimiters: plain string values,
+comma-separated lists, and omitted empty keys. Unknown keys are ignored.
+Set `created:` to the creation date, matching the filename date; keep
+`schema: 3`. For other record types, use `memory create` with the flags in
+`memory-writing.md`. The one-step path
 is `zamm-run.sh memory create`, which takes this body on stdin and writes
 the frontmatter and the collision-safe filename itself.>
