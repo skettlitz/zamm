@@ -814,6 +814,8 @@ class TestKrakenFrameGate(ZammTest):
         self.led.add_plan("2026-01-05-gecko2", status="Implementing")
         self.led.compile()
         d = self.led.digest()
-        self.assertIn_("2026-01-05-k7 [kraken, frame pending]", d)
+        # a Draft takes one line, and a kraken keeps its frame state on it:
+        # Draft is where the framing happens
+        self.assertIn_("[2026-01-05-k7] (kraken, frame pending; last 2026-01-05)", d)
         self.assertIn_("2026-01-05-k8 [kraken, frame approved 2026-01-05]", d)
         self.assertIn_("2026-01-05-gecko2 [gecko]", d)

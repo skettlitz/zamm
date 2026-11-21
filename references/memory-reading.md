@@ -47,8 +47,8 @@ Its anatomy, top to bottom:
   rendering with no cap, no budget and no decay floor. That file is for a
   person searching, not for a session: reading it at session start spends
   context on everything the ranking already decided not to push.
-- `## Plans` — every active plan (status, progress, title) and the recently
-  archived ones; `plans-reading.md`.
+- `## Plans` — every plan in work (status, progress, title), the Drafts on
+  one line each, and the recently archived ones; `plans-reading.md`.
 - `## Marked backlog` — only when ideas are marked: the ideas someone
   selected for implementation, one headline each. Implement or unmark.
 - `Backlog:` — one line of counts. `Journal:` — one line, only when

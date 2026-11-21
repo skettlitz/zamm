@@ -16,7 +16,8 @@ by best match and ask only when ambiguity remains.
 
 - Every agent at every session start reads the Plans tail: status, progress
   and the TITLE. The title is the plan to everyone who has not opened it:
-  "Cache frontmatter between passes", not "Compiler work".
+  "Cache frontmatter between passes", not "Compiler work". While the plan is
+  a Draft, the title and the date are all the tail shows of it.
 - The agent picking the work up next session reads `plan show`. `## Why`
   says what the plan is for, which is what it needs at any fork the plan
   did not foresee — and lets it notice when the problem has already gone.

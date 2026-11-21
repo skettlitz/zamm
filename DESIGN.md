@@ -155,6 +155,17 @@ earlier draft the same day made it a refusal. The method behind the frame
 property of the problem, not of the size. *Cost:* two header lines on the rare
 kraken plan, and one warning the checker knows about.
 
+**A Draft is listed, not presented as work.** Nobody has started a Draft, so
+the Plans tail gives it one line after the plans in work — title, plan id, the
+date it was last touched — where an Implementing plan gets an entry with its
+scope and progress. The title stays because Session Start matches the request
+against the tail, and a Draft nobody can see gets a second plan for the same
+work; a kraken keeps its frame state, because Draft is where the framing
+happens. A Draft with an open block or an annotated status keeps the full
+entry: both are `plan check` errors, and an error must not be the quiet line.
+*Cost:* a Draft's scope and progress are one `plan show` away. The human's
+idea, 2026-11-21.
+
 ---
 
 ## Ranking and the digest

@@ -2596,3 +2596,46 @@ the lane commands write) now counts for nothing. A rewrite earns its credit
 whether or not it decides the lane too, so the one-record form never scores
 below the two-record one. One re-up still keeps an idea above the dormancy
 floor for good; that half of the problem is a separate decision.
+
+Locked 2026-11-21 — a Draft takes one line in the Plans tail.
+
+**A Draft read like work in progress.** The tail gave every plan under
+`active/` the same entry (status line, title, `in:`), and a Draft differed
+only by ranking last. On the lab ledger a Draft at 0/18, untouched for a
+month, took the same three lines at every session start as the two plans
+awaiting review above it. The human proposed that a Draft should not count as
+an active plan and should reach the session read as a short description only.
+The entries are now the plans in work (Blocked, Review, Implementing, and
+terminal ones awaiting archive). The Drafts follow under
+`Drafts (N; not started):`, one line each, `- <title> [<plan-id>] (last
+<date>)`, oldest plan id first, before `Recently archived`. It is the shape
+the marked backlog already gives latent work: headline, id, state. A project
+whose only plans are Drafts prints `(no active plans)` and then the list. The
+full digest copies the same tail.
+
+**What stayed on the line.** The title, because Session Start step 2 matches
+the request against the tail and a Draft that cannot be seen gets a second
+plan for the same work; leaving Drafts out of the digest was rejected for that
+reason. The date, because it is the only sign a Draft went stale. A kraken's
+frame state, because Draft is where the framing happens. Dropped: the animal,
+the done-when count and the `in:` line.
+
+**The irregular Draft keeps its entry.** Only `Status: Draft` exactly, with no
+open block entry, takes the one-line form. An annotated status and a block on
+unstarted work are both `plan check` errors, and the rule that an open block
+renders under every status still holds.
+
+**Numbers, on a copy of the lab ledger.** One Draft: three lines and 333 bytes
+before; two lines and 220 bytes after, the `Drafts` line included. Each
+further Draft costs one line where it cost three. The byte saving is small;
+what changes is that an unstarted plan no longer has the shape of started
+work.
+
+**`whatis` agrees, and learned `Blocked`.** A Draft's standing line said
+"active plan ... current work"; it says "draft plan ... not started".
+`Blocked` (2026-09-10) is younger than `whatis` (2026-09-06) and had been
+falling through to the unknown-status branch, which sent the reader to
+`plan check` over a valid status; it has its own line.
+
+Unchanged: `plan list` and `status` (already grouped by status), the plan
+count on the startup line (it counts plan directories), the router.

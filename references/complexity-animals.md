@@ -46,7 +46,7 @@ The frame, a strong suggestion: a kraken plan should not leave Draft before the 
 yes to the sentence on its `## Why` `problem:` line — the working frame — recorded in the header
 as `Frame-approved-by:` (who) and `Frame-approved-at:` (a real date). `plan check` WARNS on a
 kraken past Draft without them, never refuses, and the digest Plans tail shows
-`[kraken, frame pending]` until they exist; a plan that must proceed unframed says why on its
+`kraken, frame pending` on the plan's line until they exist; a plan that must proceed unframed says why on its
 `enough:` line. `alternatives:` holds the rejected frames; the perspectives, the assumptions
 register and the probe portfolio live in a `<plan-dir>/frame.md` sidecar. A kraken still in
 Draft owes nothing — Draft is where the framing happens — and every other animal is untouched.

@@ -300,6 +300,24 @@ class TestPlansAndOtherFiles(ZammTest):
                 self.assertIn_("title:     Do things", r.out)
                 self.assertIn_("head (through the first section", r.out)
 
+    def test_a_draft_is_not_called_current_work(self):
+        """The digest lists a Draft apart from the plans in work, and the
+        standing line says the same thing."""
+        self.led.add_plan("2026-01-10-sketch", status="Draft")
+        r = self.led.zamm("whatis", "--brief", "2026-01-10-sketch")
+        self.assertEqual(r.code, 0, r)
+        self.assertIn_("standing:  draft plan (Status: Draft) - not started", r.out)
+        self.assertNotIn_("current work", r.out)
+
+    def test_a_blocked_plan_has_a_standing(self):
+        """Blocked was added after `whatis` and fell through to the unknown
+        branch, which sent the reader to `plan check` for a valid status."""
+        self.led.add_plan("2026-01-10-stuck", status="Blocked")
+        r = self.led.zamm("whatis", "--brief", "2026-01-10-stuck")
+        self.assertEqual(r.code, 0, r)
+        self.assertIn_("standing:  active plan (Status: Blocked)", r.out)
+        self.assertNotIn_("unknown", r.out)
+
     def test_scratch_and_subplans_name_their_plan(self):
         self.led.add_plan("2026-01-10-do-things", status="Draft")
         self.led.write("zamm-memory/active/plans/2026-01-10-do-things/workdir/notes.md", "scratch\n")

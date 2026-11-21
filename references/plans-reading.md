@@ -1,15 +1,22 @@
 # Plans — reading
 
 - The session digest ends with `## Plans (active; compact entries)`: one
-  entry per active plan — `- Status: <plan-dir> [complexity] done-when x/y,
+  entry per plan in work — `- Status: <plan-dir> [complexity] done-when x/y,
   last <date>` and the title on the next line — ranked Blocked, Review,
-  Implementing, Draft; terminal plans still under `active/` are flagged
+  Implementing; terminal plans still under `active/` are flagged
   archive-ready. A Blocked entry adds `blocked <N>d` to its line and one
   `blocked[<class>]: <sentence>` line per open block under the title: the
   reason is in the digest itself, never one file-open away. Blocked outranks
   Review because both want a human, but Review is finished work awaiting a
-  blessing while Blocked is work that has stopped. A
-  "Recently archived" list follows: check it before treating a referenced
+  blessing while Blocked is work that has stopped.
+- A Draft is not work in progress and has no entry. The Drafts follow the
+  entries under `Drafts (N; not started):`, one line each —
+  `- <title> [<plan-dir>] (last <date>)`, a `kraken` with its frame state.
+  Match a request against these titles too before creating a plan;
+  `plan show` opens the one that fits. A Draft with an open block or an
+  annotated Status keeps a full entry: both are `plan check` errors and stay
+  visible.
+- A "Recently archived" list follows: check it before treating a referenced
   plan directory as missing after a pull.
 - `plan show <slug>` — one plan with its progress line. Its `## Why` (plans
   created after 2026-09-13 carry one) is what to read before choosing at a

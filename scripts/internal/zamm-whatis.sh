@@ -397,7 +397,9 @@ describe_plan() {
     *)
       case "$_dp_status" in
         Done|Abandoned) echo "  standing:  active tree, terminal (Status: $_dp_status) - archive-ready; not current work" ;;
-        Draft|Implementing|Review) echo "  standing:  active plan (Status: $_dp_status) - current work; its Status outranks any record" ;;
+        Draft) echo "  standing:  draft plan (Status: Draft) - not started; its Status outranks any record" ;;
+        Blocked) echo "  standing:  active plan (Status: Blocked) - work that has stopped on an open block; its Status outranks any record" ;;
+        Implementing|Review) echo "  standing:  active plan (Status: $_dp_status) - current work; its Status outranks any record" ;;
         *) echo "  standing:  active tree, Status: ${_dp_status:-missing} (unknown; plan check)" ;;
       esac ;;
   esac

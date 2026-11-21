@@ -730,9 +730,10 @@ fi
 # appended after the fact is a ceiling the digest walks straight through.
 # Rendering it first also means a broken plan tree fails before the
 # expensive ledger pass rather than after it.
-# ---- Plans tail: one compact 2-3 line entry per active plan (status line,
-#      title, optional inline scope), derived at compile time (no maintained
-#      index files; zamm-status.sh stays the on-demand verbose view)
+# ---- Plans tail: one compact 2-3 line entry per plan in work (status line,
+#      title, optional inline scope), then one line per Draft, derived at
+#      compile time (no maintained index files; zamm-status.sh stays the
+#      on-demand verbose view)
 render_plans_section() {
   # The plan tree enters the digest ONLY through the checked manifest: a glob
   # here followed symlinked directories into external content and read an
@@ -866,6 +867,7 @@ render_plans_section() {
         else if (st ~ /^Abandoned/)    { rank = 5; label = st " (archive-ready)" }
         else if (st == "")             label = "Unknown"
         line = "- " label ": " slug
+        frame = ""
         if (cf != "" && cf !~ /^</) {
           if (length(cf) > 32) cf = substr(cf, 1, 29) "..."
           # A kraken plan carries the one gate the scale imposes -- the frame
@@ -879,14 +881,17 @@ render_plans_section() {
             } else {
               cf = cf ", frame pending"
             }
+            frame = cf
           }
           line = line " [" cf "]"
         }
         tot = nopen + ndone + 0
         if (tot > 0) line = line " done-when " ndone + 0 "/" tot ","
+        last = ""
         if (lu != "" && lu !~ /^</) {
           split(lu, luw, /[ \t]/)
-          line = line " last " luw[1]
+          last = "last " luw[1]
+          line = line " " last
         }
         sub(/,$/, "", line)
         oldest = ""
@@ -899,11 +904,29 @@ render_plans_section() {
           if (age < 0) age = 0
           line = line ", blocked " age "d"
         }
-        out = rank "\t" line
         if (ti != "" && ti !~ /^</) {
           if (length(ti) > 100) ti = substr(ti, 1, 97) "..."
-          out = out "\t" ti
+        } else {
+          ti = ""
         }
+        # A Draft is not work in progress, so it does not get an entry among
+        # the plans that are: one line, in the shape the digest gives its
+        # other latent work (headline, id, state), listed after them. The
+        # title stays because Session Start matches the request against this
+        # tail, and a Draft nobody can see gets a second plan beside it. The
+        # date stays because it is the only sign a Draft went stale; a kraken
+        # keeps its frame state, since Draft is where the framing happens.
+        # Only the exact status with no open block qualifies: an annotated
+        # status or a block on unstarted work is a plan check error, and an
+        # error keeps the full entry.
+        if (st == "Draft" && oldest == "") {
+          state = frame
+          if (last != "") state = state (state == "" ? "" : "; ") last
+          print "D\t" slug "\t- " (ti == "" ? "(untitled)" : ti) " [" slug "]" (state == "" ? "" : " (" state ")")
+          exit
+        }
+        out = rank "\t" line
+        if (ti != "") out = out "\t" ti
         # Every open block, in log order, right under the title: the reason a
         # reader has to act on belongs in the digest, not one file-open away.
         # The class leads it, because "who clears this" is what tells a reader
@@ -926,16 +949,24 @@ render_plans_section() {
   done <<EOF
 $(awk -F"$tab" '$1 == "PLANDIR" { print $2 }' "$pmf")
 EOF
+  # Drafts carry the tag D where the entries carry a rank; they are listed
+  # after the entries, oldest plan id first.
+  ndraft=$(awk -F"$tab" '$1 == "D" { n++ } END { print n + 0 }' "$plans_tmp")
   {
     printf '\n## Plans (active; compact entries)\n\n'
-    if [ -s "$plans_tmp" ]; then
-      sort -n "$plans_tmp" | awk -F'\t' '{
+    if grep -q -v "^D${tab}" "$plans_tmp"; then
+      grep -v "^D${tab}" "$plans_tmp" | sort -n | awk -F'\t' '{
         print $2
         for (i = 3; i <= NF; i++) print "  " $i
         print ""
       }'
     else
       echo "(no active plans)"
+      echo ""
+    fi
+    if [ "$ndraft" -gt 0 ]; then
+      echo "Drafts ($ndraft; not started):"
+      awk -F"$tab" '$1 == "D"' "$plans_tmp" | sort -t "$tab" -k2,2 | cut -f3-
       echo ""
     fi
   } >> "$PLANS_TAIL"

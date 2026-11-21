@@ -68,11 +68,11 @@ Reading that file, whole, is the whole read. Top to bottom: a `Needs reconciliat
 left two heads; marked backlog ideas; up to 200 records balanced across knowledge areas so
 one hot topic cannot drown the rest, each with its elaboration where the budget could afford
 it (a leading `!` is a guardrail, `+bg` means a Background section exists, `+el` means the
-elaboration did not fit); counts for the unlisted and the dormant; the active plans with
-status and progress; the recently archived plan ids; one backlog line; and, only when
-journal digestion is due, one `Journal:` line.
-Nothing else has to be discovered. The agent reruns it only after records were written or
-merged.
+elaboration did not fit); counts for the unlisted and the dormant; the plans in work with
+status and progress; the Drafts, one line each; the recently archived plan ids; one backlog
+line; and, only when journal digestion is due, one `Journal:` line.
+Nothing else has to be discovered. The agent reruns it only after a pull, a merge or another
+agent changed the ledger; its own writes recompile the digest.
 
 ## Four trees, one boundary test
 
